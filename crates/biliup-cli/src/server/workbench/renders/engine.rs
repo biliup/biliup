@@ -13,6 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 const PROCESS_STALL: Duration = Duration::from_secs(180);
 const MAX_DIAGNOSTICS: usize = 16 * 1024;
+const QSV_PARALLEL_MAX_PARTS: usize = 6;
+const QSV_PARALLEL_MIN_PART_MS: i64 = 10_000;
 
 pub type SourceSpan = RenderSource;
 
@@ -515,6 +517,57 @@ fn qsv_danmaku_ass(ass: &str, full_height: u32, band_height: u32) -> Option<Stri
     ass.contains(&full).then(|| ass.replacen(&full, &band, 1))
 }
 
+fn qsv_audio_filter_graph(source: &SourceSpan, media: &MediaInfo, audio_input: usize) -> String {
+    let span = source.trim_end_ms - source.trim_start_ms;
+    if media.has_audio {
+        format!(
+            "[0:a:0]asetpts=PTS-({:.9})/TB,atrim=start={}:end={},asetpts=PTS-({})/TB,aresample=48000:async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration={}[audio]",
+            media.video_origin_seconds,
+            secs(source.trim_start_ms),
+            secs(source.trim_end_ms),
+            secs(source.trim_start_ms),
+            secs(span),
+        )
+    } else {
+        format!(
+            "[{audio_input}:a:0]atrim=duration={},asetpts=PTS-STARTPTS[audio]",
+            secs(span)
+        )
+    }
+}
+
+fn qsv_parallel_parts(source: &SourceSpan, frame_rate: &str) -> Option<Vec<SourceSpan>> {
+    let duration = source.trim_end_ms.checked_sub(source.trim_start_ms)?;
+    if duration < QSV_PARALLEL_MIN_PART_MS * 4 || duration % 1_000 != 0 {
+        return None;
+    }
+    let (numerator, denominator) = frame_rate.split_once('/')?;
+    if numerator.parse::<u32>().ok()? == 0 || denominator.parse::<u32>().ok()? != 1 {
+        return None;
+    }
+
+    // Whole-second cuts stay on frame boundaries for integer-rate output.
+    // Each child keeps the original source and ASS clock; only its output trim
+    // changes, while the caller seeks backward by the same scrolling pre-roll.
+    let seconds = duration / 1_000;
+    let part_count =
+        (seconds / (QSV_PARALLEL_MIN_PART_MS / 1_000)).min(QSV_PARALLEL_MAX_PARTS as i64) as usize;
+    let base_seconds = seconds / part_count as i64;
+    let remainder = seconds % part_count as i64;
+    let mut result = Vec::with_capacity(part_count);
+    let mut start = source.trim_start_ms;
+    for index in 0..part_count {
+        let part_seconds = base_seconds + if (index as i64) < remainder { 1 } else { 0 };
+        let end = start.checked_add(part_seconds * 1_000)?;
+        let mut part = source.clone();
+        part.trim_start_ms = start;
+        part.trim_end_ms = end;
+        result.push(part);
+        start = end;
+    }
+    (start == source.trim_end_ms).then_some(result)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QsvMosaicBackend {
     OpenClNearest,
@@ -649,17 +702,64 @@ fn qsv_filter_graph(
     }
 
     if include_audio {
-        let span = source.trim_end_ms - source.trim_start_ms;
-        if media.has_audio {
-            parts.push(format!("[0:a:0]asetpts=PTS-({:.9})/TB,atrim=start={}:end={},asetpts=PTS-({})/TB,aresample=48000:async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration={}[audio]", media.video_origin_seconds, secs(source.trim_start_ms), secs(source.trim_end_ms), secs(source.trim_start_ms), secs(span)));
-        } else {
-            parts.push(format!(
-                "[{audio_input}:a:0]atrim=duration={},asetpts=PTS-STARTPTS[audio]",
-                secs(span)
-            ));
-        }
+        parts.push(qsv_audio_filter_graph(source, media, audio_input));
     }
     Some(parts.join(";"))
+}
+
+fn audio_segment_command(
+    segment_dir: &Path,
+    source: &SourceSpan,
+    media: &MediaInfo,
+    filter_file_option: &str,
+    filter_file: &str,
+) -> Result<Command, String> {
+    let mut command = crate::tools::low_priority_ffmpeg_command();
+    command
+        .current_dir(segment_dir)
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-copyts",
+        ])
+        .arg("-i")
+        .arg(std::fs::canonicalize(&source.path).map_err(|e| format!("打开原录像失败：{e}"))?);
+    if !media.has_audio {
+        command.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
+    }
+    command
+        .args([
+            "-filter_complex_threads",
+            "1",
+            filter_file_option,
+            filter_file,
+        ])
+        .args([
+            "-map",
+            "[audio]",
+            "-vn",
+            "-c:a",
+            "aac",
+            "-ar",
+            "48000",
+            "-ac",
+            "2",
+            "-b:a",
+            "192k",
+            "-t",
+            &secs(source.trim_end_ms - source.trim_start_ms),
+            "-f",
+            "mp4",
+            "-y",
+            "audio.m4a",
+        ])
+        .stdin(Stdio::null());
+    Ok(command)
 }
 
 fn segment_command(
@@ -673,6 +773,8 @@ fn segment_command(
     filter_file: &str,
     qsv_decode: bool,
     filter_complex_threads: &str,
+    include_audio: bool,
+    output_file: &str,
     probe_frames: Option<u32>,
 ) -> Result<Command, String> {
     let mut command = if qsv_decode {
@@ -721,7 +823,7 @@ fn segment_command(
             .arg("-i")
             .arg(segment_dir.join(format!("image-{input}.png")));
     }
-    if !media.has_audio && probe_frames.is_none() {
+    if include_audio && !media.has_audio && probe_frames.is_none() {
         command.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
     }
     command.args([
@@ -740,26 +842,327 @@ fn segment_command(
         }
         command.args(["-f", "null", "-"]);
     } else {
-        command.args(["-map", "[video]", "-map", "[audio]"]);
+        if include_audio {
+            command.args(["-map", "[video]", "-map", "[audio]"]);
+        } else {
+            command.args(["-map", "[video]", "-an"]);
+        }
         command.args(selected.output_args());
         if qsv_decode {
             command.args(["-async_depth:v", "8"]);
         }
-        command
-            .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"])
-            .args([
-                "-t",
-                &secs(source.trim_end_ms - source.trim_start_ms),
-                "-video_track_timescale",
-                "90000",
-                "-f",
-                "mp4",
-                "-y",
-                "encoded.mp4",
-            ]);
+        if include_audio {
+            command.args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"]);
+        }
+        command.args([
+            "-t",
+            &secs(source.trim_end_ms - source.trim_start_ms),
+            "-video_track_timescale",
+            "90000",
+            "-f",
+            "mp4",
+            "-y",
+            output_file,
+        ]);
     }
     command.stdin(Stdio::null());
     Ok(command)
+}
+
+fn report_qsv_parallel_progress(
+    selected: &SelectedEncoder,
+    phase: &str,
+    part_ms: &[i64],
+    part_frames: &[i64],
+    elapsed: Duration,
+    completed_ms: i64,
+    total_ms: i64,
+    source_progress_ms: &mut i64,
+    report: &mut impl FnMut(EngineProgress),
+) {
+    let processed = part_ms.iter().sum::<i64>().max(0);
+    *source_progress_ms = (*source_progress_ms).max(processed);
+    let frames = part_frames.iter().sum::<i64>().max(0);
+    let seconds = elapsed.as_secs_f64();
+    let stats = FfmpegProgress {
+        processed_ms: Some(processed),
+        frames: Some(frames),
+        fps: (seconds > 0.).then_some(frames as f64 / seconds),
+        speed: (seconds > 0.).then_some(processed as f64 / 1000. / seconds),
+    };
+    let done = completed_ms + *source_progress_ms;
+    report(engine_progress(
+        Some(selected),
+        phase.to_owned(),
+        Some(((done as f64 / total_ms as f64) * 0.95).clamp(0., 0.95)),
+        done,
+        total_ms,
+        stats,
+    ));
+}
+
+async fn remove_qsv_parallel_outputs(segment_dir: &Path, part_count: usize) {
+    for index in 0..part_count {
+        let _ = tokio::fs::remove_file(segment_dir.join(format!("video-part-{index}.mp4"))).await;
+    }
+    for name in ["audio.m4a", "join-video.txt", "encoded.mp4"] {
+        let _ = tokio::fs::remove_file(segment_dir.join(name)).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn encode_qsv_parallel_source(
+    source: &SourceSpan,
+    parts: &[SourceSpan],
+    settings: &RenderRecipe,
+    media: &MediaInfo,
+    target: (u32, u32),
+    origin: i64,
+    has_ass: bool,
+    audio_input: usize,
+    frame_rate: &str,
+    backend: QsvMosaicBackend,
+    selected: &SelectedEncoder,
+    segment_dir: &Path,
+    seek_preroll_ms: i64,
+    filter_file_option: &str,
+    phase: &str,
+    completed_ms: i64,
+    total_ms: i64,
+    source_progress_ms: &mut i64,
+    cancel: &CancellationToken,
+    report: &mut impl FnMut(EngineProgress),
+) -> Result<(), String> {
+    let part_durations: Vec<i64> = parts
+        .iter()
+        .map(|part| part.trim_end_ms - part.trim_start_ms)
+        .collect();
+    let mut commands = Vec::with_capacity(parts.len());
+    for (index, part) in parts.iter().enumerate() {
+        let graph = qsv_filter_graph(
+            part,
+            settings,
+            media,
+            target,
+            origin,
+            has_ass,
+            audio_input,
+            false,
+            frame_rate,
+            selected,
+            backend,
+        )
+        .ok_or("并行 QSV 子段不满足滤镜图条件")?;
+        let filter_file = format!("filters-qsv-part-{index}.txt");
+        tokio::fs::write(segment_dir.join(&filter_file), graph)
+            .await
+            .map_err(|e| format!("保存并行 QSV 子段滤镜失败：{e}"))?;
+        let seek_ms = (part.trim_start_ms - seek_preroll_ms).max(0);
+        let output_file = format!("video-part-{index}.mp4");
+        let command = segment_command(
+            selected,
+            segment_dir,
+            part,
+            media,
+            seek_ms,
+            0,
+            filter_file_option,
+            &filter_file,
+            true,
+            "2",
+            false,
+            &output_file,
+            None,
+        )?;
+        commands.push((index, command));
+    }
+
+    let audio_graph = qsv_audio_filter_graph(source, media, 1);
+    tokio::fs::write(segment_dir.join("filters-audio.txt"), audio_graph)
+        .await
+        .map_err(|e| format!("保存完整音轨滤镜失败：{e}"))?;
+    let audio_command = audio_segment_command(
+        segment_dir,
+        source,
+        media,
+        filter_file_option,
+        "filters-audio.txt",
+    )?;
+
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<(usize, String)>();
+    let mut tasks = tokio::task::JoinSet::new();
+    let mut cancel_tokens = Vec::with_capacity(parts.len() + 1);
+    for (index, command) in commands {
+        let child_cancel = cancel.child_token();
+        cancel_tokens.push(child_cancel.clone());
+        let progress_tx = progress_tx.clone();
+        tasks.spawn(async move {
+            let result = run_process(command, &child_cancel, PROCESS_STALL, |_, block| {
+                let _ = progress_tx.send((index, block.to_owned()));
+            })
+            .await
+            .map(|_| ());
+            (Some(index), result)
+        });
+    }
+    let audio_cancel = cancel.child_token();
+    cancel_tokens.push(audio_cancel.clone());
+    tasks.spawn(async move {
+        let result = run_process(audio_command, &audio_cancel, PROCESS_STALL, |_, _| {})
+            .await
+            .map(|_| ());
+        (None, result)
+    });
+    drop(progress_tx);
+
+    let started = std::time::Instant::now();
+    let mut part_ms = vec![0i64; parts.len()];
+    let mut part_frames = vec![0i64; parts.len()];
+    let mut progress_open = true;
+    let mut parent_cancelled = false;
+    let mut task_error: Option<(bool, String)> = None;
+    while !tasks.is_empty() {
+        tokio::select! {
+            _ = cancel.cancelled(), if !parent_cancelled => {
+                parent_cancelled = true;
+                for token in &cancel_tokens {
+                    token.cancel();
+                }
+            }
+            message = progress_rx.recv(), if progress_open => {
+                match message {
+                    Some((index, block)) if task_error.is_none() && !parent_cancelled => {
+                        let stats = FfmpegProgress::parse(&block).with_elapsed(frame_rate, started.elapsed());
+                        let at = stats.encoded_time(frame_rate).clamp(0, part_durations[index]);
+                        part_ms[index] = part_ms[index].max(at);
+                        part_frames[index] = part_frames[index].max(stats.frames.unwrap_or(0));
+                        report_qsv_parallel_progress(
+                            selected,
+                            phase,
+                            &part_ms,
+                            &part_frames,
+                            started.elapsed(),
+                            completed_ms,
+                            total_ms,
+                            source_progress_ms,
+                            report,
+                        );
+                    }
+                    Some(_) => {}
+                    None => progress_open = false,
+                }
+            }
+            joined = tasks.join_next() => {
+                if let Some(joined) = joined {
+                    let (index, result) = match joined {
+                        Ok(result) => result,
+                        Err(error) => {
+                            if task_error.is_none() {
+                                task_error = Some((false, format!("并行 QSV 子任务异常：{error}")));
+                                for token in &cancel_tokens {
+                                    token.cancel();
+                                }
+                            }
+                            continue;
+                        }
+                    };
+                    match result {
+                        Ok(()) => {
+                            if let Some(index) = index {
+                                part_ms[index] = part_durations[index];
+                                let (numerator, denominator) = frame_rate
+                                    .split_once('/')
+                                    .and_then(|(n, d)| Some((n.parse::<f64>().ok()?, d.parse::<f64>().ok()?)))
+                                    .ok_or("输出帧率无效")?;
+                                part_frames[index] =
+                                    (part_durations[index] as f64 * numerator / (1000. * denominator)).round() as i64;
+                                if task_error.is_none() && !parent_cancelled {
+                                    report_qsv_parallel_progress(
+                                        selected,
+                                        phase,
+                                        &part_ms,
+                                        &part_frames,
+                                        started.elapsed(),
+                                        completed_ms,
+                                        total_ms,
+                                        source_progress_ms,
+                                        report,
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) if error.contains("合成已取消") && (parent_cancelled || task_error.is_some()) => {}
+                        Err(error) => {
+                            if task_error.is_none() {
+                                task_error = Some((index.is_none(), error));
+                                for token in &cancel_tokens {
+                                    token.cancel();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if parent_cancelled || cancel.is_cancelled() {
+        remove_qsv_parallel_outputs(segment_dir, parts.len()).await;
+        return Err("合成已取消".into());
+    }
+    if let Some((_, error)) = task_error {
+        remove_qsv_parallel_outputs(segment_dir, parts.len()).await;
+        return Err(error);
+    }
+
+    let mut manifest = String::from("ffconcat version 1.0\n");
+    for index in 0..parts.len() {
+        manifest.push_str(&format!("file 'video-part-{index}.mp4'\n"));
+    }
+    tokio::fs::write(segment_dir.join("join-video.txt"), manifest)
+        .await
+        .map_err(|e| format!("保存并行视频拼接清单失败：{e}"))?;
+    let mut command = crate::tools::low_priority_ffmpeg_command();
+    command
+        .current_dir(segment_dir)
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-f",
+            "concat",
+            "-safe",
+            "1",
+            "-i",
+            "join-video.txt",
+            "-i",
+            "audio.m4a",
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c",
+            "copy",
+            "-video_track_timescale",
+            "90000",
+            "-movflags",
+            "+faststart",
+            "-f",
+            "mp4",
+            "-y",
+            "encoded.mp4",
+        ])
+        .stdin(Stdio::null());
+    run_process(command, cancel, PROCESS_STALL, |_, _| {})
+        .await
+        .map_err(|error| {
+            let _ = std::fs::remove_file(segment_dir.join("encoded.mp4"));
+            error
+        })?;
+    Ok(())
 }
 
 /// Coordinates refer to the actual source frame; scaling/padding is performed
@@ -1038,6 +1441,7 @@ pub async fn render(
             .regions
             .iter()
             .any(|region| region.effect_type == EffectType::Mosaic && region.opacity > 0.);
+        let mut qsv_mosaic_backend = None;
         let mut qsv_graph = qsv_filter_graph(
             source,
             &request.settings,
@@ -1072,10 +1476,7 @@ pub async fn render(
         }
         if use_qsv_graph {
             let backends: &[QsvMosaicBackend] = if has_mosaic {
-                &[
-                    QsvMosaicBackend::OpenClNearest,
-                    QsvMosaicBackend::QsvVpp,
-                ]
+                &[QsvMosaicBackend::OpenClNearest, QsvMosaicBackend::QsvVpp]
             } else {
                 &[QsvMosaicBackend::OpenClNearest]
             };
@@ -1110,6 +1511,8 @@ pub async fn render(
                     "filters-qsv-probe.txt",
                     true,
                     "2",
+                    false,
+                    "",
                     Some(8),
                 )?;
                 match run_process(command, &cancel, Duration::from_secs(20), |_, _| {}).await {
@@ -1130,6 +1533,7 @@ pub async fn render(
                 }
             }
             if let Some(backend) = working_backend {
+                qsv_mosaic_backend = Some(backend);
                 if has_mosaic {
                     tracing::info!(
                         segment_id = source.segment_id,
@@ -1184,6 +1588,14 @@ pub async fn render(
         tokio::fs::write(segment_dir.join(filter_file), filter)
             .await
             .map_err(|e| format!("保存合成滤镜失败：{e}"))?;
+        let parallel_parts = if use_qsv_graph
+            && has_ass
+            && qsv_mosaic_backend == Some(QsvMosaicBackend::OpenClNearest)
+        {
+            qsv_parallel_parts(source, &first.frame_rate)
+        } else {
+            None
+        };
         let command = segment_command(
             &selected,
             &segment_dir,
@@ -1195,28 +1607,91 @@ pub async fn render(
             filter_file,
             use_qsv_graph,
             if use_qsv_graph { "2" } else { "1" },
+            true,
+            "encoded.mp4",
             None,
         )?;
         let phase = format!("合成分段 {}/{}", number + 1, request.sources.len());
         let duration = source.trim_end_ms - source.trim_start_ms;
         let encode_started = std::time::Instant::now();
-        let encoded = run_process(command, &cancel, PROCESS_STALL, |_, block| {
-            let stats = FfmpegProgress::parse(block)
-                .with_elapsed(&first.frame_rate, encode_started.elapsed());
-            let at = stats.encoded_time(&first.frame_rate);
-            report(engine_progress(
-                Some(&active_selected),
-                phase.clone(),
-                Some(
-                    ((completed + at.clamp(0, duration)) as f64 / total as f64 * 0.95)
-                        .clamp(0., 0.95),
-                ),
-                completed + at.clamp(0, duration),
+        let mut source_progress_ms = 0i64;
+        let encoded = if let Some(parts) = parallel_parts {
+            tracing::info!(
+                segment_id = source.segment_id,
+                part_count = parts.len(),
+                "QSV 弹幕分段并行压制已启用"
+            );
+            match encode_qsv_parallel_source(
+                source,
+                &parts,
+                &request.settings,
+                &media,
+                target,
+                ass.time_origin_ms,
+                has_ass,
+                audio_input,
+                &first.frame_rate,
+                qsv_mosaic_backend.unwrap(),
+                &selected,
+                &segment_dir,
+                pre_roll_ms,
+                filter_file_option,
+                &phase,
+                completed,
                 total,
-                stats,
-            ));
-        })
-        .await;
+                &mut source_progress_ms,
+                &cancel,
+                &mut report,
+            )
+            .await
+            {
+                Ok(()) => Ok(String::new()),
+                Err(error) if !cancel.is_cancelled() && !error.contains("磁盘空间不足") => {
+                    tracing::warn!(
+                        segment_id = source.segment_id,
+                        %error,
+                        "并行 QSV 子段失败，重试整段串行 QSV"
+                    );
+                    let part_count = qsv_parallel_parts(source, &first.frame_rate)
+                        .map_or(0, |parts| parts.len());
+                    remove_qsv_parallel_outputs(&segment_dir, part_count).await;
+                    run_process(command, &cancel, PROCESS_STALL, |_, block| {
+                        let stats = FfmpegProgress::parse(block)
+                            .with_elapsed(&first.frame_rate, encode_started.elapsed());
+                        let at = stats.encoded_time(&first.frame_rate).clamp(0, duration);
+                        source_progress_ms = source_progress_ms.max(at);
+                        let processed = completed + source_progress_ms;
+                        report(engine_progress(
+                            Some(&active_selected),
+                            phase.clone(),
+                            Some((processed as f64 / total as f64 * 0.95).clamp(0., 0.95)),
+                            processed,
+                            total,
+                            stats,
+                        ));
+                    })
+                    .await
+                }
+                Err(error) => Err(error),
+            }
+        } else {
+            run_process(command, &cancel, PROCESS_STALL, |_, block| {
+                let stats = FfmpegProgress::parse(block)
+                    .with_elapsed(&first.frame_rate, encode_started.elapsed());
+                let at = stats.encoded_time(&first.frame_rate).clamp(0, duration);
+                source_progress_ms = source_progress_ms.max(at);
+                let processed = completed + source_progress_ms;
+                report(engine_progress(
+                    Some(&active_selected),
+                    phase.clone(),
+                    Some((processed as f64 / total as f64 * 0.95).clamp(0., 0.95)),
+                    processed,
+                    total,
+                    stats,
+                ));
+            })
+            .await
+        };
         if let Err(error) = encoded {
             if use_qsv_graph && !cancel.is_cancelled() && !error.contains("磁盘空间不足") {
                 tracing::warn!(segment_id = source.segment_id, %error, "QSV 渲染失败，重试软件滤镜");
@@ -1248,20 +1723,21 @@ pub async fn render(
                     "filters.txt",
                     false,
                     "1",
+                    true,
+                    "encoded.mp4",
                     None,
                 )?;
                 run_process(command, &cancel, PROCESS_STALL, |_, block| {
                     let stats = FfmpegProgress::parse(block)
                         .with_elapsed(&first.frame_rate, encode_started.elapsed());
-                    let at = stats.encoded_time(&first.frame_rate);
+                    let at = stats.encoded_time(&first.frame_rate).clamp(0, duration);
+                    source_progress_ms = source_progress_ms.max(at);
+                    let processed = completed + source_progress_ms;
                     report(engine_progress(
                         Some(&active_selected),
                         phase.clone(),
-                        Some(
-                            ((completed + at.clamp(0, duration)) as f64 / total as f64 * 0.95)
-                                .clamp(0., 0.95),
-                        ),
-                        completed + at.clamp(0, duration),
+                        Some((processed as f64 / total as f64 * 0.95).clamp(0., 0.95)),
+                        processed,
                         total,
                         stats,
                     ));

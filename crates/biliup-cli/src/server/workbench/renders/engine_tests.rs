@@ -198,6 +198,43 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
     );
 }
 
+#[test]
+fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
+    let mut span = source(PathBuf::from("source.flv"), 7, 0, 90_000, 100, 60_100);
+    span.source_origin_ms = Some(900_000);
+    let parts = qsv_parallel_parts(&span, "60/1").unwrap();
+    assert_eq!(parts.len(), 6);
+    assert_eq!(
+        parts
+            .iter()
+            .map(|part| (part.trim_start_ms, part.trim_end_ms))
+            .collect::<Vec<_>>(),
+        [
+            (100, 10_100),
+            (10_100, 20_100),
+            (20_100, 30_100),
+            (30_100, 40_100),
+            (40_100, 50_100),
+            (50_100, 60_100),
+        ]
+    );
+    assert!(parts.iter().all(|part| {
+        part.segment_id == span.segment_id
+            && part.path == span.path
+            && part.source_origin_ms == span.source_origin_ms
+            && part.start_ms == span.start_ms
+            && part.end_ms == span.end_ms
+    }));
+
+    let mut short = span.clone();
+    short.trim_end_ms = short.trim_start_ms + 39_000;
+    assert!(qsv_parallel_parts(&short, "60/1").is_none());
+    let mut fractional_duration = span.clone();
+    fractional_duration.trim_end_ms += 20;
+    assert!(qsv_parallel_parts(&fractional_duration, "60/1").is_none());
+    assert!(qsv_parallel_parts(&span, "30000/1001").is_none());
+}
+
 async fn pixel(path: &Path, at: f64, x: usize, y: usize, width: usize) -> [u8; 3] {
     let output = crate::tools::ffmpeg_command()
         .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
