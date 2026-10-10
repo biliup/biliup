@@ -21,6 +21,7 @@ const FFMPEG: &str = "ffmpeg";
 const RENDER_TOOLS_ENV: &str = "BILIUP_RENDER_TOOLS_DIR";
 const RENDER_TOOLS_DIR: &str = "render-tools";
 const RENDER_FONT: &str = "NotoSansSC-Regular.otf";
+const RENDER_EMOJI_FONT: &[u8] = include_bytes!("assets/NotoEmoji.ttf");
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -138,7 +139,7 @@ pub fn render_font_files() -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    entries
+    let mut files: Vec<_> = entries
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| {
@@ -151,7 +152,18 @@ pub fn render_font_files() -> Vec<PathBuf> {
                     Some("ttf" | "otf" | "ttc")
                 )
         })
-        .collect()
+        .collect();
+    files.sort_by_key(|path| {
+        let name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        if name == RENDER_FONT { 0 } else { 1 }
+    });
+    files
+}
+
+/// Monochrome Noto Emoji is embedded in the binary so libass and the browser
+/// preview always have a deterministic fallback for emoji missing from CJK.
+pub fn render_emoji_font_bytes() -> &'static [u8] {
+    RENDER_EMOJI_FONT
 }
 
 /// The ffmpeg program to run and where it came from.

@@ -37,6 +37,24 @@ fn reads_precise_origin_and_estimates_old_origin_by_median() {
     assert!(parse_xml(b"<i recording_start_time_ms=\"1\"><recording_start_time_ms>2</recording_start_time_ms></i>").is_err());
 }
 
+#[test]
+fn emoji_fallback_marks_only_dialogue_runs_and_keeps_zwj_sequences() {
+    let input = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0000,0000,0000,,中文 😡👩‍💻 end,with comma\nComment: 0,0:00:00.00,0:00:01.00,Default,,0000,0000,0000,,😡";
+    let output = add_emoji_font_fallback(input);
+    assert!(
+        output.contains("中文 {\\fnNoto Emoji}😡👩‍💻{\\fnNoto Sans CJK SC} end,with comma"),
+        "{output}"
+    );
+    assert!(output.ends_with("Comment: 0,0:00:00.00,0:00:01.00,Default,,0000,0000,0000,,😡"));
+}
+
+#[test]
+fn embedded_emoji_font_has_a_valid_sfnt_header() {
+    let font = crate::tools::render_emoji_font_bytes();
+    assert!(font.len() > 1_000_000);
+    assert!(font.starts_with(b"\0\x01\0\0"));
+}
+
 fn golden(path: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../danmaku-factory/tests/golden")

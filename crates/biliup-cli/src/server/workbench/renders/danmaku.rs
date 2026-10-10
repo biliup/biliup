@@ -258,6 +258,58 @@ fn escape(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
+fn is_emoji_base(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x1f000..=0x1faff | 0x2600..=0x27bf | 0x2300..=0x23ff
+    )
+}
+
+fn is_emoji_extender(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x200d | 0xfe0e..=0xfe0f | 0x1f3fb..=0x1f3ff | 0xe0020..=0xe007f
+    )
+}
+
+/// Prefer the bundled monochrome emoji face for emoji runs while leaving the
+/// generated event timing, layout, colors, and ordinary CJK text untouched.
+fn add_emoji_font_fallback(ass: &str) -> String {
+    let mut output = String::with_capacity(ass.len() + 128);
+    for (line_number, line) in ass.lines().enumerate() {
+        if line_number > 0 {
+            output.push('\n');
+        }
+        let Some(text_start) = line
+            .strip_prefix("Dialogue:")
+            .and_then(|_| line.match_indices(',').nth(8).map(|(at, _)| at + 1))
+        else {
+            output.push_str(line);
+            continue;
+        };
+        output.push_str(&line[..text_start]);
+        let text = &line[text_start..];
+        let mut chars = text.char_indices().peekable();
+        while let Some((_, ch)) = chars.next() {
+            if !is_emoji_base(ch) {
+                output.push(ch);
+                continue;
+            }
+            output.push_str("{\\fnNoto Emoji}");
+            output.push(ch);
+            while let Some(&(_, next)) = chars.peek() {
+                if !is_emoji_base(next) && !is_emoji_extender(next) {
+                    break;
+                }
+                chars.next();
+                output.push(next);
+            }
+            output.push_str("{\\fnNoto Sans CJK SC}");
+        }
+    }
+    output
+}
+
 pub fn empty_ass(width: u32, height: u32) -> String {
     format!(
         "[Script Info]\nScriptType: v4.00+\nPlayResX: {width}\nPlayResY: {height}\n\n[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\nStyle: Default,Noto Sans CJK SC,38,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,7,0,0,0,1\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -384,6 +436,7 @@ pub async fn generate(
         })
         .collect::<Vec<_>>()
         .join("\n");
+    preview.ass = add_emoji_font_fallback(&preview.ass);
     Ok(preview)
 }
 

@@ -185,6 +185,17 @@ async fn body(response: Response) -> Bytes {
         .unwrap()
 }
 
+#[tokio::test]
+async fn embedded_emoji_font_is_available_from_the_preview_font_route() {
+    let response = get_render_font(Path(1), Request::new(Body::empty())).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "font/ttf");
+    assert_eq!(
+        body(response).await.as_ref(),
+        crate::tools::render_emoji_font_bytes()
+    );
+}
+
 async fn json_of(response: Response, status: StatusCode) -> Value {
     assert_eq!(response.status(), status);
     serde_json::from_slice(&body(response).await).unwrap()

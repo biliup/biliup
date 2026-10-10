@@ -698,6 +698,12 @@ pub async fn render(
             tokio::fs::copy(font, fonts.join(format!("render-font.{extension}")))
                 .await
                 .map_err(|e| format!("复制弹幕字体失败：{e}"))?;
+            tokio::fs::write(
+                fonts.join("NotoEmoji.ttf"),
+                crate::tools::render_emoji_font_bytes(),
+            )
+            .await
+            .map_err(|e| format!("写入弹幕 Emoji 字体失败：{e}"))?;
         }
         let mut command = crate::tools::low_priority_ffmpeg_command();
         command
