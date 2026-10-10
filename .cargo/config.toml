@@ -1,5 +1,7 @@
-# Optimized incremental builds can leave inconsistent LLVM objects, which fail
-# to link with undefined hidden anon.* symbols. Keep development and inherited
-# test builds reproducible, including when user-level Cargo config enables it.
+# Cargo config overrides Cargo.toml. Keep these in sync with the manifest so
+# user-level opt-level=1 cannot re-enable optimized incremental dev builds
+# (the configuration associated with earlier undefined hidden anon.* failures).
 [profile.dev]
-incremental = false
+opt-level = 0
+debug = 2
+incremental = true

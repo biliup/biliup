@@ -42,14 +42,17 @@ reqwest = { version = "0.13.4", features = ["cookies", "form", "query"] }
 url = "2.5"
 
 
-# Avoid stale anonymous LLVM symbols from optimized incremental dev builds.
 [profile.dev]
-incremental = false
+# Keep business code easy to step through, and reuse unaffected code after edits.
+opt-level = 0
+debug = 2
+incremental = true
 
 [profile.release]
 lto = true
 codegen-units = 1
 strip = true
+incremental = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [profile.minimal]
