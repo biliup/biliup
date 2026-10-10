@@ -253,7 +253,7 @@ export default function RenderEditorOverlay({ state: s, video, current, segments
         style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }}
         onClick={() => s.setSelected(region.id)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); s.setSelected(region.id) } }}
         onPointerDown={e => pointerDown(e, region, null)} onPointerMove={pointerMove} onPointerUp={() => { regionDrag.current = null }} onPointerCancel={() => { regionDrag.current = null }}>
-        <span>{region.effect_type === 'image' ? '图片' : region.effect_type === 'mosaic' ? '马赛克' : region.effect_type === 'blur' ? '模糊' : '纯色'}</span>
+        <span>{region.effect_type === 'image' ? '图片' : region.effect_type === 'mosaic' ? '马赛克' : region.effect_type === 'smooth_blur' ? '平滑模糊' : region.effect_type === 'blur' ? '模糊' : '纯色'}</span>
         {region.id === s.selected && handles.map(handle => <div key={handle} className={styles.renderResize} data-handle={handle}
           style={{ left: `${handlePoint[handle][0] * 100}%`, top: `${handlePoint[handle][1] * 100}%` }}
           aria-label={`缩放 ${handle}`} onPointerDown={e => pointerDown(e, region, handle)} />)}

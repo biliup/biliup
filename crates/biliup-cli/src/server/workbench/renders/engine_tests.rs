@@ -61,6 +61,116 @@ fn source(path: PathBuf, id: i64, start: i64, end: i64, from: i64, to: i64) -> S
     }
 }
 
+#[test]
+fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
+    let source = source(PathBuf::from("source.flv"), 1, 0, 60_000, 0, 60_000);
+    let media = MediaInfo {
+        width: 1920,
+        height: 1080,
+        has_audio: true,
+        duration_ms: Some(60_000),
+        video_origin_seconds: 0.05,
+        frame_rate: "60/1".into(),
+    };
+    let encoder = super::encoding::SelectedEncoder {
+        encoder: VideoEncoder::H264Qsv,
+        device: None,
+        fallback_reason: None,
+    };
+    let region = MaskRegion {
+        id: "face".into(),
+        effect_type: EffectType::SmoothBlur,
+        x: 0.5,
+        y: 0.4,
+        width: 0.2,
+        height: 0.2,
+        strength: 12.,
+        ..Default::default()
+    };
+    let settings = RenderRecipe {
+        encoding: EncoderConfig {
+            encoder: VideoEncoder::H264Qsv,
+            device: None,
+        },
+        danmaku: DanmakuSettings {
+            enabled: true,
+            ..Default::default()
+        },
+        regions: vec![region.clone()],
+    };
+    let smooth = qsv_filter_graph(
+        &source,
+        &settings,
+        &media,
+        (1920, 1080),
+        0,
+        true,
+        1,
+        false,
+        "60/1",
+        &encoder,
+    )
+    .unwrap();
+    assert!(smooth.contains("scale_qsv=w=384:h=216:format=nv12"));
+    assert!(smooth.contains("async_depth=8"));
+    assert!(smooth.contains("cw=1920:ch=432:cx=0:cy=0:w=1920:h=432"));
+    assert!(smooth.contains("ass=filename=danmaku-qsv.ass"));
+    assert_eq!(smooth.matches("hwdownload").count(), 1); // ASS only
+    assert!(smooth.contains("alpha=255"));
+    assert!(smooth.contains("setpts=PTS-(0.050000000)/TB"));
+    let band_ass =
+        qsv_danmaku_ass(&super::super::danmaku::empty_ass(1920, 1080), 1080, 432).unwrap();
+    assert!(band_ass.contains("PlayResY: 432"));
+
+    let mosaic = RenderRecipe {
+        regions: vec![MaskRegion {
+            effect_type: EffectType::Mosaic,
+            ..region.clone()
+        }],
+        ..settings.clone()
+    };
+    let mosaic_graph = qsv_filter_graph(
+        &source,
+        &mosaic,
+        &media,
+        (1920, 1080),
+        0,
+        true,
+        1,
+        false,
+        "60/1",
+        &encoder,
+    )
+    .unwrap();
+    assert!(mosaic_graph.contains("scale=32:18:flags=neighbor,scale=384:216:flags=neighbor"));
+    assert_eq!(mosaic_graph.matches("hwdownload").count(), 2); // ROI plus ASS
+
+    let mut timed = mosaic;
+    timed.regions[0].intervals.push(TimeInterval {
+        from_ms: 0,
+        to_ms: 1000,
+    });
+    assert!(
+        qsv_filter_graph(
+            &source,
+            &timed,
+            &media,
+            (1920, 1080),
+            0,
+            true,
+            1,
+            false,
+            "60/1",
+            &encoder,
+        )
+        .is_none()
+    );
+    assert_eq!(
+        serde_json::to_string(&EffectType::SmoothBlur).unwrap(),
+        "\"smooth_blur\""
+    );
+}
+
 async fn pixel(path: &Path, at: f64, x: usize, y: usize, width: usize) -> [u8; 3] {
     let output = crate::tools::ffmpeg_command()
         .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])

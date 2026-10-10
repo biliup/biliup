@@ -445,7 +445,11 @@ pub async fn generate(
 /// --font-size-strict --opacity N --outline N --shadow 0 --scrolltime S
 /// --fixtime S --displayarea A --density D`, everything else at the CLI's
 /// defaults. Values go through f32 exactly like the CLI's atof()+cast.
-pub(super) fn factory_options(settings: &DanmakuSettings, width: u32, height: u32) -> ConvertOptions {
+pub(super) fn factory_options(
+    settings: &DanmakuSettings,
+    width: u32,
+    height: u32,
+) -> ConvertOptions {
     ConvertOptions {
         width,
         height,
@@ -501,7 +505,10 @@ async fn run_worker(
     if cancel.is_cancelled() {
         return Err("合成已取消".into());
     }
-    match (outcome, danmaku_worker::read_response(work, &request.result)) {
+    match (
+        outcome,
+        danmaku_worker::read_response(work, &request.result),
+    ) {
         (Ok(_), Some(Ok(Response::Converted { stats, .. }))) => Ok(stats),
         (_, Some(Ok(Response::Failed { error, .. }))) => Err(describe(&error)),
         (_, Some(Err(error))) => Err(error),
@@ -513,7 +520,9 @@ async fn run_worker(
 fn describe(error: &ConvertError) -> String {
     const ENOSPC: i32 = 28;
     match error.kind {
-        ErrorKind::OutputWrite if error.os_error == Some(ENOSPC) => "磁盘空间不足，弹幕转换失败".into(),
+        ErrorKind::OutputWrite if error.os_error == Some(ENOSPC) => {
+            "磁盘空间不足，弹幕转换失败".into()
+        }
         ErrorKind::OutputWrite | ErrorKind::OutputCreate | ErrorKind::OutputExists => {
             format!("写入弹幕 ASS 失败：{error}")
         }
@@ -539,8 +548,7 @@ pub(super) fn decode_ass(bytes: &[u8]) -> String {
     text
 }
 
-const SELF_TEST_XML: &str =
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n<d p=\"0.000,1,25,16777215,0,0,0,0\">biliup 弹幕</d>\n</i>\n";
+const SELF_TEST_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n<d p=\"0.000,1,25,16777215,0,0,0,0\">biliup 弹幕</d>\n</i>\n";
 
 /// Converts a one-comment XML in a worker, which proves that this
 /// installation can start the worker and that the linked core works.

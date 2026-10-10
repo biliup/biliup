@@ -8,7 +8,7 @@ export interface DanmakuSettings {
   scroll_seconds: number; display_area: number; density: number; offset_ms: number
   segment_offsets: Record<string, number>
 }
-export type EffectType = 'mosaic' | 'blur' | 'solid' | 'image'
+export type EffectType = 'mosaic' | 'blur' | 'smooth_blur' | 'solid' | 'image'
 export interface MaskRegion {
   id: string; effect_type: EffectType; x: number; y: number; width: number; height: number
   strength: number; color: string; opacity: number; asset_id: number | null; lock_aspect: boolean

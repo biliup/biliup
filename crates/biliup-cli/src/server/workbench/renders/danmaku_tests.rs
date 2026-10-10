@@ -161,7 +161,10 @@ async fn concurrent_previews_use_separate_workers() {
     }
     let expected = decode_ass(&std::fs::read(golden("expected/dense-biliup.ass")).unwrap());
     for work in &works {
-        assert_eq!(decode_ass(&std::fs::read(work.path().join(ASS_FILE)).unwrap()), expected);
+        assert_eq!(
+            decode_ass(&std::fs::read(work.path().join(ASS_FILE)).unwrap()),
+            expected
+        );
     }
     assert!(started.elapsed() < Duration::from_secs(60));
 }
@@ -205,7 +208,10 @@ async fn a_hung_worker_is_stopped_by_the_timeout() {
     )
     .await
     .unwrap_err();
-    assert!(error.contains("弹幕转换失败") && error.contains("没有推进"), "{error}");
+    assert!(
+        error.contains("弹幕转换失败") && error.contains("没有推进"),
+        "{error}"
+    );
     assert!(started.elapsed() < Duration::from_secs(5));
     assert!(!work.path().join(ASS_FILE).exists());
 }
@@ -238,10 +244,18 @@ async fn a_crashing_worker_is_reported_and_leaves_no_ass() {
         factory_options(&gui_defaults(), 1920, 1080),
         Some(Hook::Abort),
     );
-    let error = run_worker(work.path(), &request, &CancellationToken::new(), CONVERT_TIMEOUT)
-        .await
-        .unwrap_err();
-    assert!(error.contains("弹幕转换失败") && error.contains("aborting"), "{error}");
+    let error = run_worker(
+        work.path(),
+        &request,
+        &CancellationToken::new(),
+        CONVERT_TIMEOUT,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error.contains("弹幕转换失败") && error.contains("aborting"),
+        "{error}"
+    );
     assert!(!work.path().join(ASS_FILE).exists());
 }
 
@@ -309,8 +323,16 @@ async fn generate_keeps_negative_origins_and_drops_impossible_times() {
     .unwrap();
     assert_eq!(preview.time_origin_ms, -1000);
     assert_eq!(preview.comment_count, 3);
-    assert!(preview.ass.contains("0:00:00.00,0:00:12.00,R2L"), "{}", preview.ass);
-    assert!(preview.ass.contains("0:00:04.00,0:00:16.00,R2L"), "{}", preview.ass);
+    assert!(
+        preview.ass.contains("0:00:00.00,0:00:12.00,R2L"),
+        "{}",
+        preview.ass
+    );
+    assert!(
+        preview.ass.contains("0:00:04.00,0:00:16.00,R2L"),
+        "{}",
+        preview.ass
+    );
     assert!(!preview.ass.contains("bogus"));
     // Style values are exact after layout.
     assert!(preview.ass.contains("Style: R2L,Noto Sans CJK SC,38,"));

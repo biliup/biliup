@@ -163,8 +163,8 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
           </fieldset>
           <div className={styles.renderToolbar}>
             <strong>遮挡图层 · 从下至上</strong>
-            {(['mosaic', 'blur', 'solid'] as const).map((type, i) => <Button key={type} size="small" disabled={disabled || s.recipe.regions.length >= 32}
-              onClick={() => add(type)}>{['马赛克', '模糊', '纯色'][i]}</Button>)}
+            {(['mosaic', 'blur', 'smooth_blur', 'solid'] as const).map((type, i) => <Button key={type} size="small" disabled={disabled || s.recipe.regions.length >= 32}
+              onClick={() => add(type)}>{['马赛克', '模糊', '平滑模糊', '纯色'][i]}</Button>)}
             <Button size="small" disabled={disabled || busy || s.recipe.regions.length >= 32} onClick={() => file.current?.click()}>上传图片</Button>
             <input ref={file} type="file" accept="image/png,image/jpeg" hidden onChange={e => {
               const uploaded = e.target.files?.[0]; e.target.value = ''
@@ -181,7 +181,7 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
           {s.assets.error && <p className={styles.renderError}>图片列表加载失败：{errorText(s.assets.error)}</p>}
           <ol className={styles.renderLayers}>
             {s.recipe.regions.map((r, index) => <li key={r.id} data-selected={r.id === s.selected}>
-              <button onClick={() => s.setSelected(r.id)}>{index + 1}. {({ mosaic: '马赛克', blur: '模糊', solid: '纯色', image: '图片' })[r.effect_type]} {r.asset_id ? `#${r.asset_id}` : ''}</button>
+              <button onClick={() => s.setSelected(r.id)}>{index + 1}. {({ mosaic: '马赛克', blur: '模糊', smooth_blur: '平滑模糊', solid: '纯色', image: '图片' })[r.effect_type]} {r.asset_id ? `#${r.asset_id}` : ''}</button>
               <Button size="small" disabled={disabled || index === 0} onClick={() => reorder(r.id, -1)}>下移</Button>
               <Button size="small" disabled={disabled || index === s.recipe.regions.length - 1} onClick={() => reorder(r.id, 1)}>上移</Button>
               <Button size="small" type="danger" disabled={disabled} onClick={() => s.change(current => ({ ...current, regions: current.regions.filter(x => x.id !== r.id) }))}>移除</Button>
@@ -203,7 +203,7 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
             }} />
             <label className={styles.renderField}><span>锁定比例</span><input type="checkbox" checked={region.lock_aspect} onChange={e => s.updateRegion(region.id, { lock_aspect: e.target.checked })} /></label>
             <NumberField label="不透明度 %" value={region.opacity * 100} min={0} max={100} disabled={disabled} onChange={n => s.updateRegion(region.id, { opacity: n / 100 })} />
-            {['blur', 'mosaic'].includes(region.effect_type) && <NumberField label="强度" value={region.strength} min={1} max={100} disabled={disabled} onChange={strength => s.updateRegion(region.id, { strength })} />}
+            {['blur', 'smooth_blur', 'mosaic'].includes(region.effect_type) && <NumberField label="强度" value={region.strength} min={1} max={100} disabled={disabled} onChange={strength => s.updateRegion(region.id, { strength })} />}
             {region.effect_type === 'solid' && <label className={styles.renderField}><span>颜色</span><input type="color" value={region.color} onChange={e => s.updateRegion(region.id, { color: e.target.value })} /></label>}
             <div className={styles.renderIntervals}>
               <strong>生效时段（场次毫秒，终点不包含）</strong>

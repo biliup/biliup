@@ -165,6 +165,22 @@ fn engine_progress(
     }
 }
 
+fn record_filter_fallback(selected: &mut SelectedEncoder, error: &str) {
+    let detail: String = error
+        .trim()
+        .lines()
+        .last()
+        .unwrap_or(error)
+        .chars()
+        .take(400)
+        .collect();
+    let reason = format!("QSV 处理图失败，已回退软件滤镜：{detail}");
+    selected.fallback_reason = Some(match selected.fallback_reason.take() {
+        Some(previous) => format!("{previous}；{reason}"),
+        None => reason,
+    });
+}
+
 #[derive(Debug, Clone)]
 struct MediaInfo {
     width: u32,
@@ -472,6 +488,255 @@ fn enable(region: &MaskRegion, source: &SourceSpan, origin: i64) -> Option<Strin
     (!intervals.is_empty()).then(|| intervals.join("+"))
 }
 
+fn region_rect(region: &MaskRegion, media: &MediaInfo) -> (u32, u32, u32, u32) {
+    let x = (region.x * media.width as f64).floor() as u32;
+    let y = (region.y * media.height as f64).floor() as u32;
+    let w = (region.width * media.width as f64).ceil().max(1.) as u32;
+    let h = (region.height * media.height as f64).ceil().max(1.) as u32;
+    (x, y, w.min(media.width - x), h.min(media.height - y))
+}
+
+fn qsv_danmaku_band_height(settings: &super::model::DanmakuSettings, height: u32) -> u32 {
+    let display_band = (height as f64 * settings.display_area).ceil() as u32;
+    // DanmakuFactory keeps lanes inside display_area. For an unusually large
+    // font that cannot fit there, retain room for its glyph and outline.
+    let glyph_extent = settings.font_size.ceil() as u32 + (settings.outline.ceil() as u32 * 2);
+    let band = if glyph_extent > display_band {
+        display_band.saturating_add(glyph_extent)
+    } else {
+        display_band
+    };
+    band.min(height).div_ceil(2).saturating_mul(2).min(height)
+}
+
+fn qsv_danmaku_ass(ass: &str, full_height: u32, band_height: u32) -> Option<String> {
+    let full = format!("PlayResY: {full_height}");
+    let band = format!("PlayResY: {band_height}");
+    ass.contains(&full).then(|| ass.replacen(&full, &band, 1))
+}
+
+/// A QSV decoder/encoder path for persistent mosaic and smooth-blur masks.
+/// Mosaic keeps the existing nearest-neighbour block pattern; smooth blur uses
+/// QSV scaling. ASS stays on libass and only its occupied display band crosses
+/// between QSV surfaces and system memory.
+fn qsv_filter_graph(
+    source: &SourceSpan,
+    settings: &RenderRecipe,
+    media: &MediaInfo,
+    target: (u32, u32),
+    origin: i64,
+    ass: bool,
+    audio_input: usize,
+    include_audio: bool,
+    frame_rate: &str,
+    encoder: &SelectedEncoder,
+) -> Option<String> {
+    if encoder.encoder != encoding::VideoEncoder::H264Qsv
+        || target.0 % 2 != 0
+        || target.1 % 2 != 0
+        || (media.width, media.height) != target
+        || settings.regions.iter().any(|region| {
+            !matches!(
+                region.effect_type,
+                EffectType::Mosaic | EffectType::SmoothBlur
+            ) || !region.intervals.is_empty()
+        })
+        || settings.regions.len() > 4
+    {
+        return None;
+    }
+
+    let mut parts = vec![format!(
+        "[0:v:0]setpts=PTS-({:.9})/TB-({})/TB[v0]",
+        media.video_origin_seconds,
+        secs(origin)
+    )];
+    let mut index = 0;
+    for region in &settings.regions {
+        if region.opacity == 0. {
+            continue;
+        }
+        let (x, y, w, h) = region_rect(region, media);
+        let left = x & !1;
+        let top = y & !1;
+        let right = (x + w).div_ceil(2) * 2;
+        let bottom = (y + h).div_ceil(2) * 2;
+        let right = right.min(media.width);
+        let bottom = bottom.min(media.height);
+        let w = right.checked_sub(left)?;
+        let h = bottom.checked_sub(top)?;
+        let block = region.strength.round().max(1.) as u32;
+        let low_w = (w / block).max(1);
+        let low_h = (h / block).max(1);
+        // QSV/NV12 surfaces need even dimensions. Rare geometry that cannot
+        // retain the effect grid goes through the proven CPU path.
+        if w < 2 || h < 2 || low_w < 2 || low_h < 2 || low_w % 2 != 0 || low_h % 2 != 0 {
+            return None;
+        }
+        let next = index + 1;
+        let alpha = (region.opacity * 255.).round().clamp(0., 255.) as u8;
+        parts.push(format!("[v{index}]split=2[keep{index}][crop{index}]"));
+        match region.effect_type {
+            EffectType::Mosaic => parts.push(format!(
+                "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={w}:h={h}:async_depth=8,hwdownload,format=nv12,scale={low_w}:{low_h}:flags=neighbor,scale={w}:{h}:flags=neighbor,format=nv12,hwupload=extra_hw_frames=64[effect{index}]"
+            )),
+            EffectType::SmoothBlur => parts.push(format!(
+                "[crop{index}]vpp_qsv=cw={w}:ch={h}:cx={left}:cy={top}:w={low_w}:h={low_h}:async_depth=8,scale_qsv=w={w}:h={h}:format=nv12[effect{index}]"
+            )),
+            _ => unreachable!("QSV eligibility checked above"),
+        }
+        parts.push(format!(
+            "[keep{index}][effect{index}]overlay_qsv=x={left}:y={top}:w={w}:h={h}:alpha={alpha}:eof_action=repeat[v{next}]"
+        ));
+        index = next;
+    }
+
+    let start = source.trim_start_ms - origin;
+    let end = source.trim_end_ms - origin;
+    if ass {
+        let band_height = qsv_danmaku_band_height(&settings.danmaku, target.1);
+        parts.push(format!("[v{index}]split=2[main-source][danmaku-source]"));
+        parts.push(format!(
+            "[main-source]setsar=1,trim=start={}:end={},setpts=PTS-({})/TB,fps={frame_rate}[main]",
+            secs(start),
+            secs(end),
+            secs(start)
+        ));
+        parts.push(format!(
+            "[danmaku-source]vpp_qsv=cw={}:ch={band_height}:cx=0:cy=0:w={}:h={band_height}:async_depth=8,hwdownload,format=nv12,setsar=1,ass=filename=danmaku-qsv.ass:fontsdir=fonts,trim=start={}:end={},setpts=PTS-({})/TB,fps={frame_rate},format=nv12,hwupload=extra_hw_frames=64[danmaku]",
+            target.0,
+            target.0,
+            secs(start),
+            secs(end),
+            secs(start)
+        ));
+        parts.push(format!(
+            "[main][danmaku]overlay_qsv=x=0:y=0:w={}:h={band_height}:alpha=255:eof_action=repeat[video]",
+            target.0
+        ));
+    } else {
+        parts.push(format!(
+            "[v{index}]setsar=1,trim=start={}:end={},setpts=PTS-({})/TB,fps={frame_rate}[video]",
+            secs(start),
+            secs(end),
+            secs(start)
+        ));
+    }
+
+    if include_audio {
+        let span = source.trim_end_ms - source.trim_start_ms;
+        if media.has_audio {
+            parts.push(format!("[0:a:0]asetpts=PTS-({:.9})/TB,atrim=start={}:end={},asetpts=PTS-({})/TB,aresample=48000:async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration={}[audio]", media.video_origin_seconds, secs(source.trim_start_ms), secs(source.trim_end_ms), secs(source.trim_start_ms), secs(span)));
+        } else {
+            parts.push(format!(
+                "[{audio_input}:a:0]atrim=duration={},asetpts=PTS-STARTPTS[audio]",
+                secs(span)
+            ));
+        }
+    }
+    Some(parts.join(";"))
+}
+
+fn segment_command(
+    selected: &SelectedEncoder,
+    segment_dir: &Path,
+    source: &SourceSpan,
+    media: &MediaInfo,
+    seek_ms: i64,
+    image_count: usize,
+    filter_file_option: &str,
+    filter_file: &str,
+    qsv_decode: bool,
+    filter_complex_threads: &str,
+    probe_frames: Option<u32>,
+) -> Result<Command, String> {
+    let mut command = if qsv_decode {
+        // QSV can keep the full filter graph in the hardware path. Give this
+        // short-lived encode the normal scheduler priority so it can reach
+        // real-time multiples instead of yielding like background CPU work.
+        crate::tools::ffmpeg_command()
+    } else {
+        crate::tools::low_priority_ffmpeg_command()
+    };
+    command
+        .current_dir(segment_dir)
+        .args(["-nostdin", "-hide_banner", "-loglevel", "error"]);
+    if probe_frames.is_none() {
+        command.args(["-nostats", "-progress", "pipe:1"]);
+    }
+    command.args(["-copyts"]);
+    command.args(selected.input_args());
+    if qsv_decode {
+        command.args([
+            "-async_depth",
+            "8",
+            "-hwaccel",
+            "qsv",
+            "-hwaccel_device",
+            "encoder",
+            "-hwaccel_output_format",
+            "qsv",
+        ]);
+    } else {
+        command.args(["-threads", "2"]);
+    }
+    if seek_ms > 0 {
+        command.args([
+            "-seek_timestamp",
+            "1",
+            "-ss",
+            &format!("{:.9}", media.video_origin_seconds + seek_ms as f64 / 1000.),
+        ]);
+    }
+    command
+        .arg("-i")
+        .arg(std::fs::canonicalize(&source.path).map_err(|e| format!("打开原录像失败：{e}"))?);
+    for input in 1..=image_count {
+        command
+            .arg("-i")
+            .arg(segment_dir.join(format!("image-{input}.png")));
+    }
+    if !media.has_audio && probe_frames.is_none() {
+        command.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
+    }
+    command.args([
+        "-filter_complex_threads",
+        filter_complex_threads,
+        filter_file_option,
+        filter_file,
+    ]);
+    if probe_frames.is_some() {
+        command
+            .args(["-map", "[video]", "-an"])
+            .args(["-frames:v", &probe_frames.unwrap().to_string()])
+            .args(selected.output_args());
+        if qsv_decode {
+            command.args(["-async_depth:v", "8"]);
+        }
+        command.args(["-f", "null", "-"]);
+    } else {
+        command.args(["-map", "[video]", "-map", "[audio]"]);
+        command.args(selected.output_args());
+        if qsv_decode {
+            command.args(["-async_depth:v", "8"]);
+        }
+        command
+            .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"])
+            .args([
+                "-t",
+                &secs(source.trim_end_ms - source.trim_start_ms),
+                "-video_track_timescale",
+                "90000",
+                "-f",
+                "mp4",
+                "-y",
+                "encoded.mp4",
+            ]);
+    }
+    command.stdin(Stdio::null());
+    Ok(command)
+}
+
 /// Coordinates refer to the actual source frame; scaling/padding is performed
 /// after masks so a changing aspect ratio cannot expose a strip underneath.
 fn filter_graph(
@@ -512,10 +777,18 @@ fn filter_graph(
             }
             effect => {
                 parts.push(format!("[v{index}]split=2[keep{index}][crop{index}]"));
-                let transform = if effect == EffectType::Mosaic {
-                    let block = region.strength.round().max(1.) as u32;
-                    format!("scale={}:{}:flags=neighbor,scale={w}:{h}:flags=neighbor", (w / block).max(1), (h / block).max(1))
-                } else { format!("gblur=sigma={}", region.strength) };
+                let transform = match effect {
+                    EffectType::Mosaic => {
+                        let block = region.strength.round().max(1.) as u32;
+                        format!("scale={}:{}:flags=neighbor,scale={w}:{h}:flags=neighbor", (w / block).max(1), (h / block).max(1))
+                    }
+                    EffectType::SmoothBlur => {
+                        let block = region.strength.round().max(1.) as u32;
+                        format!("scale={}:{}:flags=bilinear,scale={w}:{h}:flags=bilinear", (w / block).max(1), (h / block).max(1))
+                    }
+                    EffectType::Blur => format!("gblur=sigma={}", region.strength),
+                    EffectType::Solid | EffectType::Image => unreachable!("handled above"),
+                };
                 parts.push(format!("[crop{index}]crop={w}:{h}:{x}:{y}:exact=1,{transform},format=rgba,colorchannelmixer=aa={}[effect{index}]", region.opacity));
                 parts.push(format!("[keep{index}][effect{index}]overlay=x={x}:y={y}:format=rgb:eof_action=repeat:enable='{enabled}'[v{next}]"));
             }
@@ -643,10 +916,11 @@ pub async fn render(
         &cancel,
     )
     .await?;
+    let mut active_selected = selected.clone();
     let mut manifest = String::from("ffconcat version 1.0\n");
     for (number, source) in request.sources.iter().enumerate() {
         report(engine_progress(
-            Some(&selected),
+            Some(&active_selected),
             format!("准备分段 {}/{}", number + 1, request.sources.len()),
             Some(completed as f64 / total as f64 * 0.95),
             completed,
@@ -705,20 +979,6 @@ pub async fn render(
             .await
             .map_err(|e| format!("写入弹幕 Emoji 字体失败：{e}"))?;
         }
-        let mut command = crate::tools::low_priority_ffmpeg_command();
-        command
-            .current_dir(&segment_dir)
-            .args([
-                "-nostdin",
-                "-hide_banner",
-                "-loglevel",
-                "error",
-                "-nostats",
-                "-progress",
-                "pipe:1",
-            ])
-            .args(["-copyts", "-threads", "2"])
-            .args(selected.input_args());
         // Input-side seek prevents decoding hours of material for a short tail
         // clip. Complete-segment ASS has already been laid out, and original
         // timestamps are retained so seeking cannot restart a scrolling cue.
@@ -728,17 +988,6 @@ pub async fn render(
             2000
         };
         let seek_ms = (source.trim_start_ms - pre_roll_ms).max(0);
-        if seek_ms > 0 {
-            command.args([
-                "-seek_timestamp",
-                "1",
-                "-ss",
-                &format!("{:.9}", media.video_origin_seconds + seek_ms as f64 / 1000.),
-            ]);
-        }
-        command
-            .arg("-i")
-            .arg(std::fs::canonicalize(&source.path).map_err(|e| format!("打开原录像失败：{e}"))?);
         let mut images = HashMap::new();
         for region in request.settings.regions.iter().filter(|r| {
             r.effect_type == EffectType::Image && enable(r, source, ass.time_origin_ms).is_some()
@@ -756,62 +1005,129 @@ pub async fn render(
             tokio::fs::copy(path, &local)
                 .await
                 .map_err(|e| format!("读取图片素材失败：{e}"))?;
-            command.args(["-i", &format!("image-{input}.png")]);
             images.insert(id, input);
         }
         let audio_input = images.len() + 1;
-        if !media.has_audio {
-            command.args(["-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo"]);
-        }
-        let filter = filter_graph(
+        let qsv_graph = qsv_filter_graph(
             source,
             &request.settings,
             &media,
             target,
             ass.time_origin_ms,
             has_ass,
-            &images,
             audio_input,
+            true,
             &first.frame_rate,
             &selected,
         );
+        let mut use_qsv_graph = qsv_graph.is_some();
+        if use_qsv_graph && has_ass {
+            let band_height = qsv_danmaku_band_height(&request.settings.danmaku, target.1);
+            if let Some(script) = qsv_danmaku_ass(&ass.ass, target.1, band_height) {
+                tokio::fs::write(segment_dir.join("danmaku-qsv.ass"), script)
+                    .await
+                    .map_err(|e| format!("保存 QSV 弹幕图层失败：{e}"))?;
+            } else {
+                tracing::warn!(
+                    segment_id = source.segment_id,
+                    "ASS 画布尺寸不匹配，改用软件滤镜"
+                );
+                record_filter_fallback(
+                    &mut active_selected,
+                    "ASS 画布尺寸不匹配，不能裁剪弹幕处理带",
+                );
+                use_qsv_graph = false;
+            }
+        }
+        if use_qsv_graph {
+            let probe_graph = qsv_filter_graph(
+                source,
+                &request.settings,
+                &media,
+                target,
+                ass.time_origin_ms,
+                has_ass,
+                audio_input,
+                false,
+                &first.frame_rate,
+                &selected,
+            )
+            .expect("video-only QSV graph has the same eligibility as the full graph");
+            tokio::fs::write(segment_dir.join("filters-qsv-probe.txt"), probe_graph)
+                .await
+                .map_err(|e| format!("保存 QSV 探测滤镜失败：{e}"))?;
+            let command = segment_command(
+                &selected,
+                &segment_dir,
+                source,
+                &media,
+                seek_ms,
+                0,
+                filter_file_option,
+                "filters-qsv-probe.txt",
+                true,
+                "2",
+                Some(8),
+            )?;
+            match run_process(command, &cancel, Duration::from_secs(20), |_, _| {}).await {
+                Ok(_) => {}
+                Err(_) if cancel.is_cancelled() => return Err("合成已取消".into()),
+                Err(error) => {
+                    tracing::warn!(segment_id = source.segment_id, %error, "QSV 解码与滤镜探测失败，改用软件滤镜");
+                    record_filter_fallback(&mut active_selected, &error);
+                    use_qsv_graph = false;
+                }
+            }
+        }
+
+        let filter_file = if use_qsv_graph {
+            "filters-qsv.txt"
+        } else {
+            "filters.txt"
+        };
+        let filter = if use_qsv_graph {
+            qsv_graph.expect("successful QSV probe has a render graph")
+        } else {
+            filter_graph(
+                source,
+                &request.settings,
+                &media,
+                target,
+                ass.time_origin_ms,
+                has_ass,
+                &images,
+                audio_input,
+                &first.frame_rate,
+                &selected,
+            )
+        };
         // A region can contain many intervals; loading a task-private script
         // avoids the OS argument-length limit on Windows and Linux.
-        tokio::fs::write(segment_dir.join("filters.txt"), filter)
+        tokio::fs::write(segment_dir.join(filter_file), filter)
             .await
             .map_err(|e| format!("保存合成滤镜失败：{e}"))?;
-        command
-            .args([
-                "-filter_complex_threads",
-                "1",
-                filter_file_option,
-                "filters.txt",
-            ])
-            .args(["-map", "[video]", "-map", "[audio]"])
-            .args(selected.output_args())
-            .args(["-c:a", "aac", "-ar", "48000", "-ac", "2", "-b:a", "192k"])
-            .args([
-                "-t",
-                &secs(source.trim_end_ms - source.trim_start_ms),
-                "-video_track_timescale",
-                "90000",
-                "-movflags",
-                "+faststart",
-                "-f",
-                "mp4",
-                "-y",
-                "encoded.mp4",
-            ])
-            .stdin(Stdio::null());
+        let command = segment_command(
+            &selected,
+            &segment_dir,
+            source,
+            &media,
+            seek_ms,
+            images.len(),
+            filter_file_option,
+            filter_file,
+            use_qsv_graph,
+            if use_qsv_graph { "2" } else { "1" },
+            None,
+        )?;
         let phase = format!("合成分段 {}/{}", number + 1, request.sources.len());
         let duration = source.trim_end_ms - source.trim_start_ms;
         let encode_started = std::time::Instant::now();
-        run_process(command, &cancel, PROCESS_STALL, |_, block| {
+        let encoded = run_process(command, &cancel, PROCESS_STALL, |_, block| {
             let stats = FfmpegProgress::parse(block)
                 .with_elapsed(&first.frame_rate, encode_started.elapsed());
             let at = stats.encoded_time(&first.frame_rate);
             report(engine_progress(
-                Some(&selected),
+                Some(&active_selected),
                 phase.clone(),
                 Some(
                     ((completed + at.clamp(0, duration)) as f64 / total as f64 * 0.95)
@@ -822,7 +1138,61 @@ pub async fn render(
                 stats,
             ));
         })
-        .await?;
+        .await;
+        if let Err(error) = encoded {
+            if use_qsv_graph && !cancel.is_cancelled() && !error.contains("磁盘空间不足") {
+                tracing::warn!(segment_id = source.segment_id, %error, "QSV 渲染失败，重试软件滤镜");
+                record_filter_fallback(&mut active_selected, &error);
+                let _ = tokio::fs::remove_file(segment_dir.join("encoded.mp4")).await;
+                let fallback = filter_graph(
+                    source,
+                    &request.settings,
+                    &media,
+                    target,
+                    ass.time_origin_ms,
+                    has_ass,
+                    &images,
+                    audio_input,
+                    &first.frame_rate,
+                    &selected,
+                );
+                tokio::fs::write(segment_dir.join("filters.txt"), fallback)
+                    .await
+                    .map_err(|e| format!("保存回退滤镜失败：{e}"))?;
+                let command = segment_command(
+                    &selected,
+                    &segment_dir,
+                    source,
+                    &media,
+                    seek_ms,
+                    images.len(),
+                    filter_file_option,
+                    "filters.txt",
+                    false,
+                    "1",
+                    None,
+                )?;
+                run_process(command, &cancel, PROCESS_STALL, |_, block| {
+                    let stats = FfmpegProgress::parse(block)
+                        .with_elapsed(&first.frame_rate, encode_started.elapsed());
+                    let at = stats.encoded_time(&first.frame_rate);
+                    report(engine_progress(
+                        Some(&active_selected),
+                        phase.clone(),
+                        Some(
+                            ((completed + at.clamp(0, duration)) as f64 / total as f64 * 0.95)
+                                .clamp(0., 0.95),
+                        ),
+                        completed + at.clamp(0, duration),
+                        total,
+                        stats,
+                    ));
+                })
+                .await?;
+            } else {
+                return Err(error);
+            }
+        }
         completed += duration;
         manifest.push_str(&format!("file 'segment-{number}/encoded.mp4'\n"));
     }
@@ -857,7 +1227,7 @@ pub async fn render(
         ])
         .stdin(Stdio::null());
     report(engine_progress(
-        Some(&selected),
+        Some(&active_selected),
         "拼接并保存".into(),
         Some(0.95),
         total,
@@ -867,7 +1237,7 @@ pub async fn render(
     run_process(command, &cancel, PROCESS_STALL, |at, _| {
         // Copy-only joining speed is not encoding speed; keep it unavailable.
         report(engine_progress(
-            Some(&selected),
+            Some(&active_selected),
             "拼接并保存".into(),
             Some(0.95 + 0.04 * (at as f64 / total as f64).clamp(0., 1.)),
             total,
@@ -900,7 +1270,7 @@ pub async fn render(
         .await
         .map_err(|e| format!("发布合成产物失败：{e}"))?;
     report(engine_progress(
-        Some(&selected),
+        Some(&active_selected),
         "已完成".into(),
         Some(1.),
         total,
@@ -911,9 +1281,9 @@ pub async fn render(
         output_path: request.output_path,
         output_bytes: bytes as i64,
         duration_ms,
-        encoder: Some(selected.encoder.name().into()),
-        encoder_device: selected.device,
-        fallback_reason: selected.fallback_reason,
+        encoder: Some(active_selected.encoder.name().into()),
+        encoder_device: active_selected.device,
+        fallback_reason: active_selected.fallback_reason,
     })
 }
 

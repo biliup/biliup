@@ -127,6 +127,16 @@ fn is_render_node(device: &str) -> bool {
         .is_some_and(is_adapter_index)
 }
 
+fn intel_render_node_priority(class: &str) -> u8 {
+    match class.trim() {
+        // Prefer a discrete VGA-class GPU over an integrated 3D controller
+        // when Auto probes Intel QSV devices.
+        "0x030000" => 0,
+        "0x038000" => 1,
+        _ => 2,
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct EncoderCapability {
     pub name: String,
@@ -416,12 +426,21 @@ fn render_nodes(intel_only: bool) -> Vec<String> {
             if intel_only && !vendor.trim().is_empty() && vendor.trim() != "0x8086" {
                 return None;
             }
-            Some(path)
+            let priority = if intel_only {
+                let class = std::fs::read_to_string(format!("/sys/class/drm/{name}/device/class"))
+                    .unwrap_or_default();
+                intel_render_node_priority(&class)
+            } else {
+                0
+            };
+            Some((path, priority))
         })
         .collect();
-    devices.sort();
+    devices.sort_by(|(a_path, a_priority), (b_path, b_priority)| {
+        a_priority.cmp(b_priority).then_with(|| a_path.cmp(b_path))
+    });
     devices.truncate(16);
-    devices
+    devices.into_iter().map(|(path, _)| path).collect()
 }
 
 /// NVIDIA adapter indices are obtained from the driver, then each adapter is
@@ -805,6 +824,13 @@ mod tests {
             .validate()
             .is_err()
         );
+    }
+
+    #[test]
+    fn qsv_auto_prefers_discrete_intel_render_nodes() {
+        assert_eq!(intel_render_node_priority("0x030000\n"), 0);
+        assert_eq!(intel_render_node_priority("0x038000"), 1);
+        assert_eq!(intel_render_node_priority("0x120000"), 2);
     }
 
     #[test]
