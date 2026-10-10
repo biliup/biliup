@@ -64,3 +64,4 @@ CLAUDE.md
 /crates/stream-gears/stream_gears/*.pyd
 cilps/
 *.tmp
+.codex/
