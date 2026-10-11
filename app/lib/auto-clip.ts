@@ -4,6 +4,7 @@ import useSWR, { mutate } from 'swr'
 import { fetcher } from './api-streamer'
 import { type Clip, refresh as refreshClip, send, usePolled } from './clips'
 import { formatSpan } from './sessions'
+import { ACTIVE_AUTO_CLIP_POLL_MS, sessionJobRefreshInterval } from './auto-clip-poll'
 
 /** GET /v1/auto-clip/status（后端 `api/auto_clip.rs::StatusView`） */
 export interface AutoClipStatus {
@@ -125,7 +126,6 @@ export const suggestionsUrl = (sessionId: number) => `/v1/sessions/${sessionId}/
 export const AUTO_CLIP_SETTINGS_HREF = '/dashboard'
 
 /** 任务在排队或运行时多久刷新一次 */
-const ACTIVE_POLL_MS = 3_000
 /** 有待处理的候选时多久刷新一次列表（跟上后台的过期清理） */
 const PENDING_POLL_MS = 60_000
 
@@ -163,7 +163,7 @@ export function useAutoClip(active = true): AutoClipAvailability {
 export const isActive = (job: AutoClipJob | null | undefined): boolean =>
   !!job && (job.state === 'queued' || job.state === 'running')
 
-const sessionRefresh = (data?: SessionAutoClip) => (isActive(data?.job) ? ACTIVE_POLL_MS : 0)
+const sessionRefresh = (data?: SessionAutoClip) => (isActive(data?.job) ? ACTIVE_AUTO_CLIP_POLL_MS : 0)
 
 /**
  * 场次的自动切片任务与预估；任务在排队或运行时每 3 秒刷新，任务结束时顺带刷新候选列表。
@@ -215,10 +215,10 @@ function flushJobs() {
   }
 }
 
-/** 剪辑台一行的任务（不含预估）；任务在排队或运行时每 3 秒刷新。`sessionId` 为 null 时不请求 */
+/** 剪辑台一行的任务（不含预估）；活动任务快速刷新，空闲行每分钟发现后台新任务。`sessionId` 为 null 时不请求 */
 export function useSessionJob(sessionId: number | null) {
   return useSWR(sessionId === null ? null : sessionJobKey(sessionId), () => loadJob(sessionId!), {
-    refreshInterval: (job) => (isActive(job) ? ACTIVE_POLL_MS : 0),
+    refreshInterval: sessionJobRefreshInterval,
     revalidateOnFocus: false,
     shouldRetryOnError: false,
   })

@@ -5,6 +5,7 @@ import {Nav, Avatar, Form, Checkbox, Button, Toast} from '@douyinfe/semi-ui';
 import { IconSemiLogo, IconFeishuLogo, IconHelpCircle, IconBell } from '@douyinfe/semi-icons';
 import styles from './index.module.scss';
 import {apiFetch} from "../../lib/api-streamer";
+import {resolveLoginDestination} from "../../lib/login-redirect";
 import useSWR from "swr";
 
 const fetcher = (url) => apiFetch(url).then(res => {
@@ -67,19 +68,10 @@ const Component = () => {
                 const urlParams = new URLSearchParams(window.location.search);
                 const nextPath = urlParams.get('next');
                 if (nextPath) {
-                    try {
-                        // URLSearchParams has already decoded the value. Only
-                        // allow a same-origin destination so a crafted login URL
-                        // cannot become an open redirect after authentication.
-                        const destination = new URL(nextPath, window.location.origin);
-                        if (destination.origin === window.location.origin) {
-                            window.location.assign(
-                                `${destination.pathname}${destination.search}${destination.hash}`
-                            );
-                            return;
-                        }
-                    } catch {
-                        // Fall through to the safe default route.
+                    const destination = resolveLoginDestination(nextPath, window.location.origin);
+                    if (destination) {
+                        window.location.assign(destination);
+                        return;
                     }
                 }
                 window.location.assign('/');

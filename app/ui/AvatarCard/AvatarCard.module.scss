@@ -1,14 +1,24 @@
 .components {
   .semi-icon-close {
-    visibility: hidden;
-    //color: var(--semi-color-tertiary);
+    opacity: 0;
     color: var(--semi-color-danger);
+    pointer-events: none;
+    transition: opacity 0.12s ease;
   }
-  &:hover {
+  &:hover,
+  &:focus-within {
     .semi-icon-close {
-      visibility: visible;
+      opacity: 1;
+      pointer-events: auto;
       //cursor: pointer;
     }
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .components .semi-icon-close {
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 

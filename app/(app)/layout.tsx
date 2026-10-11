@@ -1,7 +1,7 @@
 'use client'
 import './bg-global.css'
 import { useGlobalBackgroundInit } from '../lib/useGlobalBackground'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
@@ -202,6 +202,137 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const isMobile = useIsMobile()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
+  const asideRef = useRef<HTMLElement>(null)
+  const burgerRef = useRef<HTMLButtonElement>(null)
+  const wasMobileNavOpen = useRef(false)
+  const previousMobileBreakpoint = useRef<boolean | null>(null)
+  const accountMenuEscapeHandled = useRef(false)
+
+  useEffect(() => {
+    if (isMobile && asideRef.current?.contains(document.activeElement)) {
+      burgerRef.current?.focus()
+    }
+  }, [isMobile])
+
+  useEffect(() => {
+    if (!passwordOpen) return
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>('input[autocomplete="current-password"]')?.focus()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [passwordOpen])
+
+  useEffect(() => {
+    const syncResponsiveState = () => {
+      const mobileWidth = window.innerWidth <= 640
+      if (previousMobileBreakpoint.current !== null && previousMobileBreakpoint.current !== mobileWidth) {
+        setMobileNavOpen(false)
+        setAccountMenuOpen(false)
+      }
+      previousMobileBreakpoint.current = mobileWidth
+    }
+    syncResponsiveState()
+    window.addEventListener('resize', syncResponsiveState)
+    return () => window.removeEventListener('resize', syncResponsiveState)
+  }, [])
+
+  useEffect(() => {
+    if (!isMobile) {
+      wasMobileNavOpen.current = false
+      return
+    }
+    if (mobileNavOpen && !wasMobileNavOpen.current) {
+      const firstNavItem = asideRef.current?.querySelector<HTMLElement>('nav a[href]')
+      const initialFocusTarget = firstNavItem ?? asideRef.current
+      initialFocusTarget?.focus()
+    } else if (!mobileNavOpen && wasMobileNavOpen.current && !passwordOpen) {
+      burgerRef.current?.focus()
+    }
+    wasMobileNavOpen.current = mobileNavOpen
+  }, [isMobile, mobileNavOpen, passwordOpen])
+
+  useEffect(() => {
+    if (!isMobile || !mobileNavOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        // Dropdown/Modal portals handle Escape first; leave their overlay open
+        // state intact instead of closing the drawer underneath them.
+        if (accountMenuEscapeHandled.current) {
+          accountMenuEscapeHandled.current = false
+          return
+        }
+        if (
+          event.defaultPrevented ||
+          event.cancelBubble ||
+          (event.target instanceof Element && event.target.closest('[role="menu"]'))
+        ) {
+          return
+        }
+        event.preventDefault()
+        setMobileNavOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const aside = asideRef.current
+      if (!aside) return
+      // Semi Dropdown renders its menu in a body portal. The trigger's
+      // aria-describedby relation identifies that popup for the focus order.
+      const dropdownTrigger = aside.querySelector<HTMLElement>('button[aria-haspopup="true"][aria-describedby]')
+      const popupId = dropdownTrigger?.getAttribute('aria-describedby')
+      const popup = popupId ? document.getElementById(popupId) : null
+      const popupOpen = !!popup && popup.getClientRects().length > 0
+      const popupItems = popupOpen && popup
+        ? Array.from(popup.querySelectorAll<HTMLElement>('[role="menuitem"]')).filter(
+            (element) => element.getClientRects().length > 0,
+          )
+        : []
+      const focusable = [
+        ...(burgerRef.current ? [burgerRef.current] : []),
+        ...Array.from(
+          aside.querySelectorAll<HTMLElement>(
+            'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ),
+      ]
+      const triggerIndex = popupOpen && dropdownTrigger ? focusable.indexOf(dropdownTrigger) : -1
+      if (triggerIndex >= 0) focusable.splice(triggerIndex, 1, ...popupItems)
+      else if (popupOpen) focusable.push(...popupItems)
+      const visibleFocusable = focusable.filter(
+        (element) => element.getAttribute('aria-hidden') !== 'true' && element.getClientRects().length > 0,
+      )
+      if (!visibleFocusable.length) {
+        event.preventDefault()
+        aside.focus()
+        return
+      }
+
+      const activeIndex = visibleFocusable.indexOf(document.activeElement as HTMLElement)
+      const outsideDialog =
+        !aside.contains(document.activeElement) &&
+        !popup?.contains(document.activeElement) &&
+        document.activeElement !== burgerRef.current
+      if (popupOpen && popup?.contains(document.activeElement) && activeIndex >= 0) {
+        const nextIndex = activeIndex + (event.shiftKey ? -1 : 1)
+        if (nextIndex >= 0 && nextIndex < visibleFocusable.length) {
+          event.preventDefault()
+          visibleFocusable[nextIndex].focus()
+          return
+        }
+      }
+      if (event.shiftKey && (activeIndex === 0 || outsideDialog)) {
+        event.preventDefault()
+        visibleFocusable[visibleFocusable.length - 1].focus()
+      } else if (!event.shiftKey && (activeIndex === visibleFocusable.length - 1 || outsideDialog)) {
+        event.preventDefault()
+        visibleFocusable[0].focus()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [isMobile, mobileNavOpen])
 
   useGlobalBackgroundInit()
 
@@ -256,7 +387,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   // 免得没有权限的人先发出一串注定 403 的请求。/v1/me 有缓存，只有首次进入会等
   const pending = !me && !meError && !!requiredPerm
 
-  const [passwordOpen, setPasswordOpen] = useState(false)
+  const openPasswordDialog = () => {
+    if (isMobile) setMobileNavOpen(false)
+    setPasswordOpen(true)
+  }
   const logout = async () => {
     try {
       await fetch(`${API_BASE}/v1/logout`, { method: 'POST', credentials: 'include' })
@@ -270,15 +404,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={styles.app}>
-      {/* 移动端:汉堡按钮 + 遮罩(抽屉打开时隐藏汉堡,点击其位置即点遮罩关闭) */}
-      {isMobile && !mobileNavOpen && (
+      {/* 移动端汉堡按钮兼作抽屉关闭按钮，遮罩点击也可关闭 */}
+      {isMobile && (
         <button
-          className={styles.burger}
-          onClick={() => setMobileNavOpen(true)}
-          aria-label="打开导航"
+          ref={burgerRef}
+          type="button"
+          className={`${styles.burger} ${mobileNavOpen ? styles.burgerOpen : ''}`}
+          onClick={() => setMobileNavOpen((open) => !open)}
+          aria-label={mobileNavOpen ? '关闭导航' : '打开导航'}
+          aria-expanded={mobileNavOpen}
+          aria-controls="app-mobile-navigation"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M4 7h16M4 12h16M4 17h16" />
+            {mobileNavOpen ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
           </svg>
         </button>
       )}
@@ -287,9 +425,17 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       )}
 
       <aside
+        ref={asideRef}
+        id="app-mobile-navigation"
         className={`${styles.sider} ${navCollapsed ? styles.collapsed : ''} ${
           isMobile ? styles.siderMobile : ''
         } ${mobileNavOpen ? styles.open : ''}`}
+        role={isMobile && mobileNavOpen ? 'dialog' : undefined}
+        aria-label={isMobile && mobileNavOpen ? '主导航' : undefined}
+        aria-modal={isMobile && mobileNavOpen && !accountMenuOpen ? true : undefined}
+        aria-hidden={isMobile && !mobileNavOpen ? true : undefined}
+        inert={isMobile && !mobileNavOpen}
+        tabIndex={isMobile && mobileNavOpen ? -1 : undefined}
       >
         {/* 品牌区 */}
         <div className={styles.brand}>
@@ -356,13 +502,21 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             <Dropdown
               trigger="click"
               clickToHide
+              visible={accountMenuOpen}
+              onVisibleChange={setAccountMenuOpen}
+              onEscKeyDown={() => {
+                accountMenuEscapeHandled.current = true
+                window.setTimeout(() => {
+                  accountMenuEscapeHandled.current = false
+                }, 0)
+              }}
               position={navCollapsed ? 'rightBottom' : 'topLeft'}
               render={
                 <Dropdown.Menu>
                   <Dropdown.Title>
                     {username} · {roleLabel}
                   </Dropdown.Title>
-                  <Dropdown.Item onClick={() => setPasswordOpen(true)}>修改密码</Dropdown.Item>
+                  <Dropdown.Item onClick={openPasswordDialog}>修改密码</Dropdown.Item>
                   <Dropdown.Divider />
                   <Dropdown.Item type="danger" onClick={logout}>
                     退出登录
@@ -412,7 +566,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <main className={styles.main}>
+      <main className={styles.main} inert={isMobile && mobileNavOpen} aria-hidden={isMobile && mobileNavOpen ? true : undefined}>
         {pending ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Spin size="large" />
@@ -430,7 +584,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           children
         )}
       </main>
-      {showUser && <ChangePasswordModal visible={passwordOpen} onClose={() => setPasswordOpen(false)} />}
+      {showUser && (
+        <ChangePasswordModal
+          visible={passwordOpen}
+          onClose={() => setPasswordOpen(false)}
+        />
+      )}
     </div>
   )
 }

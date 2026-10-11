@@ -242,15 +242,19 @@ export function OverviewBar({
   const trackRef = useRef<HTMLDivElement>(null)
   const [hover, setHover] = useState<number | null>(null)
   const to = Math.max(1000, duration)
-  const pick = (e: React.MouseEvent) => {
-    if (!trackRef.current) return
-    const ms = msAt(e, trackRef.current, 0, to)
-    const seg = segmentAt(segments, ms)
+  const seekValue = Math.max(0, Math.min(to, playhead ?? 0))
+  const seekTo = (ms: number) => {
+    const target = Math.max(0, Math.min(to, ms))
+    const seg = segmentAt(segments, target)
     if (seg && !isReadable(seg)) {
       onBlocked(seg)
       return
     }
-    onSeek(ms)
+    onSeek(target)
+  }
+  const pick = (e: React.MouseEvent) => {
+    if (!trackRef.current) return
+    seekTo(msAt(e, trackRef.current, 0, to))
   }
   return (
     <div className={styles.overview}>
@@ -260,7 +264,6 @@ export function OverviewBar({
         onClick={pick}
         onMouseMove={(e) => trackRef.current && setHover(msAt(e, trackRef.current, 0, to))}
         onMouseLeave={() => setHover(null)}
-        role="presentation"
       >
         <Segments segments={segments} from={0} to={to} />
         <Gaps gaps={gaps} from={0} to={to} />
@@ -290,6 +293,17 @@ export function OverviewBar({
             {formatSessionTime(hover)}
           </span>
         ) : null}
+        <input
+          className={styles.overviewSeekInput}
+          type="range"
+          min={0}
+          max={to}
+          step={1000}
+          value={seekValue}
+          aria-label="场次播放位置"
+          aria-valuetext={formatSessionTime(seekValue)}
+          onChange={(e) => seekTo(Number(e.currentTarget.value))}
+        />
       </div>
       <Ruler from={0} to={to} maxLabels={8} />
     </div>

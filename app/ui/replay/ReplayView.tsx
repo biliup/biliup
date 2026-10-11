@@ -120,6 +120,13 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null
+  return !!element?.closest(
+    'button, a[href], input, textarea, select, summary, [role="button"], [role="link"], [role="slider"], [contenteditable="true"]',
+  )
+}
+
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd className={styles.kbd} aria-hidden="true">
@@ -754,7 +761,7 @@ export default function ReplayView({
   // ---------- 快捷键（都有对应的按钮，快捷键只是加速） ----------
   const keyActions = useRef<(e: KeyboardEvent) => void>(() => {})
   const onKey = (e: KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return
+    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || isInteractiveTarget(e.target)) return
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
     const actions: Record<string, () => void> = {
       ' ': togglePlay,
