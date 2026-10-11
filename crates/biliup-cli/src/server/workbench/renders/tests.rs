@@ -361,6 +361,201 @@ async fn job_and_clip_product_publish_in_one_transaction() {
 }
 
 #[tokio::test]
+async fn finish_transaction_errors_keep_the_worker_until_the_result_is_committed() {
+    use crate::server::workbench::clips;
+    use tokio_util::sync::CancellationToken;
+
+    let (dir, pool, session, segment) = setup().await;
+    let clip = clips::insert(
+        &pool,
+        session,
+        &clips::NewClip {
+            marker_id: None,
+            in_ms: 0,
+            out_ms: 1000,
+            title: "retry finish".into(),
+            created_by: None,
+            created_at: now_ms(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut snapshot = spec(&pool, dir.path().join("renders"), session).await;
+    snapshot.clip_id = Some(clip.id);
+    snapshot.out_ms = 1000;
+    let job = store::insert(&pool, &snapshot, now_ms()).await.unwrap();
+    clips::begin_render_export(&pool, clip.id, job.view.id, now_ms())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(store::running(&pool, job.view.id, now_ms()).await.unwrap());
+
+    sqlx::query("CREATE TRIGGER fail_render_publish BEFORE UPDATE OF state ON render_jobs WHEN NEW.state='ready' BEGIN SELECT RAISE(ABORT, 'temporary database failure'); END")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let output = dir
+        .path()
+        .join("renders")
+        .join(session.to_string())
+        .join("completed.mp4");
+    tokio::fs::create_dir_all(output.parent().unwrap())
+        .await
+        .unwrap();
+    tokio::fs::write(&output, b"completed render")
+        .await
+        .unwrap();
+    let jobs = Arc::new(RenderJobs::new(pool.clone(), dir.path().join("renders")));
+    let task_jobs = jobs.clone();
+    let task_output = output.clone();
+    let id = job.view.id;
+    let task = tokio::spawn(async move {
+        task_jobs
+            .finish_output(id, &task_output, 16, 1000, &CancellationToken::new())
+            .await
+    });
+
+    let during_retry = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let record = store::get(&pool, job.view.id).await.unwrap().unwrap();
+            if record.view.phase == "保存合成结果失败，等待数据库恢复" {
+                break record;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("finish failure should be visible while retrying");
+    assert_eq!(during_retry.view.state, "running");
+    assert_eq!(during_retry.view.phase, "保存合成结果失败，等待数据库恢复");
+    assert!(output.exists());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT pin_count FROM segments WHERE id=?")
+            .bind(segment)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        2,
+        "both the clip and the pending render must retain their source pins"
+    );
+    sqlx::query("DROP TRIGGER fail_render_publish")
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(task.await.unwrap());
+
+    let finished = store::get(&pool, job.view.id).await.unwrap().unwrap();
+    assert_eq!(finished.view.state, "ready");
+    let saved_clip = clips::get(&pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(saved_clip.state, clips::State::Ready);
+    assert_eq!(
+        saved_clip.output_path.as_deref(),
+        Some(output.to_string_lossy().as_ref())
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT pin_count FROM segments WHERE id=?")
+            .bind(segment)
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1,
+        "the completed render releases its pin while the unpublished clip retains its own"
+    );
+    assert!(dir.path().join("source.mp4").exists());
+}
+
+#[tokio::test]
+async fn cancelled_snapshot_registration_cleans_only_unreferenced_private_copies() {
+    let (dir, pool, session, _) = setup().await;
+    let root = dir.path().join("renders");
+    let original = png();
+    let asset = assets::upload(&pool, &root, session, "image/png", &original, now_ms())
+        .await
+        .unwrap();
+    let recipe = RenderRecipe {
+        regions: vec![MaskRegion {
+            id: "image".into(),
+            effect_type: EffectType::Image,
+            asset_id: Some(asset.id),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let jobs = RenderJobs::new(pool.clone(), &root);
+    let mut cancelled_spec = jobs
+        .make_spec(session, None, None, recipe.clone())
+        .await
+        .unwrap();
+    let cancelled_job = store::insert(&pool, &cancelled_spec, now_ms())
+        .await
+        .unwrap();
+    let cancelled_dir = root
+        .join("snapshots")
+        .join(cancelled_job.view.id.to_string());
+    tokio::fs::create_dir_all(&cancelled_dir).await.unwrap();
+    let copied = cancelled_dir.join("asset.png");
+    tokio::fs::write(&copied, &original).await.unwrap();
+    cancelled_spec.assets[0].path = copied;
+    assert!(
+        store::terminal(
+            &pool,
+            cancelled_job.view.id,
+            "cancelled",
+            Some("cancelled"),
+            now_ms()
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        !jobs
+            .register_snapshot(cancelled_job.view.id, &cancelled_spec)
+            .await
+            .unwrap()
+    );
+    assert!(!cancelled_dir.exists());
+
+    let mut retry_spec = jobs.make_spec(session, None, None, recipe).await.unwrap();
+    let retry_job_id = store::insert(&pool, &retry_spec, now_ms())
+        .await
+        .unwrap()
+        .view
+        .id;
+    let retry_dir = root.join("snapshots").join(retry_job_id.to_string());
+    tokio::fs::create_dir_all(&retry_dir).await.unwrap();
+    let frozen = retry_dir.join("asset.png");
+    tokio::fs::write(&frozen, &original).await.unwrap();
+    retry_spec.assets[0].path = frozen;
+    assert!(
+        store::update_snapshot(&pool, retry_job_id, &retry_spec)
+            .await
+            .unwrap()
+    );
+    assert!(
+        store::terminal(&pool, retry_job_id, "failed", Some("retryable"), now_ms())
+            .await
+            .unwrap()
+    );
+
+    let orphan_dir = root.join("snapshots/999999");
+    tokio::fs::create_dir_all(&orphan_dir).await.unwrap();
+    tokio::fs::write(orphan_dir.join("orphan.png"), &original)
+        .await
+        .unwrap();
+    jobs.initialize().await.unwrap();
+    assert!(!orphan_dir.exists());
+    assert!(
+        retry_dir.exists(),
+        "a failed job must retain its frozen retry inputs"
+    );
+    let original_asset = assets::get(&pool, asset.id).await.unwrap().unwrap();
+    assert_eq!(
+        tokio::fs::read(&original_asset.render.path).await.unwrap(),
+        original
+    );
+}
+
+#[tokio::test]
 async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states() {
     let (dir, pool, session, _) = setup().await;
     let original = spec(&pool, dir.path().join("renders"), session).await;

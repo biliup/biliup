@@ -325,6 +325,10 @@ pub struct ClipPublisher {
     pool: ConnectionPool,
     exports: Arc<ClipExports>,
     backend: Arc<dyn Bilibili>,
+    /// Serializes session deletion with publication validation and in-memory admission.
+    session_admission: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    session_admission_attempts: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     queue: Mutex<Queue>,
     wake: Notify,
     next_id: AtomicU64,
@@ -358,10 +362,30 @@ impl ClipPublisher {
             pool,
             exports,
             backend,
+            session_admission: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            session_admission_attempts: Mutex::new(None),
             queue: Mutex::new(Queue::default()),
             wake: Notify::new(),
             next_id: AtomicU64::new(1),
         }
+    }
+
+    /// Holds the shared boundary while an API validates a session's clips and admits jobs,
+    /// or while the session deletion endpoint checks and deletes that session.
+    pub async fn lock_session_admission(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        #[cfg(test)]
+        if let Some(attempts) = lock(&self.session_admission_attempts).as_ref() {
+            let _ = attempts.send(());
+        }
+        self.session_admission.lock().await
+    }
+
+    #[cfg(test)]
+    pub fn watch_session_admission_attempts(&self) -> tokio::sync::mpsc::UnboundedReceiver<()> {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        *lock(&self.session_admission_attempts) = Some(sender);
+        receiver
     }
 
     /// 启动后台的发布循环（整个进程一个）。

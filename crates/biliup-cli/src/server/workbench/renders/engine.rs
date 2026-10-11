@@ -701,16 +701,17 @@ fn qsv_filter_graph_with_images(
             let input = image_inputs.get(&region.asset_id?)?;
             let pad_x = x - left;
             let pad_y = y - top;
-            // Align the composition rectangle for NV12 without stretching or
-            // shifting the image. Transparent borders preserve its exact ROI.
-            // Its timestamp is the start of the normalized source timeline,
-            // so an input-side seek cannot delay the static overlay's arrival.
+            // oneVPL does not allow per-pixel alpha and global alpha in the
+            // same composition call. Apply opacity to BGRA alpha before upload
+            // and leave overlay_qsv's global alpha disabled, preserving both
+            // transparent pixels and region opacity on QSV.
             parts.push(format!(
-                "[{input}:v:0]scale={image_w}:{image_h},format=bgra,pad={w}:{h}:{pad_x}:{pad_y}:color=black@0,setsar=1,trim=end_frame=1,settb=AVTB,setpts=PTS-STARTPTS-({})/TB,hwupload=extra_hw_frames=8[picture{index}]",
+                "[{input}:v:0]scale={image_w}:{image_h},format=bgra,colorchannelmixer=aa={:.6},pad={w}:{h}:{pad_x}:{pad_y}:color=black@0,setsar=1,trim=end_frame=1,settb=AVTB,setpts=PTS-STARTPTS-({})/TB,hwupload=extra_hw_frames=8[picture{index}]",
+                region.opacity,
                 secs(origin)
             ));
             parts.push(format!(
-                "[v{index}][picture{index}]overlay_qsv=x={left}:y={top}:w={w}:h={h}:alpha={alpha}:eof_action=repeat[v{next}]"
+                "[v{index}][picture{index}]overlay_qsv=x={left}:y={top}:w={w}:h={h}:alpha=255:eof_action=repeat[v{next}]"
             ));
             index = next;
             continue;

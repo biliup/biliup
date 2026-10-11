@@ -270,6 +270,86 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
 }
 
 #[test]
+fn qsv_image_graph_preserves_transparency_opacity_and_odd_roi_alignment() {
+    let source = source(PathBuf::from("source.flv"), 1, 0, 5_000, 0, 5_000);
+    let media = MediaInfo {
+        width: 320,
+        height: 192,
+        has_audio: false,
+        duration_ms: Some(5_000),
+        format_start_seconds: 0.,
+        video_origin_seconds: 0.05,
+        frame_rate: "30/1".into(),
+    };
+    let encoder = super::encoding::SelectedEncoder {
+        encoder: VideoEncoder::H264Qsv,
+        device: None,
+        fallback_reason: None,
+    };
+    let settings = RenderRecipe {
+        encoding: EncoderConfig {
+            encoder: VideoEncoder::H264Qsv,
+            device: None,
+            ..Default::default()
+        },
+        regions: vec![MaskRegion {
+            id: "image".into(),
+            effect_type: EffectType::Image,
+            asset_id: Some(7),
+            opacity: 0.5,
+            x: 0.101,
+            y: 0.101,
+            width: 0.3,
+            height: 0.3,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let graph = qsv_filter_graph_with_images(
+        &source,
+        &settings,
+        &media,
+        (320, 192),
+        1_200,
+        false,
+        &HashMap::from([(7, 4)]),
+        1,
+        false,
+        "30/1",
+        &encoder,
+        QsvMosaicBackend::OpenClNearest,
+    )
+    .unwrap();
+
+    assert!(graph.contains(
+        "[4:v:0]scale=96:58,format=bgra,colorchannelmixer=aa=0.500000,pad=96:60:0:1:color=black@0,setsar=1,trim=end_frame=1,settb=AVTB,setpts=PTS-STARTPTS-(1.200000)/TB,hwupload=extra_hw_frames=8[picture0]"
+    ));
+    assert!(
+        graph.contains(
+            "[v0][picture0]overlay_qsv=x=32:y=18:w=96:h=60:alpha=255:eof_action=repeat[v1]"
+        )
+    );
+    assert!(
+        qsv_filter_graph_with_images(
+            &source,
+            &settings,
+            &media,
+            (320, 192),
+            1_200,
+            false,
+            &HashMap::new(),
+            1,
+            false,
+            "30/1",
+            &encoder,
+            QsvMosaicBackend::OpenClNearest,
+        )
+        .is_none(),
+        "a QSV image region without its input must decline the hardware graph"
+    );
+}
+
+#[test]
 fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
     let mut span = source(PathBuf::from("source.flv"), 7, 0, 90_000, 100, 60_100);
     span.source_origin_ms = Some(900_000);
@@ -673,31 +753,55 @@ async fn hardware_render() {
     let dir = tempfile::tempdir().unwrap();
     let a = dir.path().join("first.mp4");
     let b = dir.path().join("second.mp4");
+    let is_qsv = encoder == VideoEncoder::H264Qsv;
     fixture(&a, "blue", "320x192", "libx264", true, 0.8).await;
     fixture(&b, "green", "256x192", "libx264", false, 0.8).await;
     let originals = (hash(&a), hash(&b));
     let target = dir.path().join("hardware.mp4");
-    let is_qsv = encoder == VideoEncoder::H264Qsv;
+    let image_path = dir.path().join("transparent-mask.png");
+    let mut regions = vec![MaskRegion {
+        id: "hardware-mask".into(),
+        effect_type: if is_qsv {
+            EffectType::Mosaic
+        } else {
+            EffectType::Solid
+        },
+        color: "#ff0000".into(),
+        x: 0.1,
+        y: 0.1,
+        width: 0.3,
+        height: 0.3,
+        ..Default::default()
+    }];
+    if is_qsv {
+        image::RgbaImage::from_fn(32, 32, |x, y| {
+            if (4..28).contains(&x) && (4..28).contains(&y) {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([255, 0, 0, 0])
+            }
+        })
+        .save(&image_path)
+        .unwrap();
+        regions.push(MaskRegion {
+            id: "transparent-image-mask".into(),
+            effect_type: EffectType::Image,
+            asset_id: Some(1),
+            opacity: 0.5,
+            x: 0.55,
+            y: 0.1,
+            width: 0.3,
+            height: 0.3,
+            ..Default::default()
+        });
+    }
     let recipe = RenderRecipe {
         encoding: EncoderConfig {
             encoder,
             device: device.clone(),
             ..Default::default()
         },
-        regions: vec![MaskRegion {
-            id: "hardware-mask".into(),
-            effect_type: if is_qsv {
-                EffectType::Mosaic
-            } else {
-                EffectType::Solid
-            },
-            color: "#ff0000".into(),
-            x: 0.1,
-            y: 0.1,
-            width: 0.3,
-            height: 0.3,
-            ..Default::default()
-        }],
+        regions,
         ..Default::default()
     };
     let mut progress = vec![];
@@ -708,7 +812,11 @@ async fn hardware_render() {
                 source(b.clone(), 2, 800, 1600, 0, 800),
             ],
             settings: recipe,
-            assets: HashMap::new(),
+            assets: if is_qsv {
+                HashMap::from([("1".into(), image_path)])
+            } else {
+                HashMap::new()
+            },
             output_path: target.clone(),
             font_path: None,
         },
@@ -735,6 +843,32 @@ async fn hardware_render() {
             .any(|p| p.phase == "合成分段 2/2" && p.processed_ms.unwrap_or(0) > 800),
         "{progress:?}"
     );
+    if is_qsv {
+        let first_source = progress
+            .iter()
+            .rev()
+            .find(|p| p.phase == "合成分段 1/2")
+            .expect("first source must report QSV progress");
+        assert!(
+            first_source
+                .fallback_reason
+                .as_deref()
+                .is_none_or(|reason| !reason.contains("软件滤镜")),
+            "matching first source should stay in the QSV filter graph: {first_source:?}"
+        );
+        let second_source = progress
+            .iter()
+            .rev()
+            .find(|p| p.phase == "合成分段 2/2")
+            .expect("second source must report fallback progress");
+        assert!(
+            second_source
+                .fallback_reason
+                .as_deref()
+                .is_some_and(|reason| reason.contains("当前遮罩或片段尺寸不满足 QSV 滤镜条件")),
+            "different-sized second source should use the existing software-filter fallback: {second_source:?}"
+        );
+    }
     assert!(
         progress
             .iter()
@@ -750,10 +884,33 @@ async fn hardware_render() {
     for at in [0.3, 1.1] {
         let masked = pixel(&target, at, 70, 40, 320).await;
         if is_qsv {
-            let expected_channel = if at < 0.8 { 2 } else { 1 };
+            let background_channel = if at < 0.8 { 2 } else { 1 };
+            // FFmpeg's named green is RGB (0, 128, 0), whereas blue is (0, 0, 255).
+            let source_level = if at < 0.8 { 255_i16 } else { 128_i16 };
             assert!(
-                masked[expected_channel] > 120,
-                "mosaic changed source color at {at}: {masked:?}"
+                masked[background_channel] > 120,
+                "QSV mosaic path changed source color at {at}: {masked:?}"
+            );
+            let image_interior = pixel(&target, at, 220, 40, 320).await;
+            assert!(
+                (i16::from(image_interior[0]) - 128).abs() < 25
+                    && (i16::from(image_interior[background_channel]) - source_level / 2).abs()
+                        < 25
+                    && image_interior[if background_channel == 2 { 1 } else { 2 }] < 80,
+                "translucent QSV image mask should blend with the source at {at}: {image_interior:?}"
+            );
+            let transparent_edge = pixel(&target, at, 179, 22, 320).await;
+            assert!(
+                (i16::from(transparent_edge[background_channel]) - source_level).abs() < 25
+                    && transparent_edge[0] < 25,
+                "transparent image pixels must preserve the source at {at}: {transparent_edge:?}"
+            );
+            // Between the mosaic and image ROIs, within both sources' visible canvas.
+            let outside_roi = pixel(&target, at, 160, 40, 320).await;
+            assert!(
+                (i16::from(outside_roi[background_channel]) - source_level).abs() < 25
+                    && outside_roi[0] < 25,
+                "QSV image mask must not affect pixels outside its ROI at {at}: {outside_roi:?}"
             );
         } else {
             assert!(

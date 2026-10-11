@@ -527,6 +527,10 @@ mod tests {
                 20,
                 "5d8d911381b19daed2042c3d83444b07e91fe9a60bc33f3c9f0e17363a83ecc8b3069f67641225d70d89ba6d19587d39",
             ),
+            (
+                21,
+                "ff62a160c58d0611278de6d1aa89fbba993848b7d0196b0053e297d651205ac2fcf83de231d5745b1259a38ee0e35925",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -593,7 +597,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            (1..=20).collect::<Vec<_>>(),
+            (1..=21).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
@@ -702,6 +706,98 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(applied, 1);
+    }
+
+    #[tokio::test]
+    async fn upgrade_from_migration_20_seeds_monotonic_session_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::connect(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let embedded = sqlx::migrate!();
+        let through_20 = Migrator {
+            migrations: Cow::Owned(
+                embedded
+                    .iter()
+                    .filter(|migration| migration.version <= 20)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        through_20.run(&pool).await.unwrap();
+        for id in [12_i64, 95] {
+            sqlx::query(
+                "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+                 VALUES(?, 'legacy', 'https://example.test', 'legacy', '2026-10-11', '')",
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("a version-20 database must apply migration 21");
+        let applied: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(applied, (1..=21).collect::<Vec<_>>());
+        let seeded: Vec<i64> = sqlx::query_scalar("SELECT id FROM stream_session_ids ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(seeded, vec![12, 95]);
+        let after_seed: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after_seed, 96);
+
+        // Legacy writers that still insert into stream_sessions must advance the durable
+        // reservation sequence before the next open_session-style allocation.
+        sqlx::query(
+            "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+             VALUES(120, 'legacy', 'https://example.test', 'legacy', '2026-10-11', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let reserved: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(reserved, 121);
+        sqlx::query(
+            "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+             VALUES(?, 'new', 'https://example.test', 'new', '2026-10-11', '')",
+        )
+        .bind(reserved)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM stream_sessions WHERE id = ?")
+            .bind(reserved)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let after_delete: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            after_delete, 122,
+            "deleting the largest session must not reuse its ID"
+        );
     }
 
     /// v1.2.5 起的 Windows 发布包（以及 Windows 本地构建）建立的库：内容与当前完全一致，
@@ -903,7 +999,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=21).collect::<Vec<_>>());
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",

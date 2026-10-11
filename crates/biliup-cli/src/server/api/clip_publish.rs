@@ -393,6 +393,7 @@ pub async fn publish_clip(
     if let Err(message) = body.settings().validate() {
         return bad_request(message);
     }
+    let _admission = publisher.lock_session_admission().await;
     let mut clip = match clips::get(&pool, cid).await {
         Ok(Some(clip)) => clip,
         Ok(None) => return clip_not_found(),
@@ -432,6 +433,7 @@ pub async fn publish_batch(
     State(publisher): State<Arc<ClipPublisher>>,
     Json(body): Json<PublishBatch>,
 ) -> Response {
+    let _admission = publisher.lock_session_admission().await;
     let clips = match load_clips(&pool, &body.clip_ids).await {
         Ok(clips) => clips,
         Err(rejection) => return rejection.into_response(),

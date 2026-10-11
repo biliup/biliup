@@ -328,6 +328,21 @@ pub async fn progress_snapshot(
         .bind(progress.fps).bind(progress.speed).bind(progress.processed_ms).bind(progress.total_ms).bind(now).bind(id).execute(pool).await?;
     Ok(())
 }
+/// Keep a database error visible while the worker retries publishing its completed output.
+pub async fn finalization_error(
+    pool: &ConnectionPool,
+    id: i64,
+    error: &str,
+    now: i64,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE render_jobs SET phase='保存合成结果失败，等待数据库恢复',error=?,updated_at=? WHERE id=? AND state='running'")
+        .bind(error)
+        .bind(now)
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
 pub async fn finish(
     pool: &ConnectionPool,
     id: i64,

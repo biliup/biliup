@@ -184,8 +184,20 @@ pub fn render_fonts_dir() -> Option<PathBuf> {
 /// shared font directory.
 pub fn render_font() -> Option<PathBuf> {
     let dir = render_fonts_dir()?;
-    let embedded = embedded_render_tools().map(|root| root.join("fonts").join(RENDER_FONT));
-    render_font_in(&dir, embedded.as_deref())
+    render_font_in_with_embedded_fallback(&dir, || {
+        embedded_render_tools().map(|root| root.join("fonts").join(RENDER_FONT))
+    })
+}
+
+fn render_font_in_with_embedded_fallback(
+    dir: &Path,
+    embedded: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(font) = render_font_in(dir, None) {
+        return Some(font);
+    }
+    let embedded = embedded()?;
+    render_font_in(dir, Some(&embedded))
 }
 
 fn render_font_in(dir: &Path, embedded: Option<&Path>) -> Option<PathBuf> {
@@ -469,6 +481,35 @@ mod tests {
             render_font_in(fonts.path(), Some(&embedded)),
             Some(embedded)
         );
+    }
+
+    #[test]
+    fn external_cjk_font_does_not_materialize_embedded_fallback() {
+        let fonts = tempfile::tempdir().unwrap();
+        let external = fonts.path().join("custom-cjk.ttf");
+        std::fs::write(&external, b"cjk").unwrap();
+        let embedded_was_requested = std::cell::Cell::new(false);
+
+        let selected = render_font_in_with_embedded_fallback(fonts.path(), || {
+            embedded_was_requested.set(true);
+            panic!("external CJK font should skip embedded extraction");
+        });
+
+        assert_eq!(selected, Some(external));
+        assert!(!embedded_was_requested.get());
+    }
+
+    #[test]
+    fn emoji_only_directory_extracts_embedded_cjk_fallback_on_demand() {
+        let fonts = tempfile::tempdir().unwrap();
+        std::fs::write(fonts.path().join("NotoEmoji.ttf"), b"emoji").unwrap();
+        let fallback = fonts.path().join("embedded-cjk.otf");
+        std::fs::write(&fallback, b"cjk").unwrap();
+
+        let selected =
+            render_font_in_with_embedded_fallback(fonts.path(), || Some(fallback.clone()));
+
+        assert_eq!(selected, Some(fallback));
     }
 
     const BTBN_WIN64: &str = "ffmpeg version n8.1.2-50-g1a748fe2cd-20260831 Copyright (c) 2000-2026 the FFmpeg developers\n\

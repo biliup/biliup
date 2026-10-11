@@ -43,6 +43,7 @@ impl RenderJobs {
     }
     pub async fn initialize(&self) -> sqlx::Result<()> {
         store::recover(&self.pool, recorder::now_ms()).await?;
+        self.cleanup_unreferenced_snapshots().await?;
         // Only job-private temp folders are disposable; completed products live outside them.
         let _ = tokio::fs::remove_dir_all(self.root.join("work")).await;
         if let Ok(mut sessions) = tokio::fs::read_dir(&self.root).await {
@@ -68,6 +69,46 @@ impl RenderJobs {
             }
         }
 
+        Ok(())
+    }
+    async fn cleanup_unreferenced_snapshots(&self) -> sqlx::Result<()> {
+        let root = self.root.join("snapshots");
+        let mut entries = match tokio::fs::read_dir(&root).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        while let Some(entry) = entries.next_entry().await? {
+            if !entry.file_type().await?.is_dir() {
+                continue;
+            }
+            let Some(id) = entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i64>().ok())
+            else {
+                continue;
+            };
+            let Some(record) = store::get(&self.pool, id).await? else {
+                tokio::fs::remove_dir_all(entry.path()).await?;
+                continue;
+            };
+            let still_retryable = record.view.state != "ready";
+            let referenced = still_retryable
+                && (record
+                    .spec
+                    .assets
+                    .iter()
+                    .any(|asset| asset.path.starts_with(entry.path()))
+                    || record
+                        .spec
+                        .font_path
+                        .as_ref()
+                        .is_some_and(|font| font.starts_with(entry.path())));
+            if !referenced {
+                tokio::fs::remove_dir_all(entry.path()).await?;
+            }
+        }
         Ok(())
     }
     pub async fn validate_assets(
@@ -222,36 +263,30 @@ impl RenderJobs {
             .map_err(|e| e.to_string())?;
         lock(&self.tokens).insert(record.view.id, CancellationToken::new());
         if let Err(error) = self.snapshot_support(record.view.id, &mut spec).await {
-            let _ = store::terminal(
-                &self.pool,
-                record.view.id,
-                "failed",
-                Some(&error),
-                recorder::now_ms(),
-            )
-            .await;
-            let _ = tokio::fs::remove_dir_all(
-                self.root.join("snapshots").join(record.view.id.to_string()),
-            )
-            .await;
+            self.persist_terminal(record.view.id, "failed", &error)
+                .await;
+            self.remove_snapshot_dir(record.view.id).await;
             lock(&self.tokens).remove(&record.view.id);
             return Err(error);
         }
-        match store::update_snapshot(&self.pool, record.view.id, &spec).await {
+        match self.register_snapshot(record.view.id, &spec).await {
             Ok(true) => {}
             Ok(false) => {
                 lock(&self.tokens).remove(&record.view.id);
                 return Err("合成任务已取消".into());
             }
             Err(error) => {
-                let _ = store::terminal(
-                    &self.pool,
+                self.persist_terminal(
                     record.view.id,
                     "failed",
-                    Some("保存合成任务快照失败"),
-                    recorder::now_ms(),
+                    &format!("保存合成任务快照失败：{error}"),
                 )
                 .await;
+                // An UPDATE error can be returned after an uncertain commit. Keep the
+                // directory if the persisted recipe references it; startup cleanup
+                // will collect it later if the write did not commit.
+                self.remove_snapshot_dir_if_unreferenced(record.view.id)
+                    .await;
                 lock(&self.tokens).remove(&record.view.id);
                 return Err(error.to_string());
             }
@@ -262,34 +297,18 @@ impl RenderJobs {
             {
                 Ok(Some(clip)) if (clip.in_ms, clip.out_ms) == (spec.in_ms, spec.out_ms) => {}
                 Ok(_) => {
-                    let _ = store::terminal(
-                        &self.pool,
+                    self.persist_terminal(
                         record.view.id,
                         "failed",
-                        Some("切片正在导出、已发布或范围已变化"),
-                        recorder::now_ms(),
-                    )
-                    .await;
-                    let _ = clips::fail_render_export(
-                        &self.pool,
-                        cid,
-                        record.view.id,
-                        "切片范围已变化",
-                        recorder::now_ms(),
+                        "切片正在导出、已发布或范围已变化",
                     )
                     .await;
                     lock(&self.tokens).remove(&record.view.id);
                     return Err("切片正在导出、已发布或范围已变化".into());
                 }
                 Err(error) => {
-                    let _ = store::terminal(
-                        &self.pool,
-                        record.view.id,
-                        "failed",
-                        Some(&error.to_string()),
-                        recorder::now_ms(),
-                    )
-                    .await;
+                    self.persist_terminal(record.view.id, "failed", &error.to_string())
+                        .await;
                     lock(&self.tokens).remove(&record.view.id);
                     return Err(error.to_string());
                 }
@@ -335,6 +354,144 @@ impl RenderJobs {
         }
         Ok(())
     }
+    async fn remove_snapshot_dir(&self, id: i64) {
+        let path = self.root.join("snapshots").join(id.to_string());
+        if let Err(error) = tokio::fs::remove_dir_all(&path).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, id, path = %path.display(), "清理合成素材快照失败");
+        }
+    }
+    /// Register frozen paths only while the task remains queued. An explicit
+    /// zero-row result proves that this enqueue no longer owns the directory.
+    pub(super) async fn register_snapshot(&self, id: i64, spec: &RenderSpec) -> sqlx::Result<bool> {
+        match store::update_snapshot(&self.pool, id, spec).await {
+            Ok(true) => Ok(true),
+            Ok(false) => {
+                self.remove_snapshot_dir(id).await;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+    async fn remove_snapshot_dir_if_unreferenced(&self, id: i64) {
+        let path = self.root.join("snapshots").join(id.to_string());
+        match store::get(&self.pool, id).await {
+            Ok(Some(record)) => {
+                let referenced = record
+                    .spec
+                    .assets
+                    .iter()
+                    .any(|asset| asset.path.starts_with(&path))
+                    || record
+                        .spec
+                        .font_path
+                        .as_ref()
+                        .is_some_and(|font| font.starts_with(&path));
+                if referenced {
+                    return;
+                }
+                self.remove_snapshot_dir(id).await;
+            }
+            Ok(None) => self.remove_snapshot_dir(id).await,
+            Err(error) => {
+                tracing::error!(%error, id, path = %path.display(), "无法确认合成素材快照是否仍被引用，保留目录");
+            }
+        }
+    }
+    /// Keep the job token alive until a terminal transition is committed. A transient
+    /// database failure therefore cannot turn a running row into an unowned task.
+    async fn persist_terminal(&self, id: i64, state: &str, error: &str) -> Option<String> {
+        let mut delay = std::time::Duration::from_millis(100);
+        loop {
+            match store::terminal(&self.pool, id, state, Some(error), recorder::now_ms()).await {
+                Ok(true) => return Some(state.to_owned()),
+                Ok(false) => match store::get(&self.pool, id).await {
+                    Ok(Some(record))
+                        if !matches!(record.view.state.as_str(), "queued" | "running") =>
+                    {
+                        return Some(record.view.state);
+                    }
+                    Ok(None) => return None,
+                    Ok(Some(_)) => {
+                        tracing::error!(id, state, "任务仍处于活动状态但终态更新未生效，将重试");
+                    }
+                    Err(read_error) => {
+                        tracing::error!(%read_error, id, state, "读取合成任务终态失败，将重试");
+                    }
+                },
+                Err(write_error) => {
+                    tracing::error!(%write_error, id, state, "保存合成任务终态失败，将重试");
+                }
+            }
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(5));
+        }
+    }
+    /// Persist the completed output before releasing the in-memory owner. Retry a
+    /// failed transaction while retaining its source pin and the generated product.
+    pub(super) async fn finish_output(
+        &self,
+        id: i64,
+        output_path: &Path,
+        output_bytes: i64,
+        duration_ms: i64,
+        cancel: &CancellationToken,
+    ) -> bool {
+        let path = output_path.to_string_lossy().into_owned();
+        let mut delay = std::time::Duration::from_millis(100);
+        loop {
+            if cancel.is_cancelled() {
+                let state = self.persist_terminal(id, "cancelled", "合成已取消").await;
+                if state.as_deref().is_some_and(|state| state == "ready") {
+                    return true;
+                }
+                return false;
+            }
+            match store::finish(
+                &self.pool,
+                id,
+                &path,
+                output_bytes,
+                duration_ms,
+                recorder::now_ms(),
+            )
+            .await
+            {
+                Ok(true) => return true,
+                Ok(false) => match store::get(&self.pool, id).await {
+                    Ok(Some(record)) if record.view.state == "ready" => return true,
+                    Ok(Some(record))
+                        if !matches!(record.view.state.as_str(), "queued" | "running") =>
+                    {
+                        return false;
+                    }
+                    Ok(None) => return false,
+                    Ok(Some(_)) => {
+                        tracing::error!(id, "合成完成事务未更新任务且任务仍活动，将重试");
+                    }
+                    Err(read_error) => {
+                        tracing::error!(%read_error, id, "读取合成任务状态失败，将重试");
+                    }
+                },
+                Err(finish_error) => {
+                    tracing::error!(%finish_error, id, output = %path, "提交合成结果失败，将重试");
+                    if let Err(record_error) = store::finalization_error(
+                        &self.pool,
+                        id,
+                        &finish_error.to_string(),
+                        recorder::now_ms(),
+                    )
+                    .await
+                    {
+                        tracing::error!(%record_error, id, "保存合成结果提交错误详情失败");
+                    }
+                }
+            }
+            tokio::time::sleep(delay).await;
+            delay = (delay * 2).min(std::time::Duration::from_secs(5));
+        }
+    }
     /// Enqueue and guard the clip export without clearing its previous output.
     pub async fn enqueue_clip(
         self: &Arc<Self>,
@@ -361,38 +518,20 @@ impl RenderJobs {
         let result = self.execute(id, &spec, &cancel).await;
         match result {
             Ok(done) => {
-                let path = done.output_path.to_string_lossy().into_owned();
-                match store::finish(
-                    &self.pool,
-                    id,
-                    &path,
-                    done.output_bytes,
-                    done.duration_ms,
-                    recorder::now_ms(),
-                )
-                .await
+                let keep_output = self
+                    .finish_output(
+                        id,
+                        &done.output_path,
+                        done.output_bytes,
+                        done.duration_ms,
+                        &cancel,
+                    )
+                    .await;
+                if !keep_output
+                    && let Err(error) = tokio::fs::remove_file(&done.output_path).await
+                    && error.kind() != std::io::ErrorKind::NotFound
                 {
-                    Ok(true) => {
-                        if let Some(cid) = spec.clip_id {
-                            let _ = clips::finish_render_export(
-                                &self.pool,
-                                cid,
-                                id,
-                                &clips::Exported {
-                                    cut_in_ms: spec.in_ms,
-                                    cut_out_ms: spec.out_ms,
-                                    output_path: path,
-                                    output_bytes: done.output_bytes,
-                                    duration_ms: done.duration_ms,
-                                },
-                                recorder::now_ms(),
-                            )
-                            .await;
-                        }
-                    }
-                    _ => {
-                        let _ = tokio::fs::remove_file(&done.output_path).await;
-                    }
+                    tracing::warn!(%error, id, path = %done.output_path.display(), "清理未提交的合成输出失败");
                 }
             }
             Err(error) => {
@@ -401,17 +540,15 @@ impl RenderJobs {
                 } else {
                     "failed"
                 };
-                let _ = store::terminal(&self.pool, id, state, Some(&error), recorder::now_ms())
-                    .await
-                    .unwrap_or(false);
-                if let Some(cid) = spec.clip_id {
-                    let _ =
-                        clips::fail_render_export(&self.pool, cid, id, &error, recorder::now_ms())
-                            .await;
-                }
+                self.persist_terminal(id, state, &error).await;
             }
         }
-        let _ = tokio::fs::remove_dir_all(self.root.join("work").join(id.to_string())).await;
+        let work = self.root.join("work").join(id.to_string());
+        if let Err(error) = tokio::fs::remove_dir_all(&work).await
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            tracing::warn!(%error, id, path = %work.display(), "清理合成工作目录失败");
+        }
         lock(&self.tokens).remove(&id);
     }
     async fn execute(
@@ -506,11 +643,6 @@ impl RenderJobs {
         )
         .await
         .map_err(|e| e.to_string())?;
-        if changed && let Some(cid) = record.and_then(|j| j.spec.clip_id) {
-            let _ =
-                clips::fail_render_export(&self.pool, cid, id, "合成已取消", recorder::now_ms())
-                    .await;
-        }
         // The worker can observe the cancelled token and commit its terminal
         // state before this request reaches the UPDATE. That is a successful
         // cancellation, not a conflicting transition.

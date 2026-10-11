@@ -249,6 +249,7 @@ pub async fn delete_session(
     State(publisher): State<Arc<ClipPublisher>>,
     Path(id): Path<i64>,
 ) -> Response {
+    let _admission = publisher.lock_session_admission().await;
     if live::is_recording(id) {
         return (StatusCode::CONFLICT, "正在录制的场次不能删除").into_response();
     }
