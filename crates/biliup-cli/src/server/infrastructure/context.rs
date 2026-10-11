@@ -14,6 +14,7 @@ use biliup::downloader::live::LiveStream;
 use core::fmt;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use tokio::sync::watch;
 use tracing::{error, info};
 
 /// 应用程序上下文，包含工作器和扩展信息
@@ -157,6 +158,8 @@ pub struct Worker {
     /// 不参与任何控制流。只存需要流信息才能判定的结论（如标题命中排除关键词）；
     /// 探测前就能判定的条件（如录制时间范围）由接口侧按当前时钟实时算，不会过期。
     last_rejection: RwLock<Option<Rejection>>,
+    /// 暂停或替换工作器时取消正在进行的开播检测。
+    monitor_changes: watch::Sender<()>,
 }
 
 impl Worker {
@@ -182,6 +185,7 @@ impl Worker {
             douyu_keeper: None,
             client,
             last_rejection: RwLock::new(None),
+            monitor_changes: watch::channel(()).0,
         }
     }
 
@@ -202,6 +206,26 @@ impl Worker {
     /// 最近一次探测被挡下的原因。
     pub fn rejection(&self) -> Option<Rejection> {
         self.last_rejection.read().unwrap().clone()
+    }
+
+    pub(crate) fn monitor_changes(&self) -> watch::Receiver<()> {
+        self.monitor_changes.subscribe()
+    }
+
+    /// 与暂停/恢复共用状态锁，避免已结束的旧检测在 spawn 后覆盖暂停状态。
+    pub(crate) fn start_download(
+        &self,
+        task: Arc<DownloadTask>,
+        monitor_changes: &watch::Receiver<()>,
+    ) -> bool {
+        let mut status = self.downloader_status.write().unwrap();
+        if monitor_changes.has_changed().unwrap_or(true)
+            || !matches!(*status, WorkerStatus::Pending)
+        {
+            return false;
+        }
+        *status = WorkerStatus::Working(task);
+        true
     }
 
     /// 获取主播信息
@@ -238,16 +262,21 @@ impl Worker {
     pub async fn change_status(&self, stage: Stage, status: WorkerStatus) {
         match stage {
             Stage::Download => {
-                let task = if let WorkerStatus::Working(task) =
-                    &*self.downloader_status.read().unwrap()
-                    && !matches!(status, WorkerStatus::Working(_))
-                {
-                    Some(task.clone())
-                } else {
-                    None
+                let task = {
+                    let mut current = self.downloader_status.write().unwrap();
+                    let task = if let WorkerStatus::Working(task) = &*current
+                        && !matches!(status, WorkerStatus::Working(_))
+                    {
+                        Some(task.clone())
+                    } else {
+                        None
+                    };
+                    if matches!(status, WorkerStatus::Pause | WorkerStatus::Idle) {
+                        self.monitor_changes.send_replace(());
+                    }
+                    *current = status;
+                    task
                 };
-
-                *self.downloader_status.write().unwrap() = status;
 
                 if let Some(task) = task
                     && let Err(e) = task.stop().await

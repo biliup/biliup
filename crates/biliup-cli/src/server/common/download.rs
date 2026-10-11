@@ -13,7 +13,7 @@ use crate::server::core::live::{danmaku_client, downloader_runtime, live_request
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::ha::UnitOutput;
-use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage};
 use crate::server::infrastructure::models::hook_step::process;
 use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
@@ -657,7 +657,7 @@ impl DownloadTask {
         }
         // 清理资源
         // 确保状态更新和资源清理
-        rooms_handle.wake_waker(ctx.worker_id()).await;
+        rooms_handle.wake_worker(ctx.worker()).await;
         info!("Download task completed: {:?}", result);
         self.done_notify.notify_one();
         Ok(())
@@ -894,6 +894,8 @@ pub async fn start_download_workflow(
     ctx: Context,
     sender: Sender<UploaderMessage>,
     rooms_handle: Arc<Monitor>,
+    monitor_changes: tokio::sync::watch::Receiver<()>,
+    resumed_session: bool,
 ) {
     let task = Arc::new(DownloadTask::new(
         downloader_runtime(
@@ -903,8 +905,19 @@ pub async fn start_download_workflow(
         ),
         ctx.live_stream(),
     ));
-    ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
-        .await;
+    if !ctx.worker().start_download(task.clone(), &monitor_changes) {
+        if !resumed_session
+            && let Err(e) = crate::server::workbench::store::close_session(
+                ctx.pool(),
+                ctx.id(),
+                crate::server::workbench::recorder::now_ms(),
+            )
+            .await
+        {
+            error!(e = ?e, "关闭取消启动的场次失败");
+        }
+        return;
+    }
 
     // 主播头像几乎不变：开播时下载一次存到 data/avatar/，地址没变就不再下载
     spawn_avatar_download(

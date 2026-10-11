@@ -112,6 +112,11 @@ impl DownloadManager {
         self.rooms_handle.wake_waker(id).await;
     }
 
+    /// 手动恢复时优先检测该房间，并立即唤醒平台监控循环。
+    pub async fn resume_room(&self, id: i64) {
+        self.rooms_handle.resume_room(id).await;
+    }
+
     pub async fn get_room_by_id(&self, id: i64) -> Option<Arc<Worker>> {
         self.rooms_handle
             .get_all()

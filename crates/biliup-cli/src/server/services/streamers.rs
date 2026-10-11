@@ -74,30 +74,20 @@ pub async fn update_streamer(
 
     let upload_config = get_upload_config(&services.pool, id).await?;
 
+    let worker = services.worker(streamer.clone(), upload_config);
+    if paused {
+        worker
+            .change_status(Stage::Download, WorkerStatus::Pause)
+            .await;
+    }
     services
         .managers
-        .add_room(services.worker(streamer.clone(), upload_config))
+        .add_room(worker)
         .await
         .ok_or(AppError::Unknown)?;
-    if paused {
-        keep_paused(&services.managers, id).await;
-    }
 
     info!(id = id, paused, "successfully update live streamers");
     Ok(streamer)
-}
-
-/// 把刚重建的房间恢复成暂停。先移出检测队列、再标暂停：监控循环从队列取房间时会把状态改成
-/// `Pending`，反过来做的话中间被取走就白标了；先移出的话，已被取走、正在检测的房间检测完看到
-/// 暂停既不开录也不放回队列（与 [`toggle_pause`] 一样）。
-async fn keep_paused(managers: &DownloadManager, id: i64) {
-    let Some(worker) = managers.get_room_by_id(id).await else {
-        return;
-    };
-    managers.make_waker(id).await;
-    worker
-        .change_status(Stage::Download, WorkerStatus::Pause)
-        .await;
 }
 
 /// 停止监控并删除主播，返回删掉的主播
@@ -127,7 +117,7 @@ pub async fn toggle_pause(managers: &DownloadManager, id: i64) {
             }
             WorkerStatus::Pause => {
                 w.change_status(Stage::Download, WorkerStatus::Idle).await;
-                managers.wake_waker(id).await;
+                managers.resume_room(id).await;
                 info!(url=?&w.live_streamer.url, "successfully start live streamers");
             }
             WorkerStatus::Pending => {
