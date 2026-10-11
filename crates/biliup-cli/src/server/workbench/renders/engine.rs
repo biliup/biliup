@@ -167,20 +167,29 @@ fn engine_progress(
     }
 }
 
-fn record_filter_fallback(selected: &mut SelectedEncoder, error: &str) {
-    let detail: String = error
+fn fallback_detail(error: &str) -> String {
+    error
         .trim()
         .lines()
         .last()
         .unwrap_or(error)
         .chars()
         .take(400)
-        .collect();
-    let reason = format!("QSV 处理图失败，已回退软件滤镜：{detail}");
+        .collect()
+}
+
+fn append_fallback_reason(selected: &mut SelectedEncoder, reason: String) {
     selected.fallback_reason = Some(match selected.fallback_reason.take() {
         Some(previous) => format!("{previous}；{reason}"),
         None => reason,
     });
+}
+
+fn record_filter_fallback(selected: &mut SelectedEncoder, error: &str) {
+    append_fallback_reason(
+        selected,
+        format!("QSV 处理图失败，已回退软件滤镜：{}", fallback_detail(error)),
+    );
 }
 
 #[derive(Debug, Clone)]
@@ -511,7 +520,22 @@ fn qsv_danmaku_band_height(settings: &super::model::DanmakuSettings, height: u32
     band.min(height).div_ceil(2).saturating_mul(2).min(height)
 }
 
+fn qsv_danmaku_has_full_canvas_position(ass: &str) -> bool {
+    ass.lines().any(|line| {
+        line.strip_prefix("Dialogue:")
+            .and_then(|dialogue| dialogue.splitn(4, ',').nth(3))
+            .and_then(|style| style.split(',').next())
+            .is_some_and(|style| style.trim() == "SP")
+    })
+}
+
 fn qsv_danmaku_ass(ass: &str, full_height: u32, band_height: u32) -> Option<String> {
+    // DanmakuFactory's SP events use absolute positions against the full ASS
+    // canvas. They can appear anywhere, so cropping them to the display band
+    // would silently lose special comments below that band.
+    if qsv_danmaku_has_full_canvas_position(ass) {
+        return None;
+    }
     let full = format!("PlayResY: {full_height}");
     let band = format!("PlayResY: {band_height}");
     ass.contains(&full).then(|| ass.replacen(&full, &band, 1))
@@ -1463,14 +1487,17 @@ pub async fn render(
                     .await
                     .map_err(|e| format!("保存 QSV 弹幕图层失败：{e}"))?;
             } else {
+                let reason = if qsv_danmaku_has_full_canvas_position(&ass.ass) {
+                    "ASS 包含全画布定位弹幕，不能裁剪弹幕处理带"
+                } else {
+                    "ASS 画布尺寸不匹配，不能裁剪弹幕处理带"
+                };
                 tracing::warn!(
                     segment_id = source.segment_id,
-                    "ASS 画布尺寸不匹配，改用软件滤镜"
+                    %reason,
+                    "改用完整画布软件滤镜"
                 );
-                record_filter_fallback(
-                    &mut active_selected,
-                    "ASS 画布尺寸不匹配，不能裁剪弹幕处理带",
-                );
+                record_filter_fallback(&mut active_selected, reason);
                 use_qsv_graph = false;
             }
         }
@@ -1534,6 +1561,21 @@ pub async fn render(
             }
             if let Some(backend) = working_backend {
                 qsv_mosaic_backend = Some(backend);
+                if backend == QsvMosaicBackend::QsvVpp {
+                    let detail = probe_error
+                        .as_deref()
+                        .map(fallback_detail)
+                        .unwrap_or_else(|| "OpenCL 直接映射不可用".into());
+                    tracing::warn!(
+                        segment_id = source.segment_id,
+                        %detail,
+                        "OpenCL 马赛克映射不可用，改用 QSV VPP 兼容路径"
+                    );
+                    append_fallback_reason(
+                        &mut active_selected,
+                        format!("OpenCL 直接映射不可用，马赛克改用 QSV VPP 兼容路径：{detail}"),
+                    );
+                }
                 if has_mosaic {
                     tracing::info!(
                         segment_id = source.segment_id,
@@ -1651,6 +1693,13 @@ pub async fn render(
                         segment_id = source.segment_id,
                         %error,
                         "并行 QSV 子段失败，重试整段串行 QSV"
+                    );
+                    append_fallback_reason(
+                        &mut active_selected,
+                        format!(
+                            "并行 QSV 子段失败，已回退整段串行 QSV：{}",
+                            fallback_detail(&error)
+                        ),
                     );
                     let part_count = qsv_parallel_parts(source, &first.frame_rate)
                         .map_or(0, |parts| parts.len());

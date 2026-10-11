@@ -122,6 +122,16 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
     let band_ass =
         qsv_danmaku_ass(&super::super::danmaku::empty_ass(1920, 1080), 1080, 432).unwrap();
     assert!(band_ass.contains("PlayResY: 432"));
+    let scrolling_ass = format!(
+        "{}Dialogue: 0,0:00:00.00,0:00:12.00,R2L,,0000,0000,0000,,{{\\move(2030,38,-110,38)}}scrolling\n",
+        super::super::danmaku::empty_ass(1920, 1080),
+    );
+    assert!(qsv_danmaku_ass(&scrolling_ass, 1080, 432).is_some());
+    let special_ass = format!(
+        "{}Dialogue: 0,0:00:00.00,0:00:05.00,SP,,0000,0000,0000,,{{\\pos(100,864)}}special\n",
+        super::super::danmaku::empty_ass(1920, 1080),
+    );
+    assert!(qsv_danmaku_ass(&special_ass, 1080, 432).is_none());
 
     let mosaic = RenderRecipe {
         regions: vec![MaskRegion {
@@ -449,7 +459,7 @@ async fn non_advancing_process_is_stopped_by_watchdog() {
 
 #[tokio::test]
 async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
-    // XML -> ASS is built in; the font comes from the render tools directory.
+    // XML -> ASS is built in; the embedded CJK font works without render-tools.
     if crate::tools::render_font().is_none() {
         assert!(
             std::env::var_os("BILIUP_REQUIRE_RENDER_TESTS").is_none(),
@@ -464,7 +474,7 @@ async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
     let original = dir.path().join("source.mp4");
     fixture(&original, "black", "320x180", "libx264", false, 12.).await;
     let xml = dir.path().join("source.xml");
-    std::fs::write(&xml, "<i><recording_start_time_ms>100000</recording_start_time_ms><d p=\"8.000,1,25,16777215,108,0,0,0\">HELLO</d></i>").unwrap();
+    std::fs::write(&xml, "<i><recording_start_time_ms>100000</recording_start_time_ms><d p=\"8.000,1,25,16777215,108,0,0,0\">你好</d></i>").unwrap();
     let original_hash = (hash(&original), hash(&xml));
     let mut span = source(original.clone(), 1, 0, 12000, 10000, 11000);
     span.danmaku_path = Some(xml.clone());
@@ -477,6 +487,7 @@ async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
         .await
         .unwrap();
     assert!(preview.ass.contains("\\move("), "{}", preview.ass);
+    assert!(preview.ass.contains("你好"), "{}", preview.ass);
     assert!(
         preview.ass.contains("0:00:08.00,0:00:12.00"),
         "{}",

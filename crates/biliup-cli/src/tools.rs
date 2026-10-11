@@ -10,9 +10,10 @@
 
 use serde::Serialize;
 use std::ffi::OsStr;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, Once, PoisonError, RwLock};
+use std::sync::{Mutex, Once, OnceLock, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use biliup::tools::{command, std_command};
@@ -21,6 +22,7 @@ const FFMPEG: &str = "ffmpeg";
 const RENDER_TOOLS_ENV: &str = "BILIUP_RENDER_TOOLS_DIR";
 const RENDER_TOOLS_DIR: &str = "render-tools";
 const RENDER_FONT: &str = "NotoSansSC-Regular.otf";
+const RENDER_FONT_BYTES: &[u8] = include_bytes!("assets/NotoSansSC-Regular.otf");
 const RENDER_EMOJI_FONT: &[u8] = include_bytes!("assets/NotoEmoji.ttf");
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -49,6 +51,7 @@ static LOCATIONS: RwLock<Locations> = RwLock::new(Locations {
 
 /// Successful `ffmpeg -version` results, keyed by the program that was run.
 static VERSION_CACHE: Mutex<Option<(PathBuf, FfmpegVersion)>> = Mutex::new(None);
+static EMBEDDED_RENDER_TOOLS: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Applies the `ffmpeg_path` setting; blank means unset.
 pub fn set_configured_ffmpeg(path: Option<&str>) {
@@ -107,35 +110,7 @@ fn bundled_render_tools() -> Option<PathBuf> {
         .and_then(|path| path.parent().map(|parent| parent.join(RENDER_TOOLS_DIR)))
 }
 
-/// Directory containing fonts shared by FFmpeg/libass and browser preview.
-pub fn render_fonts_dir() -> Option<PathBuf> {
-    bundled_render_tools()
-        .map(|dir| dir.join("fonts"))
-        .filter(|path| path.is_dir())
-}
-
-/// Returns the preferred bundled CJK font, or another supported font in the
-/// shared font directory.
-pub fn render_font() -> Option<PathBuf> {
-    let dir = render_fonts_dir()?;
-    let preferred = dir.join(RENDER_FONT);
-    if preferred.is_file() {
-        return Some(preferred);
-    }
-    render_font_files().into_iter().next()
-}
-
-pub fn render_font_path() -> Result<PathBuf, String> {
-    render_font()
-        .ok_or_else(|| "找不到弹幕字体：请安装随包字体或设置 BILIUP_RENDER_TOOLS_DIR".into())
-}
-
-/// Font files exposed to the browser font endpoint. Paths are always under
-/// the shared bundled font directory.
-pub fn render_font_files() -> Vec<PathBuf> {
-    let Some(dir) = render_fonts_dir() else {
-        return Vec::new();
-    };
+fn render_font_files_in(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -158,6 +133,83 @@ pub fn render_font_files() -> Vec<PathBuf> {
         if name == RENDER_FONT { 0 } else { 1 }
     });
     files
+}
+
+fn embedded_render_font_matches(path: &Path) -> bool {
+    std::fs::read(path).is_ok_and(|bytes| bytes.as_slice() == RENDER_FONT_BYTES)
+}
+
+fn materialize_embedded_render_tools() -> Option<PathBuf> {
+    let cache = dirs::cache_dir().unwrap_or_else(|| {
+        std::env::temp_dir().join(format!("biliup-cache-{}", std::process::id()))
+    });
+    let root = cache.join("biliup").join("render-tools-embedded-v1");
+    let fonts = root.join("fonts");
+    std::fs::create_dir_all(&fonts).ok()?;
+    let font = fonts.join(RENDER_FONT);
+    if embedded_render_font_matches(&font) {
+        return Some(root);
+    }
+
+    let mut temporary = tempfile::NamedTempFile::new_in(&fonts).ok()?;
+    temporary.write_all(RENDER_FONT_BYTES).ok()?;
+    if temporary.persist(&font).is_err() && !embedded_render_font_matches(&font) {
+        // On platforms that cannot replace an existing file atomically, remove
+        // only the invalid cached copy and retry through a fresh temporary file.
+        std::fs::remove_file(&font).ok()?;
+        let mut replacement = tempfile::NamedTempFile::new_in(&fonts).ok()?;
+        replacement.write_all(RENDER_FONT_BYTES).ok()?;
+        replacement.persist(&font).ok()?;
+    }
+    embedded_render_font_matches(&font).then_some(root)
+}
+
+fn embedded_render_tools() -> Option<PathBuf> {
+    EMBEDDED_RENDER_TOOLS
+        .get_or_init(materialize_embedded_render_tools)
+        .clone()
+}
+
+/// Directory containing fonts shared by FFmpeg/libass and browser preview.
+/// Shipped render-tools take precedence; the CJK font embedded in the binary
+/// is materialized into the user cache when no external font is available.
+pub fn render_fonts_dir() -> Option<PathBuf> {
+    let bundled = bundled_render_tools()
+        .map(|dir| dir.join("fonts"))
+        .filter(|path| !render_font_files_in(path).is_empty());
+    bundled.or_else(|| embedded_render_tools().map(|dir| dir.join("fonts")))
+}
+
+/// Returns the preferred bundled CJK font, or another supported font in the
+/// shared font directory.
+pub fn render_font() -> Option<PathBuf> {
+    let dir = render_fonts_dir()?;
+    let preferred = dir.join(RENDER_FONT);
+    if preferred.is_file() {
+        return Some(preferred);
+    }
+    if let Some(path) = render_font_files_in(&dir)
+        .into_iter()
+        .find(|path| path.file_name().and_then(OsStr::to_str) != Some("NotoEmoji.ttf"))
+    {
+        return Some(path);
+    }
+    let embedded = embedded_render_tools()?.join("fonts").join(RENDER_FONT);
+    embedded.is_file().then_some(embedded)
+}
+
+pub fn render_font_path() -> Result<PathBuf, String> {
+    render_font()
+        .ok_or_else(|| "找不到弹幕字体：请安装随包字体或设置 BILIUP_RENDER_TOOLS_DIR".into())
+}
+
+/// Font files exposed to the browser font endpoint. Paths are always under
+/// the shared bundled font directory.
+pub fn render_font_files() -> Vec<PathBuf> {
+    let Some(dir) = render_fonts_dir() else {
+        return Vec::new();
+    };
+    render_font_files_in(&dir)
 }
 
 /// Monochrome Noto Emoji is embedded in the binary so libass and the browser
@@ -389,6 +441,13 @@ fn find_in_path(program: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn embedded_cjk_font_materializes_from_compiled_asset() {
+        let tools = embedded_render_tools().expect("embedded CJK font should be extractable");
+        let font = tools.join("fonts").join(RENDER_FONT);
+        assert_eq!(std::fs::read(font).unwrap().as_slice(), RENDER_FONT_BYTES);
+    }
 
     const BTBN_WIN64: &str = "ffmpeg version n8.1.2-50-g1a748fe2cd-20260831 Copyright (c) 2000-2026 the FFmpeg developers\n\
 built with gcc 15.2.0 (crosstool-NG 1.28.0.21_3c5cc17)\n\
