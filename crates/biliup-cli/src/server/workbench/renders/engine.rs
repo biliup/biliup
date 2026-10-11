@@ -1,5 +1,5 @@
 //! Immutable source recordings -> one encode per segment -> a copy-only MP4 join.
-use super::encoding::{self, EncoderCapability, SelectedEncoder};
+use super::encoding::{self, EncoderCapability, QualityPreset, SelectedEncoder};
 use super::model::{EffectType, MaskRegion, RenderRecipe, RenderSource};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -826,6 +826,7 @@ fn segment_command(
     include_audio: bool,
     output_file: &str,
     probe_frames: Option<u32>,
+    quality: QualityPreset,
 ) -> Result<Command, String> {
     let mut command = if qsv_decode {
         // QSV can keep the full filter graph in the hardware path. Give this
@@ -884,7 +885,7 @@ fn segment_command(
         command
             .args(["-map", "[video]", "-an"])
             .args(["-frames:v", &probe_frames.unwrap().to_string()])
-            .args(selected.output_args());
+            .args(selected.output_args_with_quality(QualityPreset::Balanced));
         if qsv_decode {
             command.args(["-async_depth:v", "8"]);
         }
@@ -895,7 +896,7 @@ fn segment_command(
         } else {
             command.args(["-map", "[video]", "-an"]);
         }
-        command.args(selected.output_args());
+        command.args(selected.output_args_with_quality(quality));
         if qsv_decode {
             command.args(["-async_depth:v", "8"]);
         }
@@ -1021,6 +1022,7 @@ async fn encode_qsv_parallel_source(
             false,
             &output_file,
             None,
+            settings.encoding.quality,
         )?;
         commands.push((index, command));
     }
@@ -1579,6 +1581,7 @@ pub async fn render(
                     false,
                     "",
                     Some(8),
+                    QualityPreset::Balanced,
                 )?;
                 match run_process(command, &cancel, Duration::from_secs(20), |_, _| {}).await {
                     Ok(_) => {
@@ -1691,6 +1694,7 @@ pub async fn render(
             true,
             "encoded.mp4",
             None,
+            request.settings.encoding.quality,
         )?;
         let phase = format!("合成分段 {}/{}", number + 1, request.sources.len());
         let duration = source.trim_end_ms - source.trim_start_ms;
@@ -1814,6 +1818,7 @@ pub async fn render(
                     true,
                     "encoded.mp4",
                     None,
+                    request.settings.encoding.quality,
                 )?;
                 run_process(command, &cancel, PROCESS_STALL, |_, block| {
                     let stats = FfmpegProgress::parse(block)

@@ -28,7 +28,8 @@ export function useRenderEditor(sessionId: number, allowed: boolean) {
   const loaded = useRef<number | null>(null)
   useEffect(() => {
     if (settings.data && loaded.current !== sessionId) {
-      loaded.current = sessionId; setRecipe({ ...settings.data, encoding: settings.data.encoding ?? defaultEncoderConfig() }); setDirty(false)
+      loaded.current = sessionId; setRecipe({ ...settings.data,
+        encoding: { ...defaultEncoderConfig(), ...settings.data.encoding } }); setDirty(false)
     }
   }, [settings.data, sessionId])
   const change = (next: RenderRecipe | ((current: RenderRecipe) => RenderRecipe)) => {
@@ -135,10 +136,19 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
         <div>
           <fieldset disabled={disabled || busy} className={styles.renderFields}>
             <legend>视频编码</legend>
+            <label className={styles.renderField}><span>质量预设</span><select value={encoding.quality ?? 'balanced'} onChange={e => s.change(current => ({
+              ...current, encoding: { ...defaultEncoderConfig(), ...current.encoding, quality: e.target.value as NonNullable<typeof encoding.quality> },
+            }))}>
+              <option value="space_saver">体积优先</option>
+              <option value="balanced">均衡推荐</option>
+              <option value="high_quality">高画质</option>
+            </select></label>
+            <p className={styles.renderHint}>参考 HandBrake 的 1080p RF 20–24：x264 三档对应 24 / 22 / 20；硬件编码器使用各自的 CQ/QP 档位近似映射。恒定质量不会保证固定文件大小。</p>
             <label className={styles.renderField}><span>编码器</span><select value={encoding.encoder} onChange={e => {
               const encoder = e.target.value as VideoEncoder
               const first = encoderCapabilities.find(item => item.name === encoder && item.available)
-              s.change(current => ({ ...current, encoding: { encoder, device: encoder === 'auto' ? null : first?.device ?? null } }))
+              s.change(current => ({ ...current, encoding: { ...defaultEncoderConfig(), ...current.encoding,
+                encoder, device: encoder === 'auto' ? null : first?.device ?? null } }))
             }}>
               {savedEncoderMissing && <option value={encoding.encoder} disabled>{encoding.encoder}（旧配置，当前不可用）</option>}
               {encoderNames.map(name => {

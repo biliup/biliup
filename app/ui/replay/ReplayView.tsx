@@ -589,13 +589,14 @@ export default function ReplayView({
     setExporting(mode)
     try {
       if (loadedClip && !clipChanged) {
-        await exportClip(loadedClip, mode)
+        await exportClip(loadedClip, mode, undefined, mode === 'precise' ? renderEditor.recipe.encoding?.quality ?? 'balanced' : undefined)
       } else {
         const created = await createClip(sessionId, {
           in_ms: selection.in,
           out_ms: selection.out,
           marker_id: selectionMarker,
           export: mode,
+          ...(mode === 'precise' ? { quality: renderEditor.recipe.encoding?.quality ?? 'balanced' } : {}),
         })
         setActiveClip(created.id)
       }
@@ -1235,6 +1236,7 @@ export default function ReplayView({
             editReason={editReason}
             canDownload={canDownload}
             ffmpeg={ffmpeg}
+            quality={renderEditor.recipe.encoding?.quality ?? 'balanced'}
             onSeekMarker={pickMarker}
             onSelectMarker={selectFromMarker}
             onLoadClip={loadClip}

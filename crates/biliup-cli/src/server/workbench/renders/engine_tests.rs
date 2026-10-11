@@ -7,6 +7,7 @@ fn cpu_recipe() -> RenderRecipe {
         encoding: EncoderConfig {
             encoder: VideoEncoder::Libx264,
             device: None,
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -92,6 +93,7 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         encoding: EncoderConfig {
             encoder: VideoEncoder::H264Qsv,
             device: None,
+            ..Default::default()
         },
         danmaku: DanmakuSettings {
             enabled: true,
@@ -304,6 +306,7 @@ fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
         encoding: EncoderConfig {
             encoder: VideoEncoder::H264Qsv,
             device: None,
+            ..Default::default()
         },
         ..Default::default()
     };
@@ -679,6 +682,7 @@ async fn hardware_render() {
         encoding: EncoderConfig {
             encoder,
             device: device.clone(),
+            ..Default::default()
         },
         regions: vec![MaskRegion {
             id: "hardware-mask".into(),

@@ -53,12 +53,48 @@ impl VideoEncoder {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityPreset {
+    SpaceSaver,
+    #[default]
+    Balanced,
+    HighQuality,
+}
+
+impl QualityPreset {
+    pub fn x264_crf(self) -> &'static str {
+        match self {
+            Self::SpaceSaver => "24",
+            Self::Balanced => "22",
+            Self::HighQuality => "20",
+        }
+    }
+
+    // Hardware CQ/QP/ICQ scales are encoder-specific; these presets express
+    // comparable priorities, not the same RF values as software x264.
+    fn hardware_quality(self) -> &'static str {
+        match self {
+            Self::SpaceSaver => "28",
+            Self::Balanced => "24",
+            Self::HighQuality => "20",
+        }
+    }
+
+    fn is_balanced(&self) -> bool {
+        *self == Self::Balanced
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EncoderConfig {
     pub encoder: VideoEncoder,
     /// DRM render node for VAAPI/Linux QSV; adapter index for NVENC/Windows QSV.
     pub device: Option<String>,
+    // Keep old balanced recipes compatible with their serialized form.
+    #[serde(skip_serializing_if = "QualityPreset::is_balanced")]
+    pub quality: QualityPreset,
 }
 
 impl EncoderConfig {
@@ -215,10 +251,24 @@ impl SelectedEncoder {
     }
 
     pub fn output_args(&self) -> Vec<String> {
+        // Capability probes retain their original quality so cached results
+        // continue to cover the most demanding preset.
+        self.output_args_with_quality(QualityPreset::HighQuality)
+    }
+
+    pub fn output_args_with_quality(&self, quality: QualityPreset) -> Vec<String> {
         let mut args = vec!["-c:v".into(), self.encoder.name().into()];
+        let hardware_quality = quality.hardware_quality();
         let options: &[&str] = match self.encoder {
             VideoEncoder::Libx264 | VideoEncoder::Auto => &[
-                "-preset", "veryfast", "-crf", "20", "-threads", "2", "-pix_fmt", "yuv420p",
+                "-preset",
+                "veryfast",
+                "-crf",
+                quality.x264_crf(),
+                "-threads",
+                "2",
+                "-pix_fmt",
+                "yuv420p",
             ],
             VideoEncoder::H264Nvenc => &[
                 "-preset",
@@ -226,7 +276,7 @@ impl SelectedEncoder {
                 "-rc",
                 "vbr",
                 "-cq",
-                "20",
+                hardware_quality,
                 "-b:v",
                 "0",
                 "-profile:v",
@@ -236,20 +286,27 @@ impl SelectedEncoder {
                 "-preset",
                 "veryfast",
                 "-global_quality",
-                "20",
+                hardware_quality,
                 "-profile:v",
                 "high",
             ],
-            VideoEncoder::H264Vaapi => &["-rc_mode", "CQP", "-qp", "20", "-profile:v", "high"],
+            VideoEncoder::H264Vaapi => &[
+                "-rc_mode",
+                "CQP",
+                "-qp",
+                hardware_quality,
+                "-profile:v",
+                "high",
+            ],
             VideoEncoder::H264Amf => &[
                 "-quality",
                 "speed",
                 "-rc",
                 "cqp",
                 "-qp_i",
-                "20",
+                hardware_quality,
                 "-qp_p",
-                "20",
+                hardware_quality,
                 "-profile:v",
                 "high",
             ],
@@ -559,6 +616,7 @@ async fn candidates(
         let config = EncoderConfig {
             encoder,
             device: Some(device.to_owned()),
+            ..Default::default()
         };
         return Ok(if config.validate().is_ok() {
             vec![SelectedEncoder {
@@ -815,13 +873,15 @@ mod tests {
             let config = EncoderConfig {
                 encoder: VideoEncoder::H264Nvenc,
                 device: Some(device.into()),
+                ..Default::default()
             };
             assert!(config.validate().is_err(), "{device:?}");
         }
         assert!(
             EncoderConfig {
                 encoder: VideoEncoder::H264Qsv,
-                device: Some("0,foo=bar".into())
+                device: Some("0,foo=bar".into()),
+                ..Default::default()
             }
             .validate()
             .is_err()
@@ -829,7 +889,8 @@ mod tests {
         assert!(
             EncoderConfig {
                 encoder: VideoEncoder::H264Vaapi,
-                device: Some("/etc/passwd".into())
+                device: Some("/etc/passwd".into()),
+                ..Default::default()
             }
             .validate()
             .is_err()
@@ -837,7 +898,8 @@ mod tests {
         assert!(
             EncoderConfig {
                 encoder: VideoEncoder::Libx264,
-                device: Some("0".into())
+                device: Some("0".into()),
+                ..Default::default()
             }
             .validate()
             .is_err()
@@ -912,6 +974,7 @@ mod tests {
         let mut config = EncoderConfig {
             encoder: VideoEncoder::H264Vaapi,
             device: Some("/dev/dri/renderD2147483647".into()),
+            ..Default::default()
         };
         let error = select(&config, (128, 128), "30/1", &cancel)
             .await

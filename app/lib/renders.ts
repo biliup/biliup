@@ -17,8 +17,9 @@ export interface MaskRegion {
 export interface RenderRecipe { danmaku: DanmakuSettings; regions: MaskRegion[]; encoding?: EncoderConfig }
 export interface RenderAsset { id: number; width: number; height: number; sha256: string; url: string }
 export type VideoEncoder = 'auto' | 'libx264' | 'h264_nvenc' | 'h264_qsv' | 'h264_vaapi' | 'h264_amf'
-export interface EncoderConfig { encoder: VideoEncoder; device: string | null }
-export const defaultEncoderConfig = (): EncoderConfig => ({ encoder: 'auto', device: null })
+export type RenderQuality = 'space_saver' | 'balanced' | 'high_quality'
+export interface EncoderConfig { encoder: VideoEncoder; device: string | null; quality: RenderQuality }
+export const defaultEncoderConfig = (): EncoderConfig => ({ encoder: 'auto', device: null, quality: 'balanced' })
 export interface RenderEncoderCapability {
   name: Exclude<VideoEncoder, 'auto'>; label: string; available: boolean; device: string | null; error: string | null
 }

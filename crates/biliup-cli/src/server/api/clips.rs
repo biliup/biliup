@@ -14,6 +14,7 @@ use crate::server::workbench::clips::{
     State as ClipState, SubmitState, UpdateOutcome,
 };
 use crate::server::workbench::markers::{self, Timing};
+use crate::server::workbench::renders::encoding::QualityPreset;
 use crate::server::workbench::{live, recorder, store};
 use axum::Json;
 use axum::body::Body;
@@ -202,6 +203,7 @@ pub struct CreateClip {
     pub title: String,
     pub marker_id: Option<i64>,
     pub export: Option<Mode>,
+    pub quality: Option<QualityPreset>,
 }
 
 /// `POST /v1/sessions/{id}/clips`
@@ -296,7 +298,7 @@ pub async fn create_clip(
     if let Some(mode) = body.export {
         match clips::begin_export(&pool, clip.id, mode, now).await {
             Ok(Some(exporting)) => {
-                exports.start(exporting.clone());
+                exports.start_with_quality(exporting.clone(), body.quality.unwrap_or_default());
                 clip = exporting;
             }
             Ok(None) => {}
@@ -452,6 +454,7 @@ pub async fn delete_clip(
 #[serde(deny_unknown_fields)]
 pub struct ExportClip {
     pub mode: Mode,
+    pub quality: Option<QualityPreset>,
     #[serde(default)]
     pub recipe: Option<crate::server::workbench::renders::RenderRecipe>,
 }
@@ -493,7 +496,7 @@ pub async fn export_clip(
     match clips::begin_export(&pool, cid, body.mode, recorder::now_ms()).await {
         Ok(Some(clip)) => {
             publisher.forget_upload(cid);
-            exports.start(clip.clone());
+            exports.start_with_quality(clip.clone(), body.quality.unwrap_or_default());
             (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response()
         }
         Ok(None) => match clips::get(&pool, cid).await {

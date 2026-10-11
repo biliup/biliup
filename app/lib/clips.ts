@@ -137,10 +137,12 @@ export function refresh(clip: Pick<Clip, 'id' | 'session_id'>) {
 /** 按入点、出点建一个切片；给了 `export` 就建好立即导出，否则是草稿 */
 export async function createClip(
   sessionId: number,
-  body: { in_ms: number; out_ms: number; title?: string; marker_id?: number | null; export?: ClipMode }
+  body: { in_ms: number; out_ms: number; title?: string; marker_id?: number | null; export?: ClipMode; quality?: import('./renders').RenderQuality }
 ): Promise<Clip> {
+  const { quality, ...clipBody } = body
   const clip = await sendJson<Clip>(clipsUrl(sessionId), 'POST', {
-    ...body,
+    ...clipBody,
+    ...(body.export === 'precise' && quality ? { quality } : {}),
     in_ms: Math.max(0, Math.round(body.in_ms)),
     out_ms: Math.round(body.out_ms),
   })
@@ -189,8 +191,17 @@ export async function deleteClip(clip: Pick<Clip, 'id' | 'session_id'>): Promise
 }
 
 /** 开始导出（失败后重试也是它）；导出在后台进行，列表按导出中自动轮询 */
-export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: ClipMode, recipe?: import('./renders').RenderRecipe): Promise<Clip> {
-  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', { mode, ...(recipe ? { recipe } : {}) })
+export async function exportClip(
+  clip: Pick<Clip, 'id' | 'session_id'>,
+  mode: ClipMode,
+  recipe?: import('./renders').RenderRecipe,
+  quality?: import('./renders').RenderQuality,
+): Promise<Clip> {
+  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', {
+    mode,
+    ...(recipe ? { recipe } : {}),
+    ...(!recipe && mode === 'precise' && quality ? { quality } : {}),
+  })
   refresh(exporting)
   return exporting
 }

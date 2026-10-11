@@ -29,6 +29,7 @@ import {
   updateClip,
 } from '@/app/lib/clips'
 import { formatSize } from '@/app/lib/use-dashboard'
+import type { RenderQuality } from '@/app/lib/renders'
 import { formatPrecise, formatSpan } from '@/app/lib/sessions'
 import { canPublish, jobFinished, MAX_BATCH, needsConfirm, type PublishJob } from '@/app/lib/publish'
 import { BvLink, JobStatus } from '@/app/ui/publish/JobStatus'
@@ -275,8 +276,8 @@ function ClipStatus({ clip }: { clip: Clip }) {
   )
 }
 
-export const QUICK_TIP = '快速剪：按关键帧切，不转码，几秒就好；入点、出点放宽到最近的关键帧，保持录像原格式'
-export const PRECISE_TIP = '精确剪：用服务器上的 ffmpeg 转码成 H.264 / AAC 的 MP4，首尾帧对准选段；较慢，占 CPU'
+export const QUICK_TIP = '快速剪：按关键帧切，不转码、不应用遮罩或弹幕，几秒就好；入点、出点放宽到最近的关键帧，保持录像原格式'
+export const PRECISE_TIP = '精确剪：用服务器上的 ffmpeg 转码成 H.264 / AAC 的 MP4，首尾帧对准选段；使用左侧视频编码里的质量预设；不应用遮罩或弹幕'
 
 function ExportButton({
   mode,
@@ -286,6 +287,7 @@ function ExportButton({
   editReason,
   label,
   primary,
+  quality,
 }: {
   mode: ClipMode
   clip: Clip
@@ -294,13 +296,14 @@ function ExportButton({
   editReason: string
   label: string
   primary?: boolean
+  quality: RenderQuality
 }) {
   const [busy, setBusy] = useState(false)
   const reason = !canEdit ? editReason : mode === 'precise' ? ffmpeg.reason : null
   const run = async () => {
     setBusy(true)
     try {
-      await exportClip(clip, mode)
+      await exportClip(clip, mode, undefined, mode === 'precise' ? quality : undefined)
     } catch (e) {
       if (!(e instanceof ReportedError)) Toast.error({ content: `没能开始导出：${errorText(e)}`, duration: 4 })
     } finally {
@@ -367,6 +370,7 @@ function ClipTools({
   editReason,
   canDownload,
   publish,
+  quality,
 }: {
   clip: Clip
   ffmpeg: FfmpegState
@@ -375,6 +379,7 @@ function ClipTools({
   canDownload: boolean
   /** 「发布」按钮；不能发布（没权限、已发布、在发布队列里）时为 null */
   publish: React.ReactNode
+  quality: RenderQuality
 }) {
   if (clip.state === 'discarded') return null
   if (clip.state === 'exporting') return publish ? <div className={styles.clipTools}>{publish}</div> : null
@@ -411,6 +416,7 @@ function ClipTools({
             canEdit={canEdit}
             editReason={editReason}
             label={other === 'precise' ? '改用精确剪' : '改用快速剪'}
+            quality={quality}
           />
         ) : null}
       </div>
@@ -429,6 +435,7 @@ function ClipTools({
           canEdit={canEdit}
           editReason={editReason}
           label={`重试${clipModeText(retry)}`}
+          quality={quality}
           primary
         />
       ) : null}
@@ -441,6 +448,7 @@ function ClipTools({
           editReason={editReason}
           label={retry ? '改用快速剪' : '快速剪'}
           primary={!retry}
+          quality={quality}
         />
       ) : null}
       {retry !== 'precise' ? (
@@ -451,6 +459,7 @@ function ClipTools({
           canEdit={canEdit}
           editReason={editReason}
           label={retry ? '改用精确剪' : '精确剪'}
+          quality={quality}
         />
       ) : null}
     </div>
@@ -473,6 +482,7 @@ function ClipRow({
   selecting,
   selected,
   onToggle,
+  quality,
 }: {
   clip: Clip
   active: boolean
@@ -490,6 +500,7 @@ function ClipRow({
   selecting: boolean
   selected: boolean
   onToggle: (c: Clip, on: boolean) => void
+  quality: RenderQuality
 }) {
   const [renaming, setRenaming] = useState(false)
   const queued = !!job && !jobFinished(job)
@@ -578,6 +589,7 @@ function ClipRow({
               editReason={editReason}
               canDownload={canDownload}
               publish={publish}
+              quality={quality}
             />
           </>
         )}
@@ -650,6 +662,7 @@ export function SidePanel({
   editReason,
   canDownload,
   ffmpeg,
+  quality,
   onSeekMarker,
   onSelectMarker,
   onLoadClip,
@@ -674,6 +687,7 @@ export function SidePanel({
   editReason: string
   canDownload: boolean
   ffmpeg: FfmpegState
+  quality: RenderQuality
   onSeekMarker: (m: Marker) => void
   onSelectMarker: (m: Marker) => void
   onLoadClip: (c: Clip) => void
@@ -747,7 +761,7 @@ export function SidePanel({
         </TabPane>
         <TabPane tab={`切片 ${clips.length}`} itemKey="clips">
           <Text type="tertiary" size="small" className={styles.panelNote}>
-            快速剪按关键帧切、不转码；精确剪用 ffmpeg 转码成 MP4，首尾对准选段。导出的文件存在服务器的 clips
+            快速剪按关键帧切、不转码；精确剪用 ffmpeg 按左侧视频编码的质量预设转码成 MP4，首尾对准选段。两者都不应用遮罩或弹幕；需要这些效果时用左侧的“合成导出选段”。导出的文件存在服务器的 clips
             目录下，删掉切片时一起删掉。
             {canSubmit
               ? `发布固定按转载投稿，同一时间只传一个稿件${running ? `（发布队列里还有 ${running} 个）` : ''}。`
@@ -809,6 +823,7 @@ export function SidePanel({
                   active={activeClip === c.id}
                   warning={clipWarning(c)}
                   ffmpeg={ffmpeg}
+                  quality={quality}
                   canEdit={canEdit}
                   editReason={editReason}
                   canDownload={canDownload}
