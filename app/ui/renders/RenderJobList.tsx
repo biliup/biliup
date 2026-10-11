@@ -25,7 +25,7 @@ export function RenderJobProgress({ job }: { job: RenderJob }) {
       <span>耗时：{formatTime(job.elapsed_ms)}</span>
       <span>剩余：{job.state === 'running' ? formatTime(job.eta_ms) : '—'}</span>
     </div>
-    {job.fallback_reason && <p className={styles.jobNotice}>硬件编码不可用，已回退：{job.fallback_reason}</p>}
+    {job.fallback_reason && <p className={styles.jobNotice}>渲染路径已调整：{job.fallback_reason}</p>}
     {job.error && <p className={styles.jobError}>{job.error}</p>}
   </>
 }

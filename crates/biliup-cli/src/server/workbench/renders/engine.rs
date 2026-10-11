@@ -610,11 +610,6 @@ enum QsvMosaicBackend {
     QsvVpp,
 }
 
-/// A QSV decoder/encoder path for persistent mosaic and smooth-blur masks.
-/// Mosaic uses OpenCL remapping to keep the NV12 nearest-neighbour block pattern
-/// on shared QSV surfaces. Smooth blur uses QSV scaling. ASS stays on libass
-/// and only its occupied display band crosses between QSV surfaces and system
-/// memory.
 fn qsv_filter_graph(
     source: &SourceSpan,
     settings: &RenderRecipe,
@@ -628,17 +623,58 @@ fn qsv_filter_graph(
     encoder: &SelectedEncoder,
     mosaic_backend: QsvMosaicBackend,
 ) -> Option<String> {
+    qsv_filter_graph_with_images(
+        source,
+        settings,
+        media,
+        target,
+        origin,
+        ass,
+        &HashMap::new(),
+        audio_input,
+        include_audio,
+        frame_rate,
+        encoder,
+        mosaic_backend,
+    )
+}
+
+/// A QSV decoder/encoder path for persistent mosaic, smooth-blur and image masks.
+/// Mosaic uses OpenCL remapping to keep the NV12 nearest-neighbour block pattern
+/// on shared QSV surfaces. Smooth blur uses QSV scaling. Static images are
+/// uploaded once as BGRA surfaces, preserving their alpha, and reused by QSV.
+/// ASS stays on libass and only its occupied display band crosses between QSV
+/// surfaces and system memory.
+fn qsv_filter_graph_with_images(
+    source: &SourceSpan,
+    settings: &RenderRecipe,
+    media: &MediaInfo,
+    target: (u32, u32),
+    origin: i64,
+    ass: bool,
+    image_inputs: &HashMap<i64, usize>,
+    audio_input: usize,
+    include_audio: bool,
+    frame_rate: &str,
+    encoder: &SelectedEncoder,
+    mosaic_backend: QsvMosaicBackend,
+) -> Option<String> {
+    let active_regions: Vec<_> = settings
+        .regions
+        .iter()
+        .filter(|region| region.opacity > 0. && enable(region, source, origin).is_some())
+        .collect();
     if encoder.encoder != encoding::VideoEncoder::H264Qsv
         || target.0 % 2 != 0
         || target.1 % 2 != 0
         || (media.width, media.height) != target
-        || settings.regions.iter().any(|region| {
+        || active_regions.iter().any(|region| {
             !matches!(
                 region.effect_type,
-                EffectType::Mosaic | EffectType::SmoothBlur
+                EffectType::Mosaic | EffectType::SmoothBlur | EffectType::Image
             ) || !region.intervals.is_empty()
         })
-        || settings.regions.len() > 4
+        || active_regions.len() > 4
     {
         return None;
     }
@@ -649,19 +685,36 @@ fn qsv_filter_graph(
         secs(origin)
     )];
     let mut index = 0;
-    for region in &settings.regions {
-        if region.opacity == 0. {
-            continue;
-        }
-        let (x, y, w, h) = region_rect(region, media);
+    for region in active_regions {
+        let (x, y, image_w, image_h) = region_rect(region, media);
         let left = x & !1;
         let top = y & !1;
-        let right = (x + w).div_ceil(2) * 2;
-        let bottom = (y + h).div_ceil(2) * 2;
+        let right = (x + image_w).div_ceil(2) * 2;
+        let bottom = (y + image_h).div_ceil(2) * 2;
         let right = right.min(media.width);
         let bottom = bottom.min(media.height);
         let w = right.checked_sub(left)?;
         let h = bottom.checked_sub(top)?;
+        let next = index + 1;
+        let alpha = (region.opacity * 255.).round().clamp(0., 255.) as u8;
+        if region.effect_type == EffectType::Image {
+            let input = image_inputs.get(&region.asset_id?)?;
+            let pad_x = x - left;
+            let pad_y = y - top;
+            // Align the composition rectangle for NV12 without stretching or
+            // shifting the image. Transparent borders preserve its exact ROI.
+            // Its timestamp is the start of the normalized source timeline,
+            // so an input-side seek cannot delay the static overlay's arrival.
+            parts.push(format!(
+                "[{input}:v:0]scale={image_w}:{image_h},format=bgra,pad={w}:{h}:{pad_x}:{pad_y}:color=black@0,setsar=1,trim=end_frame=1,settb=AVTB,setpts=PTS-STARTPTS-({})/TB,hwupload=extra_hw_frames=8[picture{index}]",
+                secs(origin)
+            ));
+            parts.push(format!(
+                "[v{index}][picture{index}]overlay_qsv=x={left}:y={top}:w={w}:h={h}:alpha={alpha}:eof_action=repeat[v{next}]"
+            ));
+            index = next;
+            continue;
+        }
         let block = region.strength.round().max(1.) as u32;
         let raw_low_w = (w / block).max(1);
         let raw_low_h = (h / block).max(1);
@@ -684,8 +737,6 @@ fn qsv_filter_graph(
         if low_w > w || low_h > h {
             return None;
         }
-        let next = index + 1;
-        let alpha = (region.opacity * 255.).round().clamp(0., 255.) as u8;
         parts.push(format!("[v{index}]split=2[keep{index}][crop{index}]"));
         match region.effect_type {
             EffectType::Mosaic if mosaic_backend == QsvMosaicBackend::OpenClNearest => {
@@ -1487,19 +1538,20 @@ pub async fn render(
             images.insert(id, input);
         }
         let audio_input = images.len() + 1;
-        let has_mosaic = request
-            .settings
-            .regions
-            .iter()
-            .any(|region| region.effect_type == EffectType::Mosaic && region.opacity > 0.);
+        let has_mosaic = request.settings.regions.iter().any(|region| {
+            region.effect_type == EffectType::Mosaic
+                && region.opacity > 0.
+                && enable(region, source, ass.time_origin_ms).is_some()
+        });
         let mut qsv_mosaic_backend = None;
-        let mut qsv_graph = qsv_filter_graph(
+        let mut qsv_graph = qsv_filter_graph_with_images(
             source,
             &request.settings,
             &media,
             target,
             ass.time_origin_ms,
             has_ass,
+            &images,
             audio_input,
             true,
             &first.frame_rate,
@@ -1550,13 +1602,14 @@ pub async fn render(
             let mut working_backend = None;
             let mut probe_error = None;
             for &backend in backends {
-                let probe_graph = qsv_filter_graph(
+                let probe_graph = qsv_filter_graph_with_images(
                     source,
                     &request.settings,
                     &media,
                     target,
                     ass.time_origin_ms,
                     has_ass,
+                    &images,
                     audio_input,
                     false,
                     &first.frame_rate,
@@ -1573,7 +1626,7 @@ pub async fn render(
                     source,
                     &media,
                     seek_ms,
-                    0,
+                    images.len(),
                     filter_file_option,
                     "filters-qsv-probe.txt",
                     true,
@@ -1627,13 +1680,14 @@ pub async fn render(
                 } else {
                     tracing::info!(segment_id = source.segment_id, "QSV 渲染滤镜图已就绪");
                 }
-                qsv_graph = qsv_filter_graph(
+                qsv_graph = qsv_filter_graph_with_images(
                     source,
                     &request.settings,
                     &media,
                     target,
                     ass.time_origin_ms,
                     has_ass,
+                    &images,
                     audio_input,
                     true,
                     &first.frame_rate,
@@ -1673,6 +1727,7 @@ pub async fn render(
             .await
             .map_err(|e| format!("保存合成滤镜失败：{e}"))?;
         let parallel_parts = if use_qsv_graph
+            && images.is_empty()
             && has_ass
             && qsv_mosaic_backend == Some(QsvMosaicBackend::OpenClNearest)
         {
