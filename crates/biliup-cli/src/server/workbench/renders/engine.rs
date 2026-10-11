@@ -562,7 +562,7 @@ fn qsv_audio_filter_graph(source: &SourceSpan, media: &MediaInfo, audio_input: u
 
 fn qsv_parallel_parts(source: &SourceSpan, frame_rate: &str) -> Option<Vec<SourceSpan>> {
     let duration = source.trim_end_ms.checked_sub(source.trim_start_ms)?;
-    if duration < QSV_PARALLEL_MIN_PART_MS * 4 || duration % 1_000 != 0 {
+    if duration < QSV_PARALLEL_MIN_PART_MS * 4 {
         return None;
     }
     let (numerator, denominator) = frame_rate.split_once('/')?;
@@ -570,9 +570,9 @@ fn qsv_parallel_parts(source: &SourceSpan, frame_rate: &str) -> Option<Vec<Sourc
         return None;
     }
 
-    // Whole-second cuts stay on frame boundaries for integer-rate output.
-    // Each child keeps the original source and ASS clock; only its output trim
-    // changes, while the caller seeks backward by the same scrolling pre-roll.
+    // Keep internal cuts on whole-second frame boundaries for integer-rate
+    // output. A fractional duration belongs to the final part, preserving the
+    // requested end time without creating fractional internal cut points.
     let seconds = duration / 1_000;
     let part_count =
         (seconds / (QSV_PARALLEL_MIN_PART_MS / 1_000)).min(QSV_PARALLEL_MAX_PARTS as i64) as usize;
@@ -582,7 +582,11 @@ fn qsv_parallel_parts(source: &SourceSpan, frame_rate: &str) -> Option<Vec<Sourc
     let mut start = source.trim_start_ms;
     for index in 0..part_count {
         let part_seconds = base_seconds + if (index as i64) < remainder { 1 } else { 0 };
-        let end = start.checked_add(part_seconds * 1_000)?;
+        let end = if index + 1 == part_count {
+            source.trim_end_ms
+        } else {
+            start.checked_add(part_seconds.checked_mul(1_000)?)?
+        };
         let mut part = source.clone();
         part.trim_start_ms = start;
         part.trim_end_ms = end;
@@ -651,11 +655,27 @@ fn qsv_filter_graph(
         let w = right.checked_sub(left)?;
         let h = bottom.checked_sub(top)?;
         let block = region.strength.round().max(1.) as u32;
-        let low_w = (w / block).max(1);
-        let low_h = (h / block).max(1);
-        // QSV/NV12 surfaces need even dimensions. Rare geometry that cannot
-        // retain the effect grid goes through the proven CPU path.
-        if w < 2 || h < 2 || low_w < 2 || low_h < 2 || low_w % 2 != 0 || low_h % 2 != 0 {
+        let raw_low_w = (w / block).max(1);
+        let raw_low_h = (h / block).max(1);
+        if w < 2 || h < 2 || raw_low_w < 2 || raw_low_h < 2 {
+            return None;
+        }
+        // QSV/NV12 surfaces require even dimensions. A one-pixel upward
+        // adjustment keeps smooth blur on the hardware path with a negligible
+        // change to its bilinear downscale; mosaic retains its exact block grid
+        // and still falls back when that grid cannot be represented evenly.
+        let (low_w, low_h) = if region.effect_type == EffectType::SmoothBlur {
+            (
+                raw_low_w.div_ceil(2).saturating_mul(2),
+                raw_low_h.div_ceil(2).saturating_mul(2),
+            )
+        } else {
+            if raw_low_w % 2 != 0 || raw_low_h % 2 != 0 {
+                return None;
+            }
+            (raw_low_w, raw_low_h)
+        };
+        if low_w > w || low_h > h {
             return None;
         }
         let next = index + 1;
@@ -1370,6 +1390,7 @@ pub async fn render(
     .await?;
     let mut active_selected = selected.clone();
     let mut manifest = String::from("ffconcat version 1.0\n");
+    let mut qsv_fallback_reported = false;
     for (number, source) in request.sources.iter().enumerate() {
         report(engine_progress(
             Some(&active_selected),
@@ -1480,6 +1501,19 @@ pub async fn render(
             QsvMosaicBackend::OpenClNearest,
         );
         let mut use_qsv_graph = qsv_graph.is_some();
+        if !use_qsv_graph
+            && selected.encoder == encoding::VideoEncoder::H264Qsv
+            && !qsv_fallback_reported
+        {
+            let reason = "当前遮罩或片段尺寸不满足 QSV 滤镜条件，已使用软件滤镜";
+            tracing::warn!(
+                segment_id = source.segment_id,
+                %reason,
+                "QSV 滤镜图未启用"
+            );
+            append_fallback_reason(&mut active_selected, reason.into());
+            qsv_fallback_reported = true;
+        }
         if use_qsv_graph && has_ass {
             let band_height = qsv_danmaku_band_height(&request.settings.danmaku, target.1);
             if let Some(script) = qsv_danmaku_ass(&ass.ass, target.1, band_height) {

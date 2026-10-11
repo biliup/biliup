@@ -119,6 +119,60 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
     assert_eq!(smooth.matches("hwdownload").count(), 1); // ASS only
     assert!(smooth.contains("alpha=255"));
     assert!(smooth.contains("setpts=PTS-(0.050000000)/TB"));
+
+    // Odd low-resolution sizes are rounded up for NV12 smooth blur, so these
+    // common region geometries stay on the QSV graph. Mosaic keeps its exact
+    // nearest-neighbour grid and still uses the software path when it is odd.
+    let odd_smooth_region = MaskRegion {
+        x: 0.,
+        y: 0.,
+        width: 0.135,
+        height: 0.1,
+        ..region.clone()
+    };
+    let odd_smooth_settings = RenderRecipe {
+        regions: vec![odd_smooth_region.clone()],
+        ..settings.clone()
+    };
+    let odd_smooth = qsv_filter_graph(
+        &source,
+        &odd_smooth_settings,
+        &media,
+        (1920, 1080),
+        0,
+        true,
+        1,
+        false,
+        "60/1",
+        &encoder,
+        QsvMosaicBackend::OpenClNearest,
+    )
+    .unwrap();
+    assert!(odd_smooth.contains(
+        "vpp_qsv=cw=260:ch=108:cx=0:cy=0:w=22:h=10:async_depth=8,scale_qsv=w=260:h=108:format=nv12"
+    ));
+    let odd_mosaic = RenderRecipe {
+        regions: vec![MaskRegion {
+            effect_type: EffectType::Mosaic,
+            ..odd_smooth_region
+        }],
+        ..settings.clone()
+    };
+    assert!(qsv_filter_graph(
+        &source,
+        &odd_mosaic,
+        &media,
+        (1920, 1080),
+        0,
+        true,
+        1,
+        false,
+        "60/1",
+        &encoder,
+        QsvMosaicBackend::OpenClNearest,
+    )
+    .is_none());
+
     let band_ass =
         qsv_danmaku_ass(&super::super::danmaku::empty_ass(1920, 1080), 1080, 432).unwrap();
     assert!(band_ass.contains("PlayResY: 432"));
@@ -241,7 +295,26 @@ fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
     assert!(qsv_parallel_parts(&short, "60/1").is_none());
     let mut fractional_duration = span.clone();
     fractional_duration.trim_end_ms += 20;
-    assert!(qsv_parallel_parts(&fractional_duration, "60/1").is_none());
+    let fractional_parts = qsv_parallel_parts(&fractional_duration, "60/1").unwrap();
+    assert_eq!(fractional_parts.len(), 6);
+    assert_eq!(
+        fractional_parts.first().unwrap().trim_start_ms,
+        span.trim_start_ms
+    );
+    assert_eq!(
+        fractional_parts.last().unwrap().trim_end_ms,
+        fractional_duration.trim_end_ms
+    );
+    assert!(fractional_parts[..5]
+        .iter()
+        .all(|part| { (part.trim_end_ms - part.trim_start_ms) % 1_000 == 0 }));
+    assert_eq!(
+        fractional_parts
+            .iter()
+            .map(|part| part.trim_end_ms - part.trim_start_ms)
+            .sum::<i64>(),
+        60_020
+    );
     assert!(qsv_parallel_parts(&span, "30000/1001").is_none());
 }
 
