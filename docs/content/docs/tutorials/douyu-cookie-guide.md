@@ -70,8 +70,8 @@ acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
 
 网页版取流设备 ID 留空时，优先使用 Web Cookie 中的 `dy_did`，其次是 `acf_did`，再使用默认值；App 回退使用 `acf_did` 或默认值。不要为了续期把 passport 设备号填到取流设备字段。
 
-![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/biliup/images/douyu-tutorial/passport-cookie-export.png)
-![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/biliup/images/douyu-tutorial/passport-cookie-export_2.png)
+![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/images/douyu-tutorial/passport-cookie-export.webp)
+![浏览器中 Web Cookie 与 passport 长期凭据的作用域](/images/douyu-tutorial/passport-cookie-export_2.webp)
 
 ## 查看登录状态和手动续期
 
@@ -90,7 +90,7 @@ acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
 | 续期凭据已失效 / 登录已失效 | 重新登录斗鱼，导出同一会话的 Web Cookie 与长期凭据，再保存 |
 | 自动续期已关闭              | 按需开启；已有 Cookie 仍会做登录校验                       |
 
-![本机斗鱼登录与自动续期配置](/biliup/images/douyu-tutorial/douyu-login-settings.png)
+![本机斗鱼登录与自动续期配置](/images/douyu-tutorial/douyu-login-settings.webp)
 
 ### 自动调度、持久化与重启
 

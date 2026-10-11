@@ -51,7 +51,7 @@ top = false
 
 同时检查 **碎片过滤（filtering_threshold）**。短分段如果小于该阈值，会被过滤，不进入投稿和后处理。启用遮挡时，程序先完成遮挡，再按原始分段大小执行过滤；被工作台引用而保留的小分段也会是遮挡后的内容。需要保留短分段用于本地合并时，应降低阈值；设为 `0` 可关闭按大小过滤。
 
-![房间自定义分段时长与碎片过滤设置](/biliup/images/recording-and-masking/segment-duration-settings.png)
+![房间自定义分段时长与碎片过滤设置](/images/recording-and-masking/segment-duration-settings.webp)
 
 ## 在真实直播截帧上圈选遮挡区域
 
@@ -77,7 +77,7 @@ top = false
 
 如果看不到入口，先确认账号有配置处理器的权限：启用 Web 鉴权时，默认只有超级管理员可操作；Fleet 托管房间需要在控制面修改。还应确认正在运行包含此功能的新版本，并强制刷新浏览器。源码构建需要先用 `npm run build` 更新前端 `out/`，后端改动需要重新编译和启动；发布构建会把前端嵌入二进制，也需要重新构建程序。
 
-![在固定直播截帧上圈选遮挡区域](/biliup/images/recording-and-masking/mosaic-frame-selection.png)
+![在固定直播截帧上圈选遮挡区域](/images/recording-and-masking/mosaic-frame-selection.webp)
 
 ## 确认遮挡完成后再使用文件
 
@@ -99,7 +99,7 @@ top = false
 
 高分辨率和高帧率会增加 CPU 负载、处理时间与临时磁盘占用。4K60 转码可能慢于实时；缩短分段只能让单个任务更短，不能提高总处理能力。等待期间预留磁盘空间，必要时减少区域或降低录制分辨率。
 
-![同一帧在遮挡前与正式输出中的效果对比](/biliup/images/recording-and-masking/mosaic-output-comparison.jpg)
+![同一帧在遮挡前与正式输出中的效果对比](/images/recording-and-masking/mosaic-output-comparison.webp)
 
 ## FLV 音频时间戳检查与自动修复
 
