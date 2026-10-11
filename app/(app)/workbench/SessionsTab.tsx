@@ -1,13 +1,17 @@
 'use client'
-import { Spin, Table, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Button, Popconfirm, Spin, Table, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { IconDeleteStroked } from '@douyinfe/semi-icons'
 import { SortOrder } from '@douyinfe/semi-ui/lib/es/table'
 import Link from 'next/link'
 import useSWR from 'swr'
 import { fetcher, type StreamerInfo } from '@/app/lib/api-streamer'
-import { isReadable, replayHref, type SessionDetail, sessionUrl } from '@/app/lib/sessions'
+import { isReadable, replayHref, type SessionDetail, sessionUrl, deleteSession } from '@/app/lib/sessions'
 import { humDate } from '@/app/lib/utils'
 import { type AutoClipAvailability, useAutoClip, useSessionJob } from '@/app/lib/auto-clip'
 import { JobCell } from '@/app/ui/auto-clip/AutoClipJob'
+import { useMe } from '@/app/lib/use-me'
+import { ReportedError } from '@/app/lib/markers'
+import { useState } from 'react'
 import Filter from './Filter'
 import { useIsMobile } from '../../lib/useIsMobile'
 import dc from '@/app/ui/data-card.module.scss'
@@ -17,8 +21,25 @@ import styles from './sessions.module.scss'
 export default function SessionsTab() {
   const isMobile = useIsMobile()
   const { Text } = Typography
-  const { data: data, error, isLoading } = useSWR<any[]>('/v1/streamer-info', fetcher)
+  const { data: data, error, isLoading, mutate } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher)
   const autoClip = useAutoClip()
+  const { can } = useMe()
+  const [deleting, setDeleting] = useState<number | null>(null)
+
+  const removeSession = async (record: StreamerInfo) => {
+    setDeleting(record.id)
+    try {
+      await deleteSession(record.id)
+      await mutate()
+      Toast.success({ content: '已删除场次历史', duration: 2 })
+    } catch (error) {
+      if (!(error instanceof ReportedError)) {
+        Toast.error({ content: `删除失败：${error instanceof Error ? error.message : String(error)}`, duration: 4 })
+      }
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -80,19 +101,40 @@ export default function SessionsTab() {
       title: '',
       dataIndex: 'replay',
       fixed: 'right' as const,
-      width: 72,
+      width: can('clip.edit') ? 128 : 72,
       render: (_: unknown, record: StreamerInfo) =>
-        record.has_timeline ? (
-          <Link href={replayHref(record.id)} className={styles.replayLink}>
-            回看
-          </Link>
-        ) : (
-          <Tooltip content="这一场在升级前录制，没有时间轴，不能按场次回看；请在「录制文件」里按文件播放">
-            <Text type="tertiary" className={styles.replayOff}>
+        <div className={styles.actions}>
+          {record.has_timeline ? (
+            <Link href={replayHref(record.id)} className={styles.replayLink}>
               回看
-            </Text>
-          </Tooltip>
-        ),
+            </Link>
+          ) : (
+            <Tooltip content="这一场在升级前录制，没有时间轴，不能按场次回看；请在「录制文件」里按文件播放">
+              <Text type="tertiary" className={styles.replayOff}>
+                回看
+              </Text>
+            </Tooltip>
+          )}
+          {can('clip.edit') ? (
+            <Popconfirm
+              title="删除这场直播历史？"
+              content="会删除回看时间轴、标记和切片记录；原始录像、切片与合成文件保留在磁盘。正在录制或有未完成任务时无法删除。"
+              okText="删除历史"
+              okType="danger"
+              onConfirm={() => removeSession(record)}
+            >
+              <Button
+                size="small"
+                theme="borderless"
+                type="danger"
+                icon={<IconDeleteStroked />}
+                aria-label={`删除 ${record.name} 的场次历史`}
+                loading={deleting === record.id}
+                disabled={deleting !== null}
+              />
+            </Popconfirm>
+          ) : null}
+        </div>,
     },
   ]
 

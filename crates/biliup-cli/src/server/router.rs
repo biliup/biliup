@@ -38,7 +38,7 @@ use crate::server::api::renders::{
 };
 use crate::server::api::session_retention::patch_session;
 use crate::server::api::sessions::{
-    get_session, get_session_keyframes, get_session_media, list_sessions,
+    delete_session, get_session, get_session_keyframes, get_session_media, list_sessions,
 };
 use crate::server::api::system_stats::get_system_stats;
 use crate::server::infrastructure::service_register::ServiceRegister;
@@ -91,8 +91,11 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/live-rates", get(get_live_rates))
         // 切片工作台：场次、可落刀位置、DVR 回看（只按场次 id 寻址，不接受路径）
         .route("/v1/sessions", get(list_sessions))
-        // PATCH 是「保留这场」：改场次的 retain_until
-        .route("/v1/sessions/{id}", get(get_session).patch(patch_session))
+        // PATCH 是「保留这场」：改场次的 retain_until；DELETE 清除已结束场次的历史记录。
+        .route(
+            "/v1/sessions/{id}",
+            get(get_session).patch(patch_session).delete(delete_session),
+        )
         .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
         .route("/v1/sessions/{id}/media", get(get_session_media))
         // 切片工作台：看直播时打的标记（只按场次 id、标记 id 寻址）

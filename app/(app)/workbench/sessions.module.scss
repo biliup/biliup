@@ -18,3 +18,10 @@
 .fileReplay {
   margin-left: 12px;
 }
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}

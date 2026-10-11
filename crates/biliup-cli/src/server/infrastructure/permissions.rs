@@ -240,7 +240,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
             ClipEdit
         }
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
-        "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
+        "/v1/sessions/{id}" if method == Method::PATCH || method == Method::DELETE => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,

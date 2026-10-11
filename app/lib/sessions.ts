@@ -1,4 +1,5 @@
-import { API_BASE } from './api-streamer'
+import { API_BASE, apiFetch, handleResponse } from './api-streamer'
+import { ReportedError } from './markers'
 
 /** GET /v1/sessions 的一行（后端 `api/sessions.rs::SessionSummary`） */
 export interface SessionSummary {
@@ -62,6 +63,20 @@ export interface KeyframeList {
 }
 
 export const sessionUrl = (id: number) => `/v1/sessions/${id}`
+
+/** 删除场次历史及其工作台记录；原始录像、切片和合成文件保留。 */
+export async function deleteSession(id: number): Promise<void> {
+  const response = await apiFetch(sessionUrl(id), { method: 'DELETE' })
+  try {
+    await handleResponse(response)
+  } catch (error) {
+    if (response.status === 401 || response.status === 403) {
+      throw new ReportedError(error instanceof Error ? error.message : String(error))
+    }
+    throw error
+  }
+}
+
 /** 回看页的地址；`t` 是起播位置（场次时间，毫秒），`clip` 是打开后载入到选段、在右侧切片列表里选中的切片 */
 export const replayHref = (id: number, t?: number | null, clip?: number | null) =>
   `/replay?session=${id}${t === undefined || t === null ? '' : `&t=${Math.max(0, Math.round(t))}`}${

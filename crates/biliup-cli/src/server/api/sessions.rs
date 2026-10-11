@@ -4,8 +4,11 @@
 //! 回看流是 chunked 响应，没有 `Content-Length`，`--auth` 下会话失效时由访问控制层截断。
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
+use crate::server::workbench::clips::publish::queue::{ClipPublisher, JobState};
 use crate::server::workbench::dvr::{self, OpenError};
-use crate::server::workbench::store::{self, SegmentRow, SegmentState, SessionListRow};
+use crate::server::workbench::store::{
+    self, DeleteSessionOutcome, SegmentRow, SegmentState, SessionListRow,
+};
 use crate::server::workbench::{live, segment_index, session_keyframes};
 use axum::Json;
 use axum::body::Body;
@@ -240,6 +243,43 @@ pub async fn get_session(State(pool): State<ConnectionPool>, Path(id): Path<i64>
     .into_response()
 }
 
+/// `DELETE /v1/sessions/{id}`：删除已结束场次的历史记录和工作台元数据，保留本地媒体文件。
+pub async fn delete_session(
+    State(pool): State<ConnectionPool>,
+    State(publisher): State<Arc<ClipPublisher>>,
+    Path(id): Path<i64>,
+) -> Response {
+    if live::is_recording(id) {
+        return (StatusCode::CONFLICT, "正在录制的场次不能删除").into_response();
+    }
+    if publisher
+        .view(Some(id))
+        .jobs
+        .iter()
+        .any(|job| !matches!(job.state, JobState::Done | JobState::Cancelled))
+    {
+        return (
+            StatusCode::CONFLICT,
+            "场次有待处理的投稿任务，请先完成或取消任务",
+        )
+            .into_response();
+    }
+
+    match store::delete_session(&pool, id).await {
+        Ok(DeleteSessionOutcome::Deleted) => StatusCode::NO_CONTENT.into_response(),
+        Ok(DeleteSessionOutcome::NotFound) => not_found(),
+        Ok(DeleteSessionOutcome::NotEnded) => {
+            (StatusCode::CONFLICT, "场次尚未结束，不能删除").into_response()
+        }
+        Ok(DeleteSessionOutcome::Busy) => (
+            StatusCode::CONFLICT,
+            "场次有投稿或后台任务尚未完成，请先完成、取消或处理后重试",
+        )
+            .into_response(),
+        Err(error) => internal(error),
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct RangeQuery {
     /// 场次时间（毫秒），缺省 0。
@@ -377,9 +417,12 @@ mod tests {
     use crate::server::infrastructure::models::StreamerInfo;
     use crate::server::infrastructure::permissions::Role;
     use crate::server::infrastructure::users::{Backend, Credentials};
+    use crate::server::workbench::clips::export::ClipExports;
+    use crate::server::workbench::clips::publish::queue::{ClipPublisher, Offline};
     use crate::server::workbench::index::tests::build_flv;
     use axum::Router;
-    use axum::http::Request;
+    use axum::extract::FromRef;
+    use axum::http::{Method, Request};
     use axum::middleware::from_fn;
     use axum::routing::get;
     use axum_login::AuthManagerLayerBuilder;
@@ -389,6 +432,12 @@ mod tests {
     use tower::ServiceExt;
     use tower_sessions::SessionManagerLayer;
     use tower_sessions_sqlx_store::SqliteStore;
+
+    #[derive(Clone, FromRef)]
+    struct TestState {
+        pool: ConnectionPool,
+        publisher: Arc<ClipPublisher>,
+    }
 
     struct Fixture {
         dir: tempfile::TempDir,
@@ -470,12 +519,17 @@ mod tests {
                 media_response(&pool, id, query, &limit).await
             }
         };
+        let exports = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+        let publisher = Arc::new(ClipPublisher::new(pool.clone(), exports, Arc::new(Offline)));
         let app = Router::new()
             .route("/v1/sessions", get(list_sessions))
-            .route("/v1/sessions/{id}", get(get_session))
+            .route("/v1/sessions/{id}", get(get_session).delete(delete_session))
             .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
             .route("/v1/sessions/{id}/media", get(media))
-            .with_state(pool.clone())
+            .with_state(TestState {
+                pool: pool.clone(),
+                publisher,
+            })
             .route_layer(from_fn(require_permission))
             .merge(crate::server::api::auth::router())
             .layer(auth_layer);
@@ -520,6 +574,17 @@ mod tests {
 
     async fn get_as(app: &Router, cookie: Option<&str>, uri: &str) -> Response {
         let mut request = Request::builder().uri(uri);
+        if let Some(cookie) = cookie {
+            request = request.header(header::COOKIE, cookie);
+        }
+        app.clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+    }
+
+    async fn delete_as(app: &Router, cookie: Option<&str>, uri: &str) -> Response {
+        let mut request = Request::builder().method(Method::DELETE).uri(uri);
         if let Some(cookie) = cookie {
             request = request.header(header::COOKIE, cookie);
         }
@@ -597,6 +662,225 @@ mod tests {
             let response = get_as(&f.app, Some(&viewer), &uri).await;
             assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
         }
+    }
+
+    #[tokio::test]
+    async fn deleting_sessions_rejects_live_or_unended_rows() {
+        let f = fixture().await;
+        let admin = login(&f.app, "biliup", "admin-password").await;
+
+        let live_uri = format!("/v1/sessions/{}", f.session);
+        let response = delete_as(&f.app, Some(&admin), &live_uri).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(store::session(&f.pool, f.session).await.unwrap().is_some());
+
+        let unended_uri = format!("/v1/sessions/{}", f.legacy);
+        let response = delete_as(&f.app, Some(&admin), &unended_uri).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(store::session(&f.pool, f.legacy).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn deleting_a_session_conflicts_with_active_background_work() {
+        let f = fixture().await;
+        let admin = login(&f.app, "biliup", "admin-password").await;
+        store::close_session(&f.pool, f.legacy, 1_700_000_001_000)
+            .await
+            .unwrap();
+        let job: i64 = sqlx::query_scalar(
+            "INSERT INTO auto_clip_jobs (session_id, trigger, state, not_before, created_at)
+             VALUES (?, 'manual', 'running', 1, 1) RETURNING id",
+        )
+        .bind(f.legacy)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+
+        let uri = format!("/v1/sessions/{}", f.legacy);
+        let response = delete_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert!(store::session(&f.pool, f.legacy).await.unwrap().is_some());
+
+        sqlx::query("UPDATE auto_clip_jobs SET state='done' WHERE id=?")
+            .bind(job)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        let response = delete_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn deleting_a_session_cascades_metadata_but_keeps_media_files() {
+        let f = fixture().await;
+        let admin = login(&f.app, "biliup", "admin-password").await;
+        store::close_session(&f.pool, f.legacy, 1_700_000_001_000)
+            .await
+            .unwrap();
+
+        let media = f.dir.path().join("legacy.flv");
+        std::fs::write(&media, b"keep the recording").unwrap();
+        let segment =
+            store::insert_segment(&f.pool, f.legacy, &media.to_string_lossy(), "flv", 0, 0)
+                .await
+                .unwrap();
+        sqlx::query("UPDATE segments SET state='finished', end_ms=1000 WHERE id=?")
+            .bind(segment)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO filelist (file, session_id) VALUES ('legacy.flv', ?)")
+            .bind(f.legacy)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO markers (session_id, at_ms, label, created_at) VALUES (?, 0, 'marker', 1)",
+        )
+        .bind(f.legacy)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO clips (session_id, in_ms, out_ms, created_at, updated_at)
+             VALUES (?, 0, 1000, 1, 1)",
+        )
+        .bind(f.legacy)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO segment_pins (owner, session_id, from_ms, to_ms) VALUES ('test', ?, 0, 1000)")
+            .bind(f.legacy)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO auto_clip_jobs (session_id, trigger, state, not_before, created_at) VALUES (?, 'manual', 'done', 1, 1)")
+            .bind(f.legacy)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO clip_suggestions (session_id, in_ms, out_ms, created_at, updated_at) VALUES (?, 0, 1000, 1, 1)")
+            .bind(f.legacy)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+
+        sqlx::query(
+            "INSERT INTO render_recipes (session_id, recipe_json, updated_at) VALUES (?, '{}', 1)",
+        )
+        .bind(f.legacy)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+        let asset: i64 = sqlx::query_scalar(
+            "INSERT INTO render_assets (session_id, path, mime, width, height, sha256, bytes, created_at)
+             VALUES (?, 'renders/legacy.jpg', 'image/jpeg', 1, 1, 'hash', 1, 1) RETURNING id",
+        )
+        .bind(f.legacy)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO render_recipe_assets (session_id, asset_id) VALUES (?, ?)")
+            .bind(f.legacy)
+            .bind(asset)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        let render: i64 = sqlx::query_scalar(
+            "INSERT INTO render_jobs (session_id, state, phase, spec_json, created_at, updated_at)
+             VALUES (?, 'ready', 'ready', '{}', 1, 1) RETURNING id",
+        )
+        .bind(f.legacy)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO render_sources (job_id, segment_id) VALUES (?, ?)")
+            .bind(render)
+            .bind(segment)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO render_job_assets (job_id, asset_id) VALUES (?, ?)")
+            .bind(render)
+            .bind(asset)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+
+        let uri = format!("/v1/sessions/{}", f.legacy);
+        let response = delete_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(store::session(&f.pool, f.legacy).await.unwrap().is_none());
+        assert!(
+            media.exists(),
+            "deleting history keeps the original recording"
+        );
+
+        for table in [
+            "filelist",
+            "segments",
+            "markers",
+            "clips",
+            "segment_pins",
+            "auto_clip_jobs",
+            "clip_suggestions",
+            "render_recipes",
+            "render_assets",
+            "render_jobs",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!(
+                "SELECT COUNT(*) FROM {table} WHERE session_id = ?"
+            ))
+            .bind(f.legacy)
+            .fetch_one(&f.pool)
+            .await
+            .unwrap();
+            assert_eq!(count, 0, "{table} should cascade with the session");
+        }
+        for table in [
+            "render_sources",
+            "render_recipe_assets",
+            "render_job_assets",
+        ] {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&f.pool)
+                .await
+                .unwrap();
+            assert_eq!(count, 0, "{table} reference rows should be removed");
+        }
+        let response = get_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = delete_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn deleting_the_latest_session_does_not_reuse_its_id() {
+        let f = fixture().await;
+        let admin = login(&f.app, "biliup", "admin-password").await;
+        let at = 1_700_000_010_000;
+        let info = StreamerInfo::new(
+            "主播a",
+            "https://a",
+            "最后一场",
+            DateTime::<Utc>::from_timestamp_millis(at).unwrap(),
+            "",
+        );
+        let deleted = store::open_session(&f.pool, 1, &info, at, 0).await.unwrap();
+        store::close_session(&f.pool, deleted.id, at + 1000)
+            .await
+            .unwrap();
+        let uri = format!("/v1/sessions/{}", deleted.id);
+        let response = delete_as(&f.app, Some(&admin), &uri).await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let next = store::open_session(&f.pool, 1, &info, at + 2000, 0)
+            .await
+            .unwrap();
+        assert!(
+            next.id > deleted.id,
+            "session media namespaces must not be reused"
+        );
     }
 
     #[test]
@@ -707,13 +991,11 @@ mod tests {
         drop((file_tap, tap));
     }
 
-    /// 四条场次路由的要求都由策略层按路由表给出：只读接口要 `file.view`、回看流要 `preview.view`，
-    /// 三个角色都满足；表里没登记的方法按默认拒绝只给超管。
+    /// 场次只读接口按 `file.view` / `preview.view` 授权，删除归 `clip.edit`。
     #[test]
     fn session_routes_are_declared_in_the_policy() {
         use crate::server::infrastructure::permissions::Permission;
         use crate::server::infrastructure::policy::{RouteRequirement, Subject};
-        use axum::http::Method;
         for (route, raw, permission) in [
             ("/v1/sessions", "/v1/sessions", Permission::FileView),
             ("/v1/sessions/{id}", "/v1/sessions/1", Permission::FileView),
@@ -741,13 +1023,13 @@ mod tests {
                 );
             }
             assert!(Subject::unrestricted().satisfies(requirement), "{route}");
-            let write = RouteRequirement::of(&Method::DELETE, route, raw);
-            assert_eq!(write, RouteRequirement::AdminOnly, "{route}");
-            assert!(
-                !Subject::user(1, Role::Operator).satisfies(write),
-                "{route}"
-            );
         }
+
+        let delete = RouteRequirement::of(&Method::DELETE, "/v1/sessions/{id}", "/v1/sessions/1");
+        assert_eq!(delete, RouteRequirement::Permission(Permission::ClipEdit));
+        assert!(Subject::user(1, Role::Operator).satisfies(delete));
+        assert!(Subject::user(1, Role::Admin).satisfies(delete));
+        assert!(!Subject::user(1, Role::Viewer).satisfies(delete));
     }
 
     #[tokio::test]

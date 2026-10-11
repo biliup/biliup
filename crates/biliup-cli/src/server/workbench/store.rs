@@ -113,6 +113,14 @@ pub struct OpenedSession {
     pub resumed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteSessionOutcome {
+    Deleted,
+    NotFound,
+    NotEnded,
+    Busy,
+}
+
 /// 开播检测到时取这一场的行：同一主播最近一场已经结束、且 `now_ms - ended_at <= merge_window_ms`
 /// 就复用那一行（`merge_window_ms <= 0` 表示从不合并），否则插一行新的。
 ///
@@ -139,23 +147,103 @@ pub async fn open_session(
     let opened = match reusable {
         Some(id) => OpenedSession { id, resumed: true },
         None => {
-            let id = sqlx::query_scalar(
-                "INSERT INTO stream_sessions (name, url, title, date, live_cover_path, streamer_id)
-                 VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            // Session rows may be deleted while their media remains on disk. Allocate IDs from a
+            // durable AUTOINCREMENT sequence so a later scene cannot reuse an old file namespace.
+            let id: i64 =
+                sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                    .fetch_one(&mut *tx)
+                    .await?;
+            sqlx::query(
+                "INSERT INTO stream_sessions (id, name, url, title, date, live_cover_path, streamer_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
+            .bind(id)
             .bind(&info.name)
             .bind(&info.url)
             .bind(&info.title)
             .bind(info.date)
             .bind(&info.live_cover_path)
             .bind(streamer_id)
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await?;
             OpenedSession { id, resumed: false }
         }
     };
     tx.commit().await?;
     Ok(opened)
+}
+
+/// 删除已结束场次的数据库记录及其工作台关联数据；原始录像、切片和合成文件保留。
+/// 活跃后台任务返回 `Busy`，避免任务完成时写回已删除的场次。
+pub async fn delete_session(pool: &ConnectionPool, id: i64) -> sqlx::Result<DeleteSessionOutcome> {
+    let mut tx = pool.begin().await?;
+    let ended_at: Option<Option<i64>> =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT ended_at FROM stream_sessions WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match ended_at {
+        None => {
+            tx.rollback().await?;
+            return Ok(DeleteSessionOutcome::NotFound);
+        }
+        Some(None) => {
+            tx.rollback().await?;
+            return Ok(DeleteSessionOutcome::NotEnded);
+        }
+        Some(Some(_)) => {}
+    }
+
+    let busy: bool = sqlx::query_scalar(
+        "SELECT
+            EXISTS (SELECT 1 FROM clips WHERE session_id = ? AND
+                    (state = 'exporting' OR submit_state IS NOT NULL))
+            OR EXISTS (SELECT 1 FROM auto_clip_jobs WHERE session_id = ? AND state IN ('queued','running'))
+            OR EXISTS (SELECT 1 FROM render_jobs WHERE session_id = ? AND state IN ('queued','running'))",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if busy {
+        tx.rollback().await?;
+        return Ok(DeleteSessionOutcome::Busy);
+    }
+
+    // These join tables use ON DELETE RESTRICT so explicitly remove them before the cascaded
+    // render jobs, source segments, and assets are deleted.
+    sqlx::query(
+        "DELETE FROM render_sources WHERE job_id IN
+         (SELECT id FROM render_jobs WHERE session_id = ?)",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM render_job_assets WHERE job_id IN
+         (SELECT id FROM render_jobs WHERE session_id = ?)",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM render_recipe_assets WHERE session_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    let deleted = sqlx::query("DELETE FROM stream_sessions WHERE id = ? AND ended_at IS NOT NULL")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+        > 0;
+    if !deleted {
+        tx.rollback().await?;
+        return Ok(DeleteSessionOutcome::NotEnded);
+    }
+    tx.commit().await?;
+    Ok(DeleteSessionOutcome::Deleted)
 }
 
 /// [`begin_recording`] 的结果。
