@@ -176,6 +176,16 @@ impl SelectedEncoder {
                     add("-init_hw_device", "qsv=encoder@render".into());
                 } else {
                     let suffix = self.device.as_ref().map_or_else(String::new, |device| {
+                        // QSV treats commas and equals signs as option
+                        // separators, and a colon separates device names.
+                        // EncoderConfig::validate rejects these at the API
+                        // boundary; keep this invariant here too so an
+                        // internally constructed encoder cannot inject
+                        // additional FFmpeg options.
+                        assert!(
+                            !device.chars().any(|c| matches!(c, ',' | '=' | ':')),
+                            "QSV device must not contain FFmpeg option delimiters"
+                        );
                         format!(",child_device={device},child_device_type=d3d11va")
                     });
                     add("-init_hw_device", format!("qsv=encoder:hw{suffix}"));
@@ -810,6 +820,14 @@ mod tests {
         }
         assert!(
             EncoderConfig {
+                encoder: VideoEncoder::H264Qsv,
+                device: Some("0,foo=bar".into())
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            EncoderConfig {
                 encoder: VideoEncoder::H264Vaapi,
                 device: Some("/etc/passwd".into())
             }
@@ -875,6 +893,17 @@ mod tests {
         };
         assert!(qsv.input_args().contains(&"qsv=encoder@render".into()));
         assert!(qsv.video_filter().ends_with("hwupload=extra_hw_frames=64"));
+    }
+
+    #[test]
+    #[should_panic(expected = "QSV device must not contain FFmpeg option delimiters")]
+    fn qsv_device_delimiters_cannot_reach_ffmpeg_arguments() {
+        SelectedEncoder {
+            encoder: VideoEncoder::H264Qsv,
+            device: Some("0,foo=bar".into()),
+            fallback_reason: None,
+        }
+        .input_args();
     }
 
     #[tokio::test]

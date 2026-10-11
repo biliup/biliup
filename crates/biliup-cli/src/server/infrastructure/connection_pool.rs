@@ -367,6 +367,8 @@ fn hex_lower(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ConnectionManager, ConnectionPool, crlf_checksum, hex_lower};
+    use sqlx::migrate::Migrator;
+    use std::borrow::Cow;
 
     #[cfg(unix)]
     #[tokio::test]
@@ -521,6 +523,10 @@ mod tests {
                 19,
                 "27b2981cd7fd93888ba7486463abe83c15e3efb8952d96ef9a2657c5f4cabf8e79c69cdd5b4ab3f9cbacb6904c388ce3",
             ),
+            (
+                20,
+                "5d8d911381b19daed2042c3d83444b07e91fe9a60bc33f3c9f0e17363a83ecc8b3069f67641225d70d89ba6d19587d39",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -587,7 +593,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            (1..=19).collect::<Vec<_>>(),
+            (1..=20).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
@@ -618,6 +624,84 @@ mod tests {
             .fetch_all(&pool)
             .await
             .expect("迁移 5 必须已应用");
+    }
+
+    /// Migration 20 must upgrade a real version-19 database and clear fabricated
+    /// finish times only for cancelled jobs that have no recorded start time.
+    #[tokio::test]
+    async fn upgrade_from_migration_19_clears_only_unstarted_cancelled_timestamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::connect(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let embedded = sqlx::migrate!();
+        let through_19 = Migrator {
+            migrations: Cow::Owned(
+                embedded
+                    .iter()
+                    .filter(|migration| migration.version <= 19)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        through_19.run(&pool).await.unwrap();
+
+        let session_id: i64 = sqlx::query_scalar(
+            "INSERT INTO stream_sessions(name,url,title,date,live_cover_path) \
+             VALUES('migration-test','https://example.test','test','2026-10-11','') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        for (state, started_at, updated_at) in [
+            ("cancelled", None, 1000),
+            ("cancelled", Some(1500_i64), 2000),
+            ("ready", None, 3000),
+            ("failed", None, 4000),
+        ] {
+            sqlx::query(
+                "INSERT INTO render_jobs(session_id,state,phase,spec_json,created_at,updated_at,started_at,finished_at) \
+                 VALUES(?, ?, ?, '{}', ?, ?, ?, ?)",
+            )
+            .bind(session_id)
+            .bind(state)
+            .bind(state)
+            .bind(updated_at)
+            .bind(updated_at)
+            .bind(started_at)
+            .bind(updated_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("a version-19 database must upgrade without checksum mismatch");
+        let timestamps: Vec<(String, Option<i64>)> =
+            sqlx::query_as("SELECT state, finished_at FROM render_jobs ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            timestamps,
+            vec![
+                ("cancelled".into(), None),
+                ("cancelled".into(), Some(2000)),
+                ("ready".into(), Some(3000)),
+                ("failed".into(), Some(4000)),
+            ]
+        );
+        let applied: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 20 AND success = TRUE",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(applied, 1);
     }
 
     /// v1.2.5 起的 Windows 发布包（以及 Windows 本地构建）建立的库：内容与当前完全一致，
@@ -819,7 +903,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=19).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=20).collect::<Vec<_>>());
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",

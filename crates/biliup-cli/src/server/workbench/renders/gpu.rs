@@ -125,7 +125,9 @@ async fn collect() -> GpuSnapshot {
                 // On Linux, retain the stable PCI identity from DRM sysfs and
                 // enrich it by normalized PCI address. On other systems
                 // the driver query supplies the device list and identity.
-                let normalized_bus = normalize_pci_bus(&row.bus_id);
+                let Some(normalized_bus) = normalize_pci_bus(&row.bus_id) else {
+                    continue;
+                };
                 let id = format!("nvidia:{normalized_bus}");
                 seen.insert(id.clone());
                 let mut row = row;
@@ -257,7 +259,10 @@ fn linux_drm_devices_at(root: &Path) -> Vec<GpuDevice> {
                     .unwrap_or(node.clone())
             });
         result.push(GpuDevice {
-            id: format!("{vendor}:{}", normalize_pci_bus(&bus)),
+            id: format!(
+                "{vendor}:{}",
+                normalize_pci_bus(&bus).unwrap_or_else(|| bus.to_ascii_lowercase())
+            ),
             name: device_name(vendor, pci_id),
             vendor: vendor.into(),
             render_node: Some(format!("/dev/dri/{node}")),
@@ -347,23 +352,39 @@ fn read_hex(path: &Path) -> Result<u32, ()> {
         .and_then(|s| u32::from_str_radix(s, 16).map_err(|_| ()))
 }
 
-fn normalize_pci_bus(bus: &str) -> String {
-    let normalized = bus.trim().to_ascii_lowercase();
-    let parts: Vec<_> = normalized.split(':').collect();
-    if parts.len() >= 3 {
-        let domain = u16::from_str_radix(parts[parts.len() - 3], 16)
-            .map(|n| format!("{n:04x}"))
-            .unwrap_or_else(|_| parts[parts.len() - 3].to_string());
-        format!(
-            "{domain}:{}:{}",
-            parts[parts.len() - 2],
-            parts[parts.len() - 1]
-        )
-    } else if parts.len() == 2 {
-        format!("0000:{}:{}", parts[0], parts[1])
-    } else {
-        normalized
+fn normalize_pci_bus(bus: &str) -> Option<String> {
+    let bus = bus.trim().to_ascii_lowercase();
+    let parts: Vec<_> = bus.split(':').collect();
+    let (domain, bus_number, device_function) = match parts.as_slice() {
+        [bus_number, device_function] => (0, *bus_number, *device_function),
+        [domain, bus_number, device_function] => {
+            (parse_pci_hex(domain, 8)?, *bus_number, *device_function)
+        }
+        _ => return None,
+    };
+    let (device, function) = device_function.split_once('.')?;
+    if function.contains('.') {
+        return None;
     }
+    let bus_number = parse_pci_hex(bus_number, 2)?;
+    let device = parse_pci_hex(device, 2)?;
+    let function = parse_pci_hex(function, 1)?;
+    if domain > u16::MAX as u32 || bus_number > u8::MAX as u32 || device > 0x1f || function > 7 {
+        return None;
+    }
+    Some(format!(
+        "{domain:04x}:{bus_number:02x}:{device:02x}.{function:x}"
+    ))
+}
+
+fn parse_pci_hex(value: &str, max_digits: usize) -> Option<u32> {
+    if value.is_empty()
+        || value.len() > max_digits
+        || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    u32::from_str_radix(value, 16).ok()
 }
 
 fn render_device_path(node: &str) -> Option<PathBuf> {
@@ -427,9 +448,6 @@ async fn bounded_command_output(mut cmd: Command, limit: Duration) -> Result<Vec
     };
     let result = timeout(limit, async {
         let (out, err) = tokio::try_join!(read_capped(&mut stdout), read_capped(&mut stderr))?;
-        if out.len() > MAX_COMMAND_BYTES || err.len() > MAX_COMMAND_BYTES {
-            return Err("GPU 监测工具输出超过 64 KiB 限制".to_string());
-        }
         let status = child
             .wait()
             .await
@@ -471,6 +489,9 @@ async fn read_capped(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result
         .read_to_end(&mut bytes)
         .await
         .map_err(|e| format!("读取 GPU 监测输出失败：{e}"))?;
+    if bytes.len() > MAX_COMMAND_BYTES {
+        return Err("GPU 监测工具输出超过 64 KiB 限制".into());
+    }
     Ok(bytes)
 }
 
@@ -575,7 +596,9 @@ async fn nvidia_encoder_rows() -> Result<std::collections::HashMap<String, f64>,
         .filter_map(|row| {
             row.encoder
                 .filter(|_| !row.bus_id.is_empty())
-                .map(|value| (format!("pci:{}", normalize_pci_bus(&row.bus_id)), value))
+                .and_then(|value| {
+                    normalize_pci_bus(&row.bus_id).map(|bus| (format!("pci:{bus}"), value))
+                })
         })
         .collect();
     if values.is_empty() {
@@ -587,7 +610,7 @@ async fn nvidia_encoder_rows() -> Result<std::collections::HashMap<String, f64>,
 
 fn lookup_nvidia_encoder(row: &NvidiaRow, metrics: &HashMap<String, f64>) -> Option<f64> {
     metrics
-        .get(&format!("pci:{}", normalize_pci_bus(&row.bus_id)))
+        .get(&format!("pci:{}", normalize_pci_bus(&row.bus_id)?))
         .or_else(|| metrics.get(&format!("index:{}", row.index)))
         .copied()
 }

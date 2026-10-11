@@ -191,9 +191,43 @@ async fn embedded_emoji_font_is_available_from_the_preview_font_route() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "font/ttf");
     assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, max-age=3600"
+    );
+    assert_eq!(
         body(response).await.as_ref(),
         crate::tools::render_emoji_font_bytes()
     );
+
+    let app = Router::new().route("/v1/render-fonts/{id}", get(get_render_font));
+    let test_cases = [
+        ("/v1/render-fonts/2", StatusCode::NOT_FOUND),
+        ("/v1/render-fonts/999999999999999999", StatusCode::NOT_FOUND),
+        ("/v1/render-fonts/invalid", StatusCode::BAD_REQUEST),
+    ];
+    for (uri, expected_status) in test_cases {
+        let response = app
+            .clone()
+            .oneshot(HttpRequest::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), expected_status);
+    }
+
+    let cjk_response = get_render_font(Path(0), Request::new(Body::empty())).await;
+    if let Some(font) = crate::tools::render_font() {
+        assert_eq!(cjk_response.status(), StatusCode::OK);
+        assert_eq!(
+            cjk_response.headers()[header::CONTENT_TYPE],
+            mime_guess::from_path(font).first_or_octet_stream().as_ref()
+        );
+        assert_eq!(
+            cjk_response.headers()[header::CACHE_CONTROL],
+            "private, max-age=3600"
+        );
+    } else {
+        assert_eq!(cjk_response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 async fn json_of(response: Response, status: StatusCode) -> Value {
@@ -464,6 +498,12 @@ async fn ready_products_support_range_head_and_attachment() {
         .unwrap();
     let jid = job.view.id;
     let uri = format!("/v1/renders/{jid}/download");
+    assert_eq!(
+        call(&f.app, None, "GET", &uri, None, Body::empty())
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
     assert_eq!(
         call(&f.app, Some(&f.viewer), "GET", &uri, None, Body::empty())
             .await
@@ -867,4 +907,39 @@ async fn global_render_list_enforces_permissions_and_validates_pagination() {
     )
     .await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let mut job_ids = Vec::new();
+    for session_id in [f.ended, f.live] {
+        let spec = RenderSpec {
+            session_id,
+            clip_id: None,
+            in_ms: 0,
+            out_ms: 1000,
+            recipe: RenderRecipe::default(),
+            sources: vec![],
+            assets: vec![],
+            font_path: None,
+        };
+        let job = store::insert(&f.pool, &spec, recorder::now_ms())
+            .await
+            .unwrap();
+        job_ids.push((session_id, job.view.id));
+    }
+    let filtered = json_of(
+        call(
+            &f.app,
+            Some(&f.viewer),
+            "GET",
+            &format!("/v1/renders?session_id={}", f.ended),
+            None,
+            Body::empty(),
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(filtered["total"], 1);
+    assert_eq!(filtered["jobs"].as_array().unwrap().len(), 1);
+    assert_eq!(filtered["jobs"][0]["id"], job_ids[0].1);
+    assert_eq!(filtered["jobs"][0]["session_id"], f.ended);
 }

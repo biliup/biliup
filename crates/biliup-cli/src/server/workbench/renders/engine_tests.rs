@@ -69,6 +69,7 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         height: 1080,
         has_audio: true,
         duration_ms: Some(60_000),
+        format_start_seconds: 0.,
         video_origin_seconds: 0.05,
         frame_rate: "60/1".into(),
     };
@@ -116,13 +117,13 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
     assert!(smooth.contains("async_depth=8"));
     assert!(smooth.contains("cw=1920:ch=432:cx=0:cy=0:w=1920:h=432"));
     assert!(smooth.contains("ass=filename=danmaku-qsv.ass"));
+    assert!(smooth.contains("fps=60/1,format=nv12,hwupload=extra_hw_frames=64[danmaku]"));
     assert_eq!(smooth.matches("hwdownload").count(), 1); // ASS only
     assert!(smooth.contains("alpha=255"));
     assert!(smooth.contains("setpts=PTS-(0.050000000)/TB"));
 
-    // Odd low-resolution sizes are rounded up for NV12 smooth blur, so these
-    // common region geometries stay on the QSV graph. Mosaic keeps its exact
-    // nearest-neighbour grid and still uses the software path when it is odd.
+    // VPP smooth blur rounds odd low-resolution sizes up for NV12 surfaces;
+    // OpenCL mosaic retains the exact software grid in its coordinate maps.
     let odd_smooth_region = MaskRegion {
         x: 0.,
         y: 0.,
@@ -158,7 +159,7 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         }],
         ..settings.clone()
     };
-    assert!(qsv_filter_graph(
+    let odd_mosaic_graph = qsv_filter_graph(
         &source,
         &odd_mosaic,
         &media,
@@ -171,7 +172,8 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
         &encoder,
         QsvMosaicBackend::OpenClNearest,
     )
-    .is_none());
+    .unwrap();
+    assert!(odd_mosaic_graph.contains("scale=21:9:flags=neighbor,scale=260:108:flags=neighbor"));
 
     let band_ass =
         qsv_danmaku_ass(&super::super::danmaku::empty_ass(1920, 1080), 1080, 432).unwrap();
@@ -211,9 +213,12 @@ fn qsv_graph_keeps_mosaic_blocks_and_separates_smooth_blur() {
     assert!(mosaic_graph.contains(
         "vpp_qsv=cw=384:ch=216:cx=960:cy=432:w=384:h=216:async_depth=8,hwmap=derive_device=opencl:mode=read+direct,format=opencl"
     ));
+    assert!(mosaic_graph.contains("format=opencl[remap-source0]"));
     assert!(mosaic_graph.contains("scale=32:18:flags=neighbor,scale=384:216:flags=neighbor"));
     assert!(mosaic_graph.contains("remap_opencl=interp=near"));
-    assert!(mosaic_graph.contains("hwmap=derive_device=qsv:mode=write+direct:reverse=1"));
+    assert!(mosaic_graph.contains(
+        "remap_opencl=interp=near,hwmap=derive_device=qsv:mode=write+direct:reverse=1,format=qsv[effect0]"
+    ));
     assert_eq!(mosaic_graph.matches("hwdownload").count(), 1); // ASS band only
 
     let legacy_mosaic_graph = qsv_filter_graph(
@@ -290,6 +295,48 @@ fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
             && part.end_ms == span.end_ms
     }));
 
+    let encoder = super::encoding::SelectedEncoder {
+        encoder: VideoEncoder::H264Qsv,
+        device: None,
+        fallback_reason: None,
+    };
+    let settings = RenderRecipe {
+        encoding: EncoderConfig {
+            encoder: VideoEncoder::H264Qsv,
+            device: None,
+        },
+        ..Default::default()
+    };
+    let media = MediaInfo {
+        width: 320,
+        height: 180,
+        has_audio: false,
+        duration_ms: Some(90_000),
+        format_start_seconds: 0.,
+        video_origin_seconds: 0.,
+        frame_rate: "60/1".into(),
+    };
+    let second_part_graph = qsv_filter_graph(
+        &parts[1],
+        &settings,
+        &media,
+        (320, 180),
+        0,
+        false,
+        1,
+        false,
+        "60/1",
+        &encoder,
+        QsvMosaicBackend::OpenClNearest,
+    )
+    .unwrap();
+    // Each independent part starts at PTS zero; concat advances it by the
+    // preceding file durations.
+    assert!(
+        second_part_graph.contains("trim=start=10.100000:end=20.100000,setpts=PTS-(10.100000)/TB"),
+        "{second_part_graph}"
+    );
+
     let mut short = span.clone();
     short.trim_end_ms = short.trim_start_ms + 39_000;
     assert!(qsv_parallel_parts(&short, "60/1").is_none());
@@ -305,9 +352,11 @@ fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
         fractional_parts.last().unwrap().trim_end_ms,
         fractional_duration.trim_end_ms
     );
-    assert!(fractional_parts[..5]
-        .iter()
-        .all(|part| { (part.trim_end_ms - part.trim_start_ms) % 1_000 == 0 }));
+    assert!(
+        fractional_parts[..5]
+            .iter()
+            .all(|part| { (part.trim_end_ms - part.trim_start_ms) % 1_000 == 0 })
+    );
     assert_eq!(
         fractional_parts
             .iter()
@@ -316,6 +365,137 @@ fn qsv_parallel_parts_keep_integer_rate_frame_boundaries() {
         60_020
     );
     assert!(qsv_parallel_parts(&span, "30000/1001").is_none());
+}
+
+#[test]
+fn qsv_parallel_parts_cover_minimum_and_maximum_boundaries() {
+    let base = source(PathBuf::from("source.flv"), 9, 0, 120_000, 0, 120_000);
+    let mut below_minimum = base.clone();
+    below_minimum.trim_end_ms = 39_999;
+    assert!(qsv_parallel_parts(&below_minimum, "60/1").is_none());
+
+    let mut minimum = base.clone();
+    minimum.trim_end_ms = 40_000;
+    let minimum_parts = qsv_parallel_parts(&minimum, "60/1").unwrap();
+    assert_eq!(minimum_parts.len(), 4);
+    assert!(
+        minimum_parts
+            .iter()
+            .all(|part| part.trim_end_ms - part.trim_start_ms == 10_000)
+    );
+
+    let maximum_parts = qsv_parallel_parts(&base, "60/1").unwrap();
+    assert_eq!(maximum_parts.len(), 6);
+    assert_eq!(maximum_parts.first().unwrap().trim_start_ms, 0);
+    assert_eq!(maximum_parts.last().unwrap().trim_end_ms, 120_000);
+    assert!(
+        maximum_parts
+            .iter()
+            .all(|part| part.trim_end_ms - part.trim_start_ms == 20_000)
+    );
+}
+
+#[test]
+fn qsv_parallel_retry_progress_does_not_count_the_same_work_twice() {
+    let selected = super::encoding::SelectedEncoder {
+        encoder: VideoEncoder::H264Qsv,
+        device: None,
+        fallback_reason: None,
+    };
+    let mut source_progress_ms = 0;
+    let mut updates = Vec::new();
+    for _ in 0..2 {
+        report_qsv_parallel_progress(
+            &selected,
+            "render",
+            &[5_000, 0],
+            &[150, 0],
+            Duration::from_secs(5),
+            0,
+            10_000,
+            &mut source_progress_ms,
+            &mut |update| updates.push(update),
+        );
+    }
+    assert_eq!(source_progress_ms, 5_000);
+    assert!(
+        updates
+            .iter()
+            .all(|update| update.processed_ms == Some(5_000))
+    );
+}
+
+#[test]
+fn mosaic_overlay_positions_match_region_coordinates() {
+    let encoder = super::encoding::SelectedEncoder {
+        encoder: VideoEncoder::H264Qsv,
+        device: Some("0".into()),
+        fallback_reason: None,
+    };
+    let media = MediaInfo {
+        width: 1920,
+        height: 1080,
+        has_audio: false,
+        duration_ms: Some(10_000),
+        format_start_seconds: 0.,
+        video_origin_seconds: 0.,
+        frame_rate: "30/1".into(),
+    };
+    let source = source(PathBuf::from("video.mp4"), 1, 0, 10_000, 0, 10_000);
+    let top_left = MaskRegion {
+        id: "tl".into(),
+        effect_type: EffectType::Mosaic,
+        x: 0.1,
+        y: 0.1,
+        width: 0.2,
+        height: 0.2,
+        strength: 16.,
+        ..Default::default()
+    };
+    let bottom_right = MaskRegion {
+        id: "br".into(),
+        effect_type: EffectType::Mosaic,
+        x: 0.7,
+        y: 0.7,
+        width: 0.2,
+        height: 0.2,
+        strength: 16.,
+        ..Default::default()
+    };
+    let settings = RenderRecipe {
+        regions: vec![top_left.clone(), bottom_right.clone()],
+        ..Default::default()
+    };
+    let graph = qsv_filter_graph(
+        &source,
+        &settings,
+        &media,
+        (1920, 1080),
+        0,
+        false,
+        0,
+        false,
+        "30/1",
+        &encoder,
+        QsvMosaicBackend::OpenClNearest,
+    )
+    .unwrap();
+    assert!(
+        graph.contains("vpp_qsv=cw=384:ch=216:cx=192:cy=108"),
+        "Top-left mosaic crop missing in graph"
+    );
+    assert!(
+        graph.contains("[keep0][effect0]overlay_qsv=x=192:y=108"),
+        "Top-left overlay position missing in graph"
+    );
+    assert!(
+        graph.contains("vpp_qsv=cw=384:ch=216:cx=1344:cy=756"),
+        "Bottom-right mosaic crop missing in graph"
+    );
+    assert!(
+        graph.contains("[keep1][effect1]overlay_qsv=x=1344:y=756"),
+        "Bottom-right overlay position missing in graph"
+    );
 }
 
 async fn pixel(path: &Path, at: f64, x: usize, y: usize, width: usize) -> [u8; 3] {
@@ -469,6 +649,134 @@ async fn ffmpeg_combines_mixed_sources_timed_masks_and_images_without_touching_o
             .to_string_lossy()
             .starts_with(".render-")
     }));
+}
+
+/// Run on an opted-in GPU runner and exercise its explicit encoder through a
+/// two-source render. Set BILIUP_TEST_ENCODER_DEVICE to select a device.
+#[tokio::test]
+async fn hardware_render() {
+    let Ok(name) = std::env::var("BILIUP_TEST_ENCODER") else {
+        return;
+    };
+    let encoder: VideoEncoder = serde_json::from_value(serde_json::Value::String(name.clone()))
+        .unwrap_or_else(|_| panic!("unsupported BILIUP_TEST_ENCODER: {name}"));
+    assert!(
+        !matches!(encoder, VideoEncoder::Auto | VideoEncoder::Libx264),
+        "choose an explicit GPU encoder"
+    );
+    let device = std::env::var("BILIUP_TEST_ENCODER_DEVICE")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("first.mp4");
+    let b = dir.path().join("second.mp4");
+    fixture(&a, "blue", "320x192", "libx264", true, 0.8).await;
+    fixture(&b, "green", "256x192", "libx264", false, 0.8).await;
+    let originals = (hash(&a), hash(&b));
+    let target = dir.path().join("hardware.mp4");
+    let is_qsv = encoder == VideoEncoder::H264Qsv;
+    let recipe = RenderRecipe {
+        encoding: EncoderConfig {
+            encoder,
+            device: device.clone(),
+        },
+        regions: vec![MaskRegion {
+            id: "hardware-mask".into(),
+            effect_type: if is_qsv {
+                EffectType::Mosaic
+            } else {
+                EffectType::Solid
+            },
+            color: "#ff0000".into(),
+            x: 0.1,
+            y: 0.1,
+            width: 0.3,
+            height: 0.3,
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let mut progress = vec![];
+    let done = render(
+        EngineRequest {
+            sources: vec![
+                source(a.clone(), 1, 0, 800, 0, 800),
+                source(b.clone(), 2, 800, 1600, 0, 800),
+            ],
+            settings: recipe,
+            assets: HashMap::new(),
+            output_path: target.clone(),
+            font_path: None,
+        },
+        CancellationToken::new(),
+        |update| progress.push(update),
+    )
+    .await
+    .unwrap();
+    assert_eq!(done.encoder.as_deref(), Some(name.as_str()));
+    if device.is_some() {
+        assert_eq!(done.encoder_device, device);
+    }
+    assert!((done.duration_ms - 1600).abs() < 150, "{done:?}");
+    assert_eq!((hash(&a), hash(&b)), originals);
+    assert!(
+        progress
+            .iter()
+            .filter(|p| p.phase != "检测编码器")
+            .all(|p| p.encoder.as_deref() == Some(name.as_str()))
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|p| p.phase == "合成分段 2/2" && p.processed_ms.unwrap_or(0) > 800),
+        "{progress:?}"
+    );
+    assert!(
+        progress
+            .iter()
+            .any(|p| p.phase.contains("合成分段") && p.fps.is_some() && p.speed.is_some()),
+        "{progress:?}"
+    );
+    let output_info = probe(&target, &CancellationToken::new()).await.unwrap();
+    assert_eq!(
+        (output_info.width, output_info.height, output_info.has_audio),
+        (320, 192, true)
+    );
+    assert_eq!(output_info.frame_rate, "30/1");
+    for at in [0.3, 1.1] {
+        let masked = pixel(&target, at, 70, 40, 320).await;
+        if is_qsv {
+            let expected_channel = if at < 0.8 { 2 } else { 1 };
+            assert!(
+                masked[expected_channel] > 120,
+                "mosaic changed source color at {at}: {masked:?}"
+            );
+        } else {
+            assert!(
+                masked[0] > 160 && masked[2] < 100,
+                "solid mask missing at {at}: {masked:?}"
+            );
+        }
+    }
+    let decoded = crate::tools::ffmpeg_command()
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-xerror",
+            "-i",
+        ])
+        .arg(&target)
+        .args(["-f", "null", "-"])
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        decoded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&decoded.stderr)
+    );
 }
 
 #[tokio::test]
@@ -735,6 +1043,78 @@ async fn audio_delay_and_first_source_frame_rate_survive_export() {
         "originally delayed audio moved to the clip start"
     );
     assert!(rms(26000, 33000) > 0.04, "delayed tone is missing");
+}
+
+#[tokio::test]
+async fn tail_seek_preserves_distinct_container_and_video_origins() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("offset.mkv");
+    let output = crate::tools::ffmpeg_command()
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-itsoffset",
+            "0.5",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=red:s=96x64:r=24:d=4,drawbox=color=blue:t=fill:enable='gte(t,2)'",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:sample_rate=48000:duration=4.5",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "1",
+            "-g",
+            "12",
+            "-fps_mode",
+            "passthrough",
+            "-c:a",
+            "pcm_s16le",
+            "-output_ts_offset",
+            "5",
+            "-y",
+        ])
+        .arg(&original)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let original_hash = hash(&original);
+    let media = probe(&original, &CancellationToken::new()).await.unwrap();
+    assert!((media.format_start_seconds - 5.).abs() < 0.01);
+    assert!((media.video_origin_seconds - 5.5).abs() < 0.01, "{media:?}");
+
+    let target = dir.path().join("tail.mp4");
+    let done = render(
+        EngineRequest {
+            sources: vec![source(original.clone(), 1, 0, 4000, 3000, 4000)],
+            settings: cpu_recipe(),
+            assets: HashMap::new(),
+            output_path: target.clone(),
+            font_path: None,
+        },
+        CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(hash(&original), original_hash);
+    assert!((done.duration_ms - 1000).abs() < 100, "{done:?}");
+    let info = probe(&target, &CancellationToken::new()).await.unwrap();
+    assert_eq!(info.frame_rate, "24/1");
+    assert!(info.video_origin_seconds.abs() < 0.05, "{info:?}");
+    assert!(info.has_audio);
+    let color = pixel(&target, 0., 48, 32, 96).await;
+    assert!(color[2] > 180 && color[0] < 60, "{color:?}");
 }
 
 #[test]

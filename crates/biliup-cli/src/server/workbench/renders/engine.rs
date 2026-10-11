@@ -198,6 +198,7 @@ struct MediaInfo {
     height: u32,
     has_audio: bool,
     duration_ms: Option<i64>,
+    format_start_seconds: f64,
     video_origin_seconds: f64,
     frame_rate: String,
 }
@@ -352,6 +353,12 @@ async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, Str
         let s = captures[3].parse::<f64>().ok()?;
         Some(((h * 3600. + m * 60. + s) * 1000.).round() as i64)
     });
+    let format_start_pattern = regex::Regex::new(r"start:\s+([-+0-9.eE]+)").unwrap();
+    let format_start_seconds = format_start_pattern
+        .captures(input)
+        .and_then(|c| c[1].parse::<f64>().ok())
+        .filter(|n| n.is_finite())
+        .unwrap_or(0.);
     let video_pts =
         regex::Regex::new(r"showinfo[^\n]*\bn:\s*0\s+pts:\s*-?\d+\s+pts_time:([-+0-9.eE]+)")
             .unwrap();
@@ -376,6 +383,7 @@ async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, Str
         height,
         has_audio: input.contains("Audio:"),
         duration_ms,
+        format_start_seconds,
         video_origin_seconds,
         frame_rate,
     })
@@ -660,20 +668,18 @@ fn qsv_filter_graph(
         if w < 2 || h < 2 || raw_low_w < 2 || raw_low_h < 2 {
             return None;
         }
-        // QSV/NV12 surfaces require even dimensions. A one-pixel upward
-        // adjustment keeps smooth blur on the hardware path with a negligible
-        // change to its bilinear downscale; mosaic retains its exact block grid
-        // and still falls back when that grid cannot be represented evenly.
-        let (low_w, low_h) = if region.effect_type == EffectType::SmoothBlur {
+        // OpenCL scales gray16 coordinate maps, so an odd grid preserves the
+        // same mosaic blocks as the software path. VPP scales NV12 surfaces
+        // and requires even dimensions for smooth blur and its fallback mosaic.
+        let (low_w, low_h) = if region.effect_type == EffectType::Mosaic
+            && mosaic_backend == QsvMosaicBackend::OpenClNearest
+        {
+            (raw_low_w, raw_low_h)
+        } else {
             (
                 raw_low_w.div_ceil(2).saturating_mul(2),
                 raw_low_h.div_ceil(2).saturating_mul(2),
             )
-        } else {
-            if raw_low_w % 2 != 0 || raw_low_h % 2 != 0 {
-                return None;
-            }
-            (raw_low_w, raw_low_h)
         };
         if low_w > w || low_h > h {
             return None;
@@ -852,12 +858,10 @@ fn segment_command(
         command.args(["-threads", "2"]);
     }
     if seek_ms > 0 {
-        command.args([
-            "-seek_timestamp",
-            "1",
-            "-ss",
-            &format!("{:.9}", media.video_origin_seconds + seek_ms as f64 / 1000.),
-        ]);
+        let relative_ss = (media.video_origin_seconds + seek_ms as f64 / 1000.
+            - media.format_start_seconds)
+            .max(0.);
+        command.args(["-ss", &format!("{:.9}", relative_ss)]);
     }
     command
         .arg("-i")
@@ -1595,7 +1599,7 @@ pub async fn render(
             }
             if let Some(backend) = working_backend {
                 qsv_mosaic_backend = Some(backend);
-                if backend == QsvMosaicBackend::QsvVpp {
+                if backend == QsvMosaicBackend::QsvVpp && !qsv_fallback_reported {
                     let detail = probe_error
                         .as_deref()
                         .map(fallback_detail)
@@ -1609,6 +1613,7 @@ pub async fn render(
                         &mut active_selected,
                         format!("OpenCL 直接映射不可用，马赛克改用 QSV VPP 兼容路径：{detail}"),
                     );
+                    qsv_fallback_reported = true;
                 }
                 if has_mosaic {
                     tracing::info!(

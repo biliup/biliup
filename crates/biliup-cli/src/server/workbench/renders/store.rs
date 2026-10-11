@@ -85,7 +85,8 @@ fn job(row: &SqliteRow) -> sqlx::Result<JobRecord> {
     })
 }
 /// FFmpeg speed is media seconds per wall-clock second. Preparation and final
-/// publication have no reliable ETA; zero, NaN and missing samples stay unknown.
+/// publication have no reliable ETA; invalid speed samples stay unknown unless
+/// media processing has reached its total duration.
 fn estimate_remaining(
     state: &str,
     processed: Option<i64>,
@@ -95,12 +96,15 @@ fn estimate_remaining(
     if state != "running" {
         return None;
     }
-    let speed = speed.filter(|s| s.is_finite() && *s > 0.)?;
     let processed = processed?;
     let total = total?;
-    if processed < 0 || total <= 0 || processed >= total {
+    if processed < 0 || total <= 0 || processed > total {
         return None;
     }
+    if processed == total {
+        return Some(0);
+    }
+    let speed = speed.filter(|s| s.is_finite() && *s > 0.)?;
     Some(
         ((total - processed) as f64 / speed)
             .ceil()
@@ -441,7 +445,11 @@ mod telemetry_tests {
         }
         assert_eq!(
             estimate_remaining("running", Some(10000), Some(10000), Some(2.)),
-            None
+            Some(0)
+        );
+        assert_eq!(
+            estimate_remaining("running", Some(10000), Some(10000), None),
+            Some(0)
         );
         assert_eq!(
             estimate_remaining("running", None, Some(10000), Some(2.)),

@@ -30,7 +30,7 @@ export interface RenderJob {
   requested_encoder?: VideoEncoder; requested_device?: string | null
   encoder?: string | null; encoder_device?: string | null; fallback_reason?: string | null
   fps?: number | null; speed?: number | null; processed_ms?: number | null; total_ms?: number | null
-  started_at?: number | null; finished_at?: number | null; elapsed_ms?: number; eta_ms?: number | null
+  started_at?: number | null; finished_at?: number | null; elapsed_ms: number; eta_ms?: number | null
   updated_at?: number; session_name?: string; session_title?: string
 }
 export interface RenderCapabilities {

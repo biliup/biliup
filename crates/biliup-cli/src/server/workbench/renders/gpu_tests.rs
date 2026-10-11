@@ -85,12 +85,27 @@ fn pci_vendor_mapping_percent_bounds_and_bus_normalization() {
         device_name("intel", Some(0x4682)),
         "Intel UHD Graphics 730 (device 0x4682)"
     );
-    assert_eq!(normalize_pci_bus("00000000:03:00.0"), "0000:03:00.0");
-    assert_eq!(normalize_pci_bus("0000:03:00.0"), "0000:03:00.0");
+    assert_eq!(
+        normalize_pci_bus("00000000:03:00.0").as_deref(),
+        Some("0000:03:00.0")
+    );
+    assert_eq!(
+        normalize_pci_bus("0000:03:00.0").as_deref(),
+        Some("0000:03:00.0")
+    );
     assert_ne!(
         normalize_pci_bus("0000:03:00.0"),
         normalize_pci_bus("0001:03:00.0")
     );
+    for invalid in [
+        "0000:03:invalid:data",
+        "0000:100:00.0",
+        "0000:03:20.0",
+        "0000:03:00.8",
+        "0000:03:00.g",
+    ] {
+        assert_eq!(normalize_pci_bus(invalid), None, "accepted {invalid}");
+    }
     assert_eq!(parse_pct("100"), Some(100.0));
     assert_eq!(parse_pct("101"), None);
     assert_eq!(parse_pct("N/A"), None);
@@ -127,6 +142,124 @@ async fn timed_out_probe_is_killed_and_reaped() {
     let result = bounded_command_output(command, Duration::from_millis(40)).await;
     assert!(result.unwrap_err().contains("超时"));
     assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn oversized_stderr_is_rejected_before_waiting_for_stdout_eof() {
+    let mut command = Command::new("sh");
+    command
+        .args(["-c", "yes x | head -c 65537 >&2; exec sleep 5"])
+        .stderr(std::process::Stdio::piped());
+    let started = Instant::now();
+    let result = bounded_command_output(command, Duration::from_secs(2)).await;
+    assert!(result.unwrap_err().contains("超过 64 KiB"));
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn hardware_gpu_monitor_nvidia_sustained_encode() {
+    if std::env::var("BILIUP_TEST_ENCODER").ok().as_deref() != Some("h264_nvenc") {
+        return;
+    }
+
+    let before = snapshot().await;
+    let before_ids: std::collections::HashSet<_> = before
+        .devices
+        .iter()
+        .filter(|device| device.vendor == "nvidia")
+        .map(|device| device.id.clone())
+        .collect();
+    assert!(
+        !before_ids.is_empty(),
+        "NVIDIA hardware host must expose a GPU"
+    );
+    tokio::time::sleep(CACHE_TTL + Duration::from_millis(100)).await;
+
+    let mut encode = crate::tools::ffmpeg_command();
+    encode.args([
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-re",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=1280x720:rate=30",
+        "-t",
+        "15",
+        "-c:v",
+        "h264_nvenc",
+    ]);
+    encode
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    if let Ok(device) = std::env::var("BILIUP_TEST_ENCODER_DEVICE") {
+        if !device.is_empty() && device.bytes().all(|byte| byte.is_ascii_digit()) {
+            encode.args(["-gpu", &device]);
+        }
+    }
+    encode.args(["-f", "null", "-"]);
+    let mut child = encode
+        .spawn()
+        .expect("ffmpeg must be installed when NVIDIA hardware test is enabled");
+
+    let mut samples = Vec::new();
+    for _ in 0..3 {
+        tokio::time::sleep(CACHE_TTL + Duration::from_millis(100)).await;
+        samples.push(snapshot().await);
+    }
+    let workload_running = child.try_wait().unwrap().is_none();
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    assert!(
+        workload_running,
+        "the NVENC workload must keep running while sampling"
+    );
+
+    let last = samples.last().expect("collect at least one monitor sample");
+    let nvidia: Vec<_> = last
+        .devices
+        .iter()
+        .filter(|device| device.vendor == "nvidia")
+        .collect();
+    let ids: std::collections::HashSet<_> = nvidia.iter().map(|device| device.id.clone()).collect();
+    assert_eq!(
+        nvidia.len(),
+        ids.len(),
+        "GPU inventory must not duplicate PCI devices"
+    );
+    assert_eq!(ids, before_ids, "GPU inventory must stay stable under load");
+    assert!(
+        samples
+            .windows(2)
+            .all(|pair| pair[1].sampled_at > pair[0].sampled_at),
+        "fresh samples must advance"
+    );
+    assert!(
+        last.sampled_at > before.sampled_at,
+        "monitor sample timestamp must advance"
+    );
+    assert!(
+        samples
+            .iter()
+            .any(|sample| sample.devices.iter().any(|device| {
+                device.vendor == "nvidia"
+                    && device
+                        .encoder_utilization_percent
+                        .is_some_and(|value| value > 0.0)
+            })),
+        "sustained NVENC workload must produce a positive encoder utilization sample"
+    );
+    assert!(
+        nvidia[0].utilization_percent.is_some(),
+        "overall GPU utilization should be reported"
+    );
+    assert!(
+        nvidia[0].memory_used_bytes.is_some() && nvidia[0].memory_total_bytes.is_some(),
+        "NVIDIA memory counters should be reported"
+    );
 }
 
 #[test]

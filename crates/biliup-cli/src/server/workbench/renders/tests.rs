@@ -366,6 +366,20 @@ async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states()
     let original = spec(&pool, dir.path().join("renders"), session).await;
     let first = store::insert(&pool, &original, 1000).await.unwrap();
     let second = store::insert(&pool, &original, 1100).await.unwrap();
+    let other_session: i64 = sqlx::query_scalar("INSERT INTO stream_sessions(name,url,title,date,live_cover_path,started_at,ended_at) VALUES('b','https://b','other','2026-10-10','',1,2) RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let other_segment_path = dir.path().join("other-source.mp4");
+    std::fs::write(&other_segment_path, b"other source").unwrap();
+    sqlx::query("INSERT INTO segments(session_id,path,container,state,start_ms,end_ms) VALUES(?,?,'mp4','finished',0,10000)")
+        .bind(other_session)
+        .bind(other_segment_path.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let other_spec = spec(&pool, dir.path().join("renders"), other_session).await;
+    let other_job = store::insert(&pool, &other_spec, 1200).await.unwrap();
     assert!(store::running(&pool, first.view.id, 2000).await.unwrap());
     let progress = engine::EngineProgress {
         phase: "合成分段 1/1".into(),
@@ -382,18 +396,43 @@ async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states()
         .await
         .unwrap();
     let page = store::list_all(&pool, None, None, 1, 0).await.unwrap();
-    assert_eq!(page.total, 2);
-    assert_eq!(page.jobs[0].id, second.view.id);
+    assert_eq!(page.total, 3);
+    assert_eq!(page.jobs[0].id, other_job.view.id);
+    assert_ne!(page.jobs[0].session_id, first.view.session_id);
     let page = store::list_all(&pool, Some("running"), Some(session), 25, 0)
         .await
         .unwrap();
     assert_eq!(page.total, 1);
+    assert_eq!(page.jobs[0].id, first.view.id);
+    let session_page = store::list_all(&pool, None, Some(session), 25, 0)
+        .await
+        .unwrap();
+    assert_eq!(session_page.total, 2);
+    assert_eq!(session_page.jobs[0].id, second.view.id);
+    assert_eq!(session_page.jobs[1].id, first.view.id);
     let job = &page.jobs[0];
     assert_eq!(job.session_name, "a");
     assert_eq!(job.requested_encoder, "auto");
     assert_eq!(job.encoder.as_deref(), Some("h264_vaapi"));
     assert_eq!(job.eta_ms, Some(3750));
     assert_eq!(job.started_at, Some(2000));
+    let no_fallback_update = engine::EngineProgress {
+        fallback_reason: None,
+        ..progress.clone()
+    };
+    store::progress_snapshot(&pool, first.view.id, &no_fallback_update, 4000)
+        .await
+        .unwrap();
+    assert_eq!(
+        store::get(&pool, first.view.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .view
+            .fallback_reason
+            .as_deref(),
+        Some("QSV 不可用，改用 VAAPI")
+    );
     assert!(
         store::terminal(&pool, first.view.id, "cancelled", Some("已取消"), 7000)
             .await
@@ -413,6 +452,10 @@ async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states()
     assert_eq!(job.state, "cancelled");
     assert_eq!(job.updated_at, 7000);
     assert_eq!(job.encoder.as_deref(), Some("h264_vaapi"));
+    assert_eq!(
+        job.fallback_reason.as_deref(),
+        Some("QSV 不可用，改用 VAAPI")
+    );
     assert_eq!(
         store::list_all(&pool, None, Some(session + 999), 25, 0)
             .await

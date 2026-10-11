@@ -184,6 +184,11 @@ pub fn render_fonts_dir() -> Option<PathBuf> {
 /// shared font directory.
 pub fn render_font() -> Option<PathBuf> {
     let dir = render_fonts_dir()?;
+    let embedded = embedded_render_tools().map(|root| root.join("fonts").join(RENDER_FONT));
+    render_font_in(&dir, embedded.as_deref())
+}
+
+fn render_font_in(dir: &Path, embedded: Option<&Path>) -> Option<PathBuf> {
     let preferred = dir.join(RENDER_FONT);
     if preferred.is_file() {
         return Some(preferred);
@@ -194,8 +199,9 @@ pub fn render_font() -> Option<PathBuf> {
     {
         return Some(path);
     }
-    let embedded = embedded_render_tools()?.join("fonts").join(RENDER_FONT);
-    embedded.is_file().then_some(embedded)
+    embedded
+        .filter(|path| path.is_file())
+        .map(Path::to_path_buf)
 }
 
 pub fn render_font_path() -> Result<PathBuf, String> {
@@ -447,6 +453,22 @@ mod tests {
         let tools = embedded_render_tools().expect("embedded CJK font should be extractable");
         let font = tools.join("fonts").join(RENDER_FONT);
         assert_eq!(std::fs::read(font).unwrap().as_slice(), RENDER_FONT_BYTES);
+    }
+
+    #[test]
+    fn emoji_only_directory_uses_only_an_existing_embedded_cjk_font() {
+        let fonts = tempfile::tempdir().unwrap();
+        std::fs::write(fonts.path().join("NotoEmoji.ttf"), b"emoji").unwrap();
+
+        let missing_fallback = fonts.path().join("missing-cjk.otf");
+        assert_eq!(render_font_in(fonts.path(), Some(&missing_fallback)), None);
+
+        let embedded = fonts.path().join("embedded-cjk.otf");
+        std::fs::write(&embedded, b"cjk").unwrap();
+        assert_eq!(
+            render_font_in(fonts.path(), Some(&embedded)),
+            Some(embedded)
+        );
     }
 
     const BTBN_WIN64: &str = "ffmpeg version n8.1.2-50-g1a748fe2cd-20260831 Copyright (c) 2000-2026 the FFmpeg developers\n\
