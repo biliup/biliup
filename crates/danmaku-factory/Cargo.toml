@@ -12,3 +12,7 @@ serde = { workspace = true }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3.14"
+
+[target.'cfg(unix)'.dev-dependencies]
+# tests/errors.rs limits the file size of a child process to fail writes
+libc = "0.2"

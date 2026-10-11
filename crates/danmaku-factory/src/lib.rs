@@ -252,12 +252,6 @@ pub fn convert_xml_to_ass(
         .map_err(|_| ConvertError::new(ErrorKind::InvalidArgument, "invalid font_name"))?;
     let input_path = c_path(input)?;
     let output_path = c_path(output)?;
-    if output.symlink_metadata().is_ok() {
-        return Err(ConvertError::new(
-            ErrorKind::OutputExists,
-            output.display().to_string(),
-        ));
-    }
     let to_i32 = |n: u32| i32::try_from(n).unwrap_or(i32::MAX);
     let raw = sys::df_options {
         struct_size: size_of::<sys::df_options>() as u32,
@@ -287,6 +281,11 @@ pub fn convert_xml_to_ass(
     let mut result = sys::df_result::new();
     let status = {
         let _core = CORE.lock().unwrap_or_else(PoisonError::into_inner);
+        // Claim the path first, atomically: an existing file, a symlink or
+        // another caller's output is never replaced, and on failure the only
+        // file removed below is the one created here. The core then opens
+        // this empty file for writing.
+        claim(output)?;
         // SAFETY: every pointer is valid and NUL-terminated for the whole
         // call, `raw` and `result` carry their own sizes, and the core keeps
         // no pointer after returning.
@@ -305,8 +304,7 @@ pub fn convert_xml_to_ass(
             blocked_count: result.blocked_count.max(0) as u32,
         });
     }
-    // The output did not exist before the call, so whatever is there now is
-    // an incomplete file from this conversion.
+    // Created by claim() above, so it is this conversion's incomplete output.
     let _ = std::fs::remove_file(output);
     // SAFETY: the core always NUL-terminates the message buffer.
     let detail = unsafe { CStr::from_ptr(result.message.as_ptr()) }
@@ -318,6 +316,28 @@ pub fn convert_xml_to_ass(
         os_error: (result.os_error != 0).then_some(result.os_error),
         detail,
     })
+}
+
+/// Creates `output`, failing if anything exists there.
+fn claim(output: &Path) -> Result<(), ConvertError> {
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output)
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(ConvertError::new(
+            ErrorKind::OutputExists,
+            output.display().to_string(),
+        )),
+        Err(error) => Err(ConvertError {
+            kind: ErrorKind::OutputCreate,
+            upstream_code: 0,
+            // errno on Unix; Windows reports Win32 codes, kept in the text.
+            os_error: if cfg!(unix) { error.raw_os_error() } else { None },
+            detail: format!("{}: {error}", output.display()),
+        }),
+    }
 }
 
 /// fopen() takes the path bytes on Unix. On Windows the core converts UTF-8
@@ -343,15 +363,17 @@ fn c_path(path: &Path) -> Result<CString, ConvertError> {
 #[cfg(windows)]
 fn windows_path(path: &Path) -> Option<String> {
     use std::path::{Component, Prefix};
-    let text = path.to_str()?;
-    // MAX_PATH is 260 UTF-16 units including the terminator.
-    if text.encode_utf16().count() < 240 {
-        return Some(text.to_owned());
-    }
-    // absolute() also turns '/' into '\' and resolves "." and "..", which
-    // verbatim paths no longer do.
+    let original = path.to_str()?;
+    // absolute() resolves a relative name against the current directory, so
+    // the length checked is that of the path _wfopen really opens. It also
+    // turns '/' into '\' and resolves "." and "..", which verbatim paths no
+    // longer do.
     let absolute = std::path::absolute(path).ok()?;
     let text = absolute.to_str()?;
+    // MAX_PATH is 260 UTF-16 units including the terminator.
+    if text.encode_utf16().count() < 240 {
+        return Some(original.to_owned());
+    }
     Some(match absolute.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
             Prefix::Disk(_) => format!(r"\\?\{text}"),

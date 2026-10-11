@@ -102,6 +102,52 @@ fn outputs_are_never_overwritten_and_failures_leave_nothing() {
     assert_eq!(error.os_error, Some(2), "{error}");
 }
 
+/// A write that fails half way (a full disk) leaves no truncated ASS behind.
+/// The file size limit applies to the whole process, so the conversion runs
+/// in a child: this test binary, filtered to this test.
+#[cfg(unix)]
+#[test]
+fn a_write_error_removes_the_partial_output() {
+    const CHILD: &str = "DANMAKU_FACTORY_TEST_WRITE_LIMIT_DIR";
+    if let Some(dir) = std::env::var_os(CHILD) {
+        // SAFETY: plain libc calls on this single-threaded child process.
+        unsafe {
+            libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            let limit = libc::rlimit {
+                rlim_cur: 4096,
+                rlim_max: 4096,
+            };
+            assert_eq!(libc::setrlimit(libc::RLIMIT_FSIZE, &limit), 0);
+        }
+        let output = Path::new(&dir).join("out.ass");
+        let error = convert_xml_to_ass(&golden("inputs/dense.xml"), &output, &biliup_options())
+            .unwrap_err();
+        assert_eq!(error.kind, ErrorKind::OutputWrite, "{error}");
+        assert_eq!(error.os_error, Some(libc::EFBIG), "{error}");
+        assert!(!output.exists(), "the truncated output was left behind");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "a_write_error_removes_the_partial_output",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CHILD, dir.path())
+        .output()
+        .unwrap();
+    let report = String::from_utf8_lossy(&child.stdout);
+    assert!(
+        child.status.success() && report.contains("1 passed"),
+        "{report}{}",
+        String::from_utf8_lossy(&child.stderr)
+    );
+    // The child really converted: it got as far as writing (and removing) out.ass.
+    assert!(std::fs::read_dir(dir.path()).unwrap().next().is_none());
+}
+
 #[test]
 fn every_option_is_range_checked() {
     let base = biliup_options;
@@ -190,6 +236,32 @@ fn long_paths_on_windows() {
     let _ = std::fs::remove_file(relative);
     convert_xml_to_ass(&input, relative, &biliup_options()).unwrap();
     std::fs::remove_file(relative).unwrap();
+}
+
+/// Callers racing for one output path: exactly one converts, the others are
+/// refused, and the file left is complete.
+#[test]
+fn racing_callers_never_replace_or_delete_each_others_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("shared.ass");
+    let results: Vec<_> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..8)
+            .map(|_| {
+                scope.spawn(|| {
+                    convert_xml_to_ass(&golden("inputs/dense.xml"), &output, &biliup_options())
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1, "{results:?}");
+    for result in results.iter().filter_map(|r| r.as_ref().err()) {
+        assert_eq!(result.kind, ErrorKind::OutputExists, "{result}");
+    }
+    let actual = std::fs::read(&output).unwrap();
+    if !cfg!(windows) {
+        assert!(actual == std::fs::read(golden("expected/dense-biliup.ass")).unwrap());
+    }
 }
 
 #[test]
