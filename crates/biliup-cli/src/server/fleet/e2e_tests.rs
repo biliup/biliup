@@ -832,6 +832,34 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
         saved["ignored"],
         serde_json::json!(["kuaishou_cookie", "pool1_size"])
     );
+    let (_, global) = send(
+        Method::GET,
+        "/v1/fleet/configuration".into(),
+        serde_json::Value::Null,
+    )
+    .await;
+    let expected_version = global["version"].as_i64().unwrap();
+    let mut next_config = global["config"].as_object().unwrap().clone();
+    next_config.insert("delay".into(), serde_json::json!(3));
+    let (status, _) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({ "expected_version": expected_version, "config": next_config }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, stale) = send(
+        Method::PUT,
+        "/v1/fleet/configuration".into(),
+        serde_json::json!({
+            "expected_version": expected_version,
+            "config": { "delay": 4 }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    assert_eq!(stale["current"]["version"], expected_version + 1);
+    assert_eq!(stale["current"]["config"]["delay"], 3);
     eventually(
         "global config applied on both nodes",
         Duration::from_secs(20),
@@ -855,6 +883,37 @@ async fn layered_config_reaches_nodes_without_their_secrets() {
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(error["message"].as_str().unwrap().contains("pool1_size"));
+    let (_, node_config) = send(
+        Method::GET,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::Value::Null,
+    )
+    .await;
+    let expected_override = node_config["override"].clone();
+    let expected_global_version = node_config["global"]["version"].as_i64().unwrap();
+    let (status, _) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({
+            "expected_override": expected_override.clone(),
+            "expected_global_version": expected_global_version,
+            "override": { "pool1_size": 1 }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, stale) = send(
+        Method::PUT,
+        format!("/v1/fleet/nodes/{a}/config"),
+        serde_json::json!({
+            "expected_override": expected_override,
+            "expected_global_version": expected_global_version,
+            "override": { "pool1_size": 3 }
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{stale}");
+    assert_eq!(stale["current"]["override"]["pool1_size"], 1);
     let (status, _) = send(
         Method::PUT,
         format!("/v1/fleet/nodes/{a}/config"),

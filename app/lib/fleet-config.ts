@@ -124,7 +124,7 @@ export const LOCAL_SECRET_FIELDS = [
 
 export type ConfigValues = Record<string, unknown>
 
-/** `GET /v1/fleet/configuration`；`PUT` 的响应多了 `changed` 与 `ignored` */
+/** `GET /v1/fleet/configuration`；条件 `PUT` 的响应多了 `changed` 与 `ignored` */
 export interface FleetConfig {
   /** 还没保存过为 0 */
   version: number
@@ -183,21 +183,61 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (res.status === 409) {
+    const payload = await res.json().catch(() => ({}))
+    throw new FleetConfigConflictError(
+      typeof payload.message === 'string' ? payload.message : '配置已被其他管理员更新',
+      payload.current,
+    )
+  }
   await handleResponse(res)
   return res.json()
 }
 
-export function saveFleetConfig(config: ConfigValues) {
-  return putJson<FleetConfig>(FLEET_CONFIG_KEY, config)
+export class FleetConfigConflictError extends Error {
+  constructor(message: string, readonly current: unknown) {
+    super(message)
+    this.name = 'FleetConfigConflictError'
+  }
 }
 
-export function saveNodeOverride(id: number, override: ConfigValues) {
-  return putJson<{ node_id: number; override: ConfigValues; ignored: string[] }>(nodeConfigKey(id), override)
+export function saveFleetConfig(expectedVersion: number, config: ConfigValues) {
+  return putJson<FleetConfig>(FLEET_CONFIG_KEY, { expected_version: expectedVersion, config })
+}
+
+export function saveNodeOverride(
+  id: number,
+  expectedOverride: ConfigValues,
+  expectedGlobalVersion: number,
+  override: ConfigValues,
+) {
+  return putJson<{ node_id: number; override: ConfigValues; ignored: string[] }>(nodeConfigKey(id), {
+    expected_override: expectedOverride,
+    expected_global_version: expectedGlobalVersion,
+    override,
+  })
 }
 
 /** 表单清空后的值：Semi 清空输入框会给 undefined 或空串，接口里一律是 null */
 const blank = (value: unknown) => (value === undefined || value === '' ? null : value)
 const same = (a: unknown, b: unknown) => JSON.stringify(blank(a)) === JSON.stringify(blank(b))
+
+/** Keep only fields the user changed while rebasing a draft on a freshly loaded form. */
+export function mergeConfigDraft(
+  latest: ConfigValues,
+  previousInitial: ConfigValues,
+  draft: ConfigValues,
+  exactKeys: string[] = [],
+): ConfigValues {
+  const merged = { ...latest }
+  for (const key of new Set([...Object.keys(previousInitial), ...Object.keys(draft)])) {
+    const unchanged = exactKeys.includes(key)
+      ? JSON.stringify(draft[key]) === JSON.stringify(previousInitial[key])
+      : same(draft[key], previousInitial[key])
+    if (!unchanged) merged[key] = draft[key]
+  }
+  return merged
+}
 
 /**
  * 全局配置的请求体：键集合永远是上次保存的那一份（共享键全集），键数不随表单变。

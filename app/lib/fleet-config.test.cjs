@@ -11,7 +11,7 @@ const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
 }).outputText
 const exportsForTest = {}
 vm.runInThisContext(`(function(exports, require) { ${compiled}\n})`, { filename })(exportsForTest, () => ({}))
-const { globalPayload, overridePayload } = exportsForTest
+const { globalPayload, overridePayload, mergeConfigDraft } = exportsForTest
 
 test('custom duration is preserved by both global and node config payloads', () => {
   const initial = { segment_time: '00:30:00', file_size: 1024 }
@@ -39,4 +39,22 @@ test('removing a custom duration or matching global settings returns to inherita
   }
   assert.deepEqual(overridePayload(current, current, global, global), {})
   assert.deepEqual(overridePayload({}, { segment_time: null }, { segment_time: null }, { segment_time: null }), {})
+})
+
+test('rebasing a config draft preserves only locally edited fields', () => {
+  const previous = { delay: 1, threads: 2, filename_prefix: 'old' }
+  const draft = { delay: 3, threads: 2, filename_prefix: 'mine' }
+  const latest = { delay: 1, threads: 8, filename_prefix: 'remote' }
+  assert.deepEqual(mergeConfigDraft(latest, previous, draft), {
+    delay: 3,
+    threads: 8,
+    filename_prefix: 'mine',
+  })
+})
+
+test('rebasing preserves explicit node duration null semantics', () => {
+  assert.deepEqual(
+    mergeConfigDraft({ segment_time: '00:30:00' }, { segment_time: null }, { segment_time: '' }, ['segment_time']),
+    { segment_time: '' },
+  )
 })
