@@ -26,7 +26,8 @@ build/
 cover/
 cache/
 .cursor/
-
+# Runtime clip exports in the working directory, not source modules.
+/clips/
 *.back
 bili.cookie.json
 archive.txt
