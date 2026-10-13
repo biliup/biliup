@@ -32,6 +32,17 @@ const DEFAULT_PROBE_POST_MB: f64 = 0.1;
 
 pub mod upos;
 
+/// Receives successful UPOS PUT acknowledgements, never bytes merely read.
+/// Implementations must be quick and must not block the upload on telemetry IO.
+pub trait UploadObserver: Send + Sync {
+    fn can_upload(&self) -> bool { true }
+    fn chunk_confirmed(&self, part_number: usize, bytes: usize) -> bool;
+    fn chunk_confirmed_range(&self, part_number: usize, _start: u64, bytes: usize) -> bool {
+        self.chunk_confirmed(part_number, bytes)
+    }
+    fn chunk_retry(&self, _part_number: usize) {}
+}
+
 pub struct Parcel {
     // line: &'a Line,
     line: Bucket,
@@ -50,6 +61,21 @@ impl Parcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
+        self.upload_with_observer(client, limit, progress, None).await
+    }
+
+    pub async fn upload_with_observer<F, S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        progress: F,
+        observer: Option<&dyn UploadObserver>,
+    ) -> Result<Video>
+    where
+        F: FnOnce(VideoStream) -> S,
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
         let mut video = match self.line {
             Bucket::Upos(bucket) => {
                 // let bucket: crate::uploader::upos::Bucket = self.pre_upload(client).await?;
@@ -57,10 +83,11 @@ impl Parcel {
                 let upos = Upos::from(client, bucket).await?;
                 let mut parts = Vec::new();
                 let stream = upos
-                    .upload_stream(
+                    .upload_stream_with_observer(
                         progress(self.video_file.get_stream(chunk_size)?),
                         self.video_file.total_size,
                         limit,
+                        observer,
                     )
                     .await?;
                 tokio::pin!(stream);
@@ -281,13 +308,27 @@ impl StreamParcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
+        self.upload_parts_with_observer(client, limit, stream, None).await
+    }
+
+    pub async fn upload_parts_with_observer<S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        stream: S,
+        observer: Option<&dyn UploadObserver>,
+    ) -> Result<UploadedStream>
+    where
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
         match self.line {
             Bucket::Upos(bucket) => {
                 let upos = Upos::from(client, bucket).await?;
                 let mut parts = Vec::new();
                 let mut uploaded_size = 0u64;
                 {
-                    let uploaded = upos.upload_stream(stream, self.total_size, limit).await?;
+                    let uploaded = upos.upload_stream_with_observer(stream, self.total_size, limit, observer).await?;
                     tokio::pin!(uploaded);
                     while let Some((part, size)) = uploaded.try_next().await? {
                         parts.push(part);

@@ -64,6 +64,158 @@ fn parses_intel_array_choosing_last_sample_and_exact_video_engine() {
     let metrics = parse_intel_metrics(&json);
     assert_eq!(metrics.overall, None);
     assert_eq!(metrics.video, Some(21.0));
+    assert_eq!(metrics.engines.len(), 2);
+    assert_eq!(metrics.engines[0].name, "Render/3D");
+    assert_eq!(metrics.engines[0].utilization_percent, Some(88.0));
+    assert_eq!(metrics.engines[1].name, "Video");
+    assert_eq!(metrics.engines[1].utilization_percent, Some(21.0));
+}
+
+#[test]
+fn intel_engine_fixture_keeps_video_instances_separate_and_ignores_similar_names() {
+    let metrics = parse_intel_metrics(&serde_json::json!({"engines": {
+        "Video/0": {"busy": 12.5},
+        "Video/1": {"busy": 35.0},
+        "VideoEnhance/0": {"busy": 4.0},
+        "Compute/0": {"busy": 75.0},
+        "VideoFoo": {"busy": 98.0}
+    }}));
+    assert_eq!(
+        metrics.video, None,
+        "multiple video engines have no single aggregate counter"
+    );
+    assert_eq!(metrics.engines.len(), 4);
+    assert_eq!(
+        metrics
+            .engines
+            .iter()
+            .filter(|engine| intel_engine_class(&engine.name) == Some(2))
+            .count(),
+        2
+    );
+    assert!(
+        !metrics
+            .engines
+            .iter()
+            .any(|engine| engine.name == "VideoFoo")
+    );
+}
+
+#[test]
+fn intel_engine_idle_zero_is_distinct_from_missing_or_invalid_counter() {
+    let metrics = parse_intel_metrics(&serde_json::json!({"engines": {
+        "Render/3D": {"busy": 0.0},
+        "Blitter": {},
+        "Video": {"busy": 0.0},
+        "VideoEnhance": {"busy": -1.0},
+        "Compute": {"busy": 101.0},
+    }}));
+    assert_eq!(metrics.video, Some(0.0));
+    assert_eq!(
+        metrics
+            .engines
+            .iter()
+            .map(|engine| engine.utilization_percent)
+            .collect::<Vec<_>>(),
+        vec![Some(0.0), None, Some(0.0), None, None]
+    );
+}
+
+fn i915_region(class: u16, probed: u64, unallocated: u64) -> [u8; 88] {
+    let mut region = [0u8; 88];
+    region[..2].copy_from_slice(&class.to_ne_bytes());
+    region[8..16].copy_from_slice(&probed.to_ne_bytes());
+    region[16..24].copy_from_slice(&unallocated.to_ne_bytes());
+    region
+}
+
+fn i915_memory_fixture(regions: &[[u8; 88]]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(16 + regions.len() * 88);
+    bytes.extend_from_slice(&(regions.len() as u32).to_ne_bytes());
+    bytes.resize(16, 0);
+    for region in regions {
+        bytes.extend_from_slice(region);
+    }
+    bytes
+}
+
+#[test]
+fn parses_i915_memory_regions_without_mislabeling_shared_memory_as_vram() {
+    let fixture = i915_memory_fixture(&[
+        i915_region(0, 16 * 1024 * 1024 * 1024, 8 * 1024 * 1024 * 1024),
+        i915_region(1, 8 * 1024 * 1024 * 1024, 3 * 1024 * 1024 * 1024),
+        i915_region(1, 4 * 1024 * 1024 * 1024, 2 * 1024 * 1024 * 1024),
+    ]);
+    assert_eq!(
+        parse_i915_memory(&fixture, true),
+        Some(IntelMemory {
+            dedicated: true,
+            total: Some(12 * 1024 * 1024 * 1024),
+            used: Some(7 * 1024 * 1024 * 1024),
+        })
+    );
+    assert_eq!(
+        parse_i915_memory(&fixture, false),
+        Some(IntelMemory {
+            dedicated: true,
+            total: Some(12 * 1024 * 1024 * 1024),
+            used: None,
+        })
+    );
+
+    let integrated = i915_memory_fixture(&[i915_region(
+        0,
+        32 * 1024 * 1024 * 1024,
+        20 * 1024 * 1024 * 1024,
+    )]);
+    assert_eq!(
+        parse_i915_memory(&integrated, true),
+        Some(IntelMemory {
+            dedicated: false,
+            total: None,
+            used: None,
+        })
+    );
+}
+
+#[test]
+fn rejects_incomplete_or_unavailable_i915_region_fixtures() {
+    assert_eq!(parse_i915_memory(&[], true), None);
+    assert_eq!(parse_i915_memory(&[0; 16], true), None);
+    let unavailable = i915_memory_fixture(&[i915_region(1, u64::MAX, u64::MAX)]);
+    assert_eq!(parse_i915_memory(&unavailable, true), None);
+    assert!(!memory_accounting_capability("CapEff:\t0000000000000000\n"));
+    assert!(memory_accounting_capability("CapEff:\t0000004000200000\n"));
+}
+
+#[test]
+fn i915_permission_fallback_never_becomes_zero_used_even_with_ambiguous_privileged_data() {
+    let fixture = i915_memory_fixture(&[i915_region(1, 8_522_825_728, 8_522_825_728)]);
+    for privileged in [false, true] {
+        assert_eq!(
+            parse_i915_memory(&fixture, privileged),
+            Some(IntelMemory {
+                dedicated: true,
+                total: Some(8_522_825_728),
+                used: None,
+            })
+        );
+    }
+    let invalid_remaining = i915_memory_fixture(&[i915_region(1, 100, 101)]);
+    assert_eq!(
+        parse_i915_memory(&invalid_remaining, true).unwrap().used,
+        None
+    );
+    let mut truncated = fixture.clone();
+    truncated.pop();
+    assert_eq!(parse_i915_memory(&truncated, true), None);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn i915_query_layout_matches_the_kernel_uapi() {
+    assert_eq!(std::mem::size_of::<I915Query>(), 16);
+    assert_eq!(std::mem::size_of::<I915QueryItem>(), 24);
 }
 
 #[test]
@@ -153,8 +305,9 @@ async fn oversized_stderr_is_rejected_before_waiting_for_stdout_eof() {
         .stderr(std::process::Stdio::piped());
     let started = Instant::now();
     let result = bounded_command_output(command, Duration::from_secs(2)).await;
-    assert!(result.unwrap_err().contains("超过 64 KiB"));
-    assert!(started.elapsed() < Duration::from_secs(1));
+    let error = result.expect_err("oversized stderr must reject the probe");
+    assert!(error.contains("超过 64 KiB"), "actual probe error: {error}");
+    assert!(started.elapsed() < Duration::from_secs(1), "rejection took {:?}", started.elapsed());
 }
 
 #[tokio::test]

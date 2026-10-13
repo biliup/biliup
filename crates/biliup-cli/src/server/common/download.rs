@@ -1,4 +1,4 @@
-use crate::server::common::live_image::spawn_avatar_download;
+use crate::server::common::live_image::{spawn_avatar_download, spawn_cover_download};
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
 use crate::server::common::throughput::{RateMeter, Sampler};
@@ -176,7 +176,7 @@ impl SegmentEventProcessor {
                 // 发送到上传器
                 let res = self
                     .uploader
-                    .force_send(UploaderMessage::SegmentEvent(rx.clone(), self.ctx.clone()))
+                    .force_send(UploaderMessage::segment_event(rx.clone(), self.ctx.clone()))
                     .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
                 if let Some(prev) = res {
                     warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
@@ -393,10 +393,18 @@ impl DownloadTask {
         *self.source.write().unwrap() = LiveSource::from_stream(stream);
         let media = LiveMedia::from_stream(stream);
         let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
+        let cover_changed = self.media.read().unwrap().cover_url != media.cover_url;
         if changed {
             spawn_avatar_download(
                 ctx.live_streamer().id,
                 media.avatar_url.clone(),
+                ctx.live_streamer().url.clone(),
+            );
+        }
+        if cover_changed {
+            spawn_cover_download(
+                ctx.live_streamer().id,
+                media.cover_url.clone(),
                 ctx.live_streamer().url.clone(),
             );
         }
@@ -925,6 +933,11 @@ pub async fn start_download_workflow(
         task.live_media().avatar_url,
         ctx.live_streamer().url.clone(),
     );
+    spawn_cover_download(
+        ctx.live_streamer().id,
+        task.live_media().cover_url,
+        ctx.live_streamer().url.clone(),
+    );
 
     tokio::spawn({
         let streamer_info = ctx.streamer_info();
@@ -1093,7 +1106,7 @@ mod tests {
         }
         assert!(processor.finish_processing().await);
 
-        let UploaderMessage::SegmentEvent(segments, _) = uploads.try_recv().unwrap();
+        let (segments, _, _) = uploads.try_recv().unwrap().into_parts();
         let queued: Vec<PathBuf> = std::iter::from_fn(|| segments.try_recv().ok())
             .map(|segment| segment.prev_file_path)
             .collect();

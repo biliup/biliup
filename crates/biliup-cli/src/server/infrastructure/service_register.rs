@@ -1,6 +1,7 @@
 use crate::LogHandle;
-use crate::server::api::live_media::ImageProxy;
+use crate::server::common::room_metadata::spawn_room_cover_refresh;
 use crate::server::common::system_stats::SystemMonitor;
+use crate::server::common::upload_observation::UploadObservations;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -39,9 +40,6 @@ pub struct ServiceRegister {
 
     pub log_handle: LogHandle,
 
-    /// 录制中直播间封面 / 头像的图片代理（抓取客户端 + 内存缓存）
-    pub image_proxy: Arc<ImageProxy>,
-
     /// 控制台首页的系统状态采样（CPU / 内存 / 磁盘 / 网速），随服务启停
     pub system: Arc<SystemMonitor>,
     /// 切片导出任务（产物在工作目录下的 `clips/`）
@@ -51,8 +49,11 @@ pub struct ServiceRegister {
 
     /// 切片发布队列（同一时间只传一个稿件；任务只在内存里）
     pub publisher: Arc<ClipPublisher>,
+    pub upload_observations: Arc<UploadObservations>,
     /// 本机斗鱼登录 Cookie 的持久化续期与运行时读取。
     pub douyu_keeper: Arc<DouyuCookieKeeper>,
+    /// 房间封面的后台刷新任务，与服务一起停止。
+    pub room_cover_refresh: Option<Arc<tokio::task::JoinHandle<()>>>,
 }
 
 /// 简单的服务容器，负责管理API端点通过axum扩展获取的各种服务
@@ -87,11 +88,18 @@ impl ServiceRegister {
         if let Err(error) = renders.initialize().await {
             tracing::warn!(%error, "录后合成任务恢复失败");
         }
-        let publisher = Arc::new(ClipPublisher::new(
-            pool.clone(),
-            clips.clone(),
-            Arc::new(BiliBackend::new(config.clone(), client.clone())),
-        ));
+        let upload_observations = download_manager.upload_observations();
+        if let Err(error) = upload_observations.initialize().await {
+            upload_observations.monitor_error(&error.to_string());
+        }
+        let publisher = Arc::new(
+            ClipPublisher::new(
+                pool.clone(),
+                clips.clone(),
+                Arc::new(BiliBackend::new(config.clone(), client.clone())),
+            )
+            .with_observations(upload_observations.clone()),
+        );
         publisher.spawn();
 
         let douyu_keeper = DouyuCookieKeeper::new(pool.clone(), config.clone());
@@ -100,17 +108,20 @@ impl ServiceRegister {
         }
 
         info!("feature services successfully initialized!");
+        let managers = Arc::new(download_manager);
+        let room_cover_refresh = Some(Arc::new(spawn_room_cover_refresh(&managers, pool.clone())));
         ServiceRegister {
             clips,
             renders,
             publisher,
+            upload_observations,
             douyu_keeper,
+            room_cover_refresh,
             pool,
-            managers: Arc::new(download_manager),
+            managers,
             config: config.clone(),
             client,
             log_handle,
-            image_proxy: Arc::new(ImageProxy::new()),
             system: SystemMonitor::spawn(),
         }
     }
@@ -127,12 +138,17 @@ impl ServiceRegister {
             self.client.clone(),
         )
         .with_douyu_keeper(self.douyu_keeper.clone())
+        .with_upload_observations(self.upload_observations.clone())
     }
 
     pub async fn cleanup(&self) {
+        if let Some(task) = &self.room_cover_refresh {
+            task.abort();
+        }
         self.renders.shutdown().await;
         self.douyu_keeper.stop();
         self.managers.cleanup().await;
+        self.upload_observations.flush().await;
     }
 }
 

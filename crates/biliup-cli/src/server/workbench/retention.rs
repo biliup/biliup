@@ -28,8 +28,8 @@ pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 const HOUR_MS: i64 = 3_600_000;
 
-/// Serialize cleanup's file operations with render enqueue. Database pins alone
-/// cannot protect a file already selected by an earlier cleanup query.
+/// Serialize cleanup's file operations with creation of media references and
+/// retention changes. Pins cannot protect files selected by an earlier query.
 pub(crate) static MEDIA_LIFECYCLE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 /// 删除点要用到的上下文：数据库，以及删之前还要保留多久。
@@ -86,7 +86,11 @@ struct Tracked {
 
 async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Tracked>> {
     sqlx::query_as(
-        "SELECT g.id, g.danmaku_path, g.pin_count, s.retain_until,
+        "SELECT g.id, g.danmaku_path, g.pin_count,
+                MAX(COALESCE(s.retain_until, 0), COALESCE((
+                    SELECT MAX(gs.retain_until)
+                    FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+                    WHERE gm.source_session_id = s.id), 0)) AS retain_until,
                 EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
                         WHERE r.segment_id = g.id AND j.state IN ('queued','running')) AS rendering
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
@@ -326,7 +330,8 @@ pub async fn unpin(conn: &mut SqliteConnection, owner: &str) -> sqlx::Result<boo
     }
 }
 
-/// 按 `segment_pins` 重算场次里每个分段的 `pin_count`。仍在录的分段（`end_ms` 为空）算到无穷远。
+/// 重算来源场次的引用，或合并场次所有成员的引用。合并场次区间保留在合并坐标中，
+/// 与来源分段比较时才应用成员偏移。仍在录的分段（`end_ms` 为空）算到无穷远。
 pub(crate) async fn refresh_pin_counts<'e, E>(executor: E, session_id: i64) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -334,10 +339,17 @@ where
     sqlx::query(
         "UPDATE segments SET pin_count = (
              SELECT COUNT(*) FROM segment_pins p
-             WHERE p.session_id = segments.session_id
+             WHERE (p.session_id = segments.session_id
                AND p.to_ms >= segments.start_ms
                AND (segments.end_ms IS NULL OR p.from_ms < segments.end_ms))
-         WHERE session_id = ?",
+                OR EXISTS (
+                    SELECT 1 FROM session_group_members gm
+                    WHERE gm.group_session_id = p.session_id
+                      AND gm.source_session_id = segments.session_id
+                      AND p.to_ms >= segments.start_ms + gm.offset_ms
+                      AND (segments.end_ms IS NULL OR p.from_ms < segments.end_ms + gm.offset_ms)))
+         WHERE session_id = ?1 OR session_id IN (
+             SELECT source_session_id FROM session_group_members WHERE group_session_id = ?1)",
     )
     .bind(session_id)
     .execute(executor)
@@ -352,6 +364,7 @@ pub async fn set_session_retention(
     session_id: i64,
     retain_until: Option<i64>,
 ) -> sqlx::Result<bool> {
+    let _lifecycle = MEDIA_LIFECYCLE.read().await;
     let done = sqlx::query("UPDATE stream_sessions SET retain_until = ? WHERE id = ?")
         .bind(retain_until)
         .bind(session_id)
@@ -403,6 +416,9 @@ pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usiz
                            WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
            AND (g.delete_after IS NULL OR g.delete_after <= ?1)
            AND (s.retain_until IS NULL OR s.retain_until <= ?1)
+           AND NOT EXISTS (
+               SELECT 1 FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+               WHERE gm.source_session_id = s.id AND gs.retain_until > ?1)
          ORDER BY g.id",
     )
     .bind(now)
@@ -449,7 +465,10 @@ where
     let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let candidates: Vec<Candidate> = sqlx::query_as(
         "SELECT g.id, g.path, g.index_path, g.danmaku_path,
-                (g.pin_count > 0 OR COALESCE(s.retain_until, 0) > ?) AS referenced
+                (g.pin_count > 0 OR COALESCE(s.retain_until, 0) > ?1
+                 OR EXISTS (
+                     SELECT 1 FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+                     WHERE gm.source_session_id = s.id AND gs.retain_until > ?1)) AS referenced
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state IN ('finished', 'pending_delete')
            AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id

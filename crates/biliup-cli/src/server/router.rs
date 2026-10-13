@@ -56,6 +56,39 @@ pub(crate) const ALLOWED_LOG_FILES: &[&str] = &["ds_update.log", "download.log",
 /// 创建应用程序路由
 pub fn router(service_register: ServiceRegister) -> Router<()> {
     Router::new()
+        .route(
+            "/v1/activity-events",
+            get(crate::server::api::activity_events::list),
+        )
+        .route(
+            "/v1/files/location",
+            get(crate::server::api::files::location),
+        )
+        .route("/v1/files/reveal", post(crate::server::api::files::reveal))
+        .route(
+            "/v1/upload-queue",
+            get(crate::server::api::upload_queue::list),
+        )
+        .route(
+            "/v1/upload-queue/{id}",
+            get(crate::server::api::upload_queue::detail),
+        )
+        .route(
+            "/v1/session-merge-candidates",
+            get(crate::server::api::session_groups::list_candidates),
+        )
+        .route(
+            "/v1/session-merge-candidates/{id}/confirm",
+            post(crate::server::api::session_groups::confirm_candidate),
+        )
+        .route(
+            "/v1/session-merge-candidates/{id}/dismiss",
+            post(crate::server::api::session_groups::dismiss_candidate),
+        )
+        .route(
+            "/v1/session-groups",
+            post(crate::server::api::session_groups::create_group),
+        )
         // 主播管理相关路由
         .route(
             "/v1/streamers",

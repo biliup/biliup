@@ -209,17 +209,13 @@ impl Monitor {
                 room.set_rejection(None);
                 let mut info = streamer_info(&stream);
                 info.name = room.live_streamer.remark.clone();
-                let merge_window_ms = room
-                    .get_config()
-                    .live_merge_minutes
-                    .saturating_mul(60_000)
-                    .min(i64::MAX as u64) as i64;
                 let session = match workbench::store::open_session(
                     &self.pool,
                     room.live_streamer.id,
                     &info,
                     workbench::recorder::now_ms(),
-                    merge_window_ms,
+                    // A new recorder owns a new source; continuity is confirmed in the workbench.
+                    0,
                 )
                 .await
                 {

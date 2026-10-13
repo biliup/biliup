@@ -9,7 +9,7 @@ use crate::server::workbench::dvr::{self, OpenError};
 use crate::server::workbench::store::{
     self, DeleteSessionOutcome, SegmentRow, SegmentState, SessionListRow,
 };
-use crate::server::workbench::{live, segment_index, session_keyframes};
+use crate::server::workbench::{live, segment_index, session_groups, session_keyframes};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -45,6 +45,9 @@ fn not_found() -> Response {
 #[derive(Debug, Serialize)]
 pub struct SessionSummary {
     pub id: i64,
+    pub kind: String,
+    pub source_session_ids: Vec<i64>,
+    pub group_session_id: Option<i64>,
     pub streamer_id: Option<i64>,
     /// 开播时记下的主播名（主播删掉之后仍在）。
     pub streamer_name: String,
@@ -69,6 +72,9 @@ impl From<SessionListRow> for SessionSummary {
         Self {
             recording: live::is_recording(row.id),
             id: row.id,
+            kind: row.kind,
+            source_session_ids: vec![row.id],
+            group_session_id: None,
             streamer_id: row.streamer_id,
             streamer_name: row.streamer_name,
             title: row.title,
@@ -80,6 +86,22 @@ impl From<SessionListRow> for SessionSummary {
             bytes: row.bytes,
         }
     }
+}
+
+async fn summary(pool: &ConnectionPool, row: SessionListRow) -> sqlx::Result<SessionSummary> {
+    let mut view = SessionSummary::from(row);
+    let members = session_groups::timeline(pool, view.id).await?;
+    view.source_session_ids = members.iter().map(|m| m.source_session_id).collect();
+    view.recording = members
+        .last()
+        .is_some_and(|m| live::is_recording(m.source_session_id));
+    view.group_session_id = sqlx::query_scalar(
+        "SELECT group_session_id FROM session_group_members WHERE source_session_id=?",
+    )
+    .bind(view.id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(view)
 }
 
 #[derive(Debug, Serialize)]
@@ -96,6 +118,7 @@ pub struct SessionListQuery {
     /// 从 1 开始。
     pub page: Option<u32>,
     pub page_size: Option<u32>,
+    pub include_sources: Option<bool>,
 }
 
 /// `GET /v1/sessions?streamer_id=&page=&page_size=`
@@ -109,14 +132,31 @@ pub async fn list_sessions(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let offset = (page as i64 - 1) * page_size as i64;
-    match store::list_sessions(&pool, query.streamer_id, page_size as i64, offset).await {
-        Ok((rows, total)) => Json(SessionPage {
-            items: rows.into_iter().map(SessionSummary::from).collect(),
-            total,
-            page,
-            page_size,
-        })
-        .into_response(),
+    match store::list_sessions_including_sources(
+        &pool,
+        query.streamer_id,
+        page_size as i64,
+        offset,
+        query.include_sources.unwrap_or(false),
+    )
+    .await
+    {
+        Ok((rows, total)) => {
+            let mut items = Vec::with_capacity(rows.len());
+            for row in rows {
+                match summary(&pool, row).await {
+                    Ok(row) => items.push(row),
+                    Err(e) => return internal(e),
+                }
+            }
+            Json(SessionPage {
+                items,
+                total,
+                page,
+                page_size,
+            })
+            .into_response()
+        }
         Err(e) => internal(e),
     }
 }
@@ -124,6 +164,7 @@ pub async fn list_sessions(
 #[derive(Debug, Serialize)]
 pub struct SegmentView {
     pub id: i64,
+    pub source_session_id: i64,
     /// `flv` / `ts` / `mp4` / `mkv`
     pub container: String,
     /// `recording` / `finished` / `missing` / `deleted` / `pending_delete`；
@@ -153,6 +194,7 @@ pub struct SessionDetail {
     pub segments: Vec<SegmentView>,
     /// 断流缺口：没有录到内容的时间段。
     pub gaps: Vec<Gap>,
+    pub members: Vec<session_groups::MemberView>,
 }
 
 /// 录制中的分段在盘上已经能回看到哪里（段内毫秒）。
@@ -189,6 +231,7 @@ async fn segment_view(row: SegmentRow) -> SegmentView {
     }
     SegmentView {
         id: row.id,
+        source_session_id: row.session_id,
         container: row.container,
         state: row.state.as_str(),
         start_ms: row.start_ms,
@@ -206,7 +249,10 @@ async fn segment_view(row: SegmentRow) -> SegmentView {
 /// `GET /v1/sessions/{id}`
 pub async fn get_session(State(pool): State<ConnectionPool>, Path(id): Path<i64>) -> Response {
     let summary = match store::session_summary(&pool, id).await {
-        Ok(Some(row)) => SessionSummary::from(row),
+        Ok(Some(row)) => match summary(&pool, row).await {
+            Ok(row) => row,
+            Err(e) => return internal(e),
+        },
         Ok(None) => return not_found(),
         Err(e) => return internal(e),
     };
@@ -239,6 +285,10 @@ pub async fn get_session(State(pool): State<ConnectionPool>, Path(id): Path<i64>
         summary,
         segments,
         gaps,
+        members: match session_groups::members(&pool, id).await {
+            Ok(rows) => rows,
+            Err(e) => return internal(e),
+        },
     })
     .into_response()
 }
@@ -250,7 +300,10 @@ pub async fn delete_session(
     Path(id): Path<i64>,
 ) -> Response {
     let _admission = publisher.lock_session_admission().await;
-    if live::is_recording(id) {
+    if match session_groups::is_recording(&pool, id).await {
+        Ok(recording) => recording,
+        Err(e) => return internal(e),
+    } {
         return (StatusCode::CONFLICT, "正在录制的场次不能删除").into_response();
     }
     if publisher
@@ -275,6 +328,11 @@ pub async fn delete_session(
         Ok(DeleteSessionOutcome::Busy) => (
             StatusCode::CONFLICT,
             "场次有投稿或后台任务尚未完成，请先完成、取消或处理后重试",
+        )
+            .into_response(),
+        Ok(DeleteSessionOutcome::GroupMember) => (
+            StatusCode::CONFLICT,
+            "场次属于合并场次，请先删除合并场次以保留来源录像",
         )
             .into_response(),
         Err(error) => internal(error),

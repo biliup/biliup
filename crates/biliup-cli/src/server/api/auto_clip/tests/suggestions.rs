@@ -39,6 +39,90 @@ fn candidate(in_s: i64, out_s: i64) -> Candidate {
     }
 }
 
+#[tokio::test]
+async fn group_suggestions_keep_source_coordinates_and_accept_into_group() {
+    let f = fixture(None).await;
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let first = add_session(&f.pool).await;
+    let second = add_session(&f.pool).await;
+    sqlx::query("UPDATE stream_sessions SET streamer_id=1 WHERE id IN (?,?)")
+        .bind(first)
+        .bind(second)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE stream_sessions SET started_at=700000,ended_at=1300000 WHERE id=?")
+        .bind(second)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let mut proposed = candidate(3, 9);
+    proposed.evidence.images = vec![5000];
+    let old = suggestions::replace_pending(&f.pool, second, None, &[proposed], 1)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let group = crate::server::workbench::session_groups::create(&f.pool, &[first, second])
+        .await
+        .unwrap();
+    let list = json_of(
+        call(
+            &f.app,
+            Some(&f.operator),
+            "GET",
+            &format!("/v1/sessions/{group}/suggestions"),
+            None,
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(list["suggestions"][0]["session_id"], second);
+    assert_eq!(list["suggestions"][0]["view_session_id"], group);
+    assert_eq!(list["suggestions"][0]["in_ms"], 702000);
+    assert_eq!(list["suggestions"][0]["evidence"]["images"][0], 704000);
+    let accepted = json_of(
+        call(
+            &f.app,
+            Some(&f.operator),
+            "POST",
+            &format!("/v1/sessions/{group}/suggestions/{}/accept", old.id),
+            Some(json!({"in_ms":590000,"out_ms":709000})),
+        )
+        .await,
+        StatusCode::CREATED,
+    )
+    .await;
+    assert_eq!(accepted["clip"]["session_id"], group);
+    assert_eq!(accepted["clip"]["out_ms"], 709000);
+    assert_eq!(accepted["suggestion"]["view_session_id"], group);
+    let canonical = suggestions::get(&f.pool, old.id).await.unwrap().unwrap();
+    assert_eq!(canonical.in_ms, 3000);
+    assert_eq!(canonical.session_id, second);
+    let counts: Vec<i64> = sqlx::query_scalar(
+        "SELECT pin_count FROM segments WHERE session_id IN (?,?) ORDER BY session_id",
+    )
+    .bind(first)
+    .bind(second)
+    .fetch_all(&f.pool)
+    .await
+    .unwrap();
+    assert_eq!(counts, vec![1, 1]);
+    let response = call(
+        &f.app,
+        Some(&f.operator),
+        "POST",
+        &format!("/v1/sessions/{group}/suggestions/{}/accept", old.id),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
 #[test]
 fn suggestion_routes_are_declared_in_the_policy() {
     for (method, route, permission) in [

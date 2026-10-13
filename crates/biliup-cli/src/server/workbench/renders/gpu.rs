@@ -34,9 +34,18 @@ pub struct GpuDevice {
     pub render_node: Option<String>,
     pub utilization_percent: Option<f64>,
     pub encoder_utilization_percent: Option<f64>,
+    pub engine_utilization: Vec<GpuEngine>,
     pub memory_used_bytes: Option<u64>,
     pub memory_total_bytes: Option<u64>,
+    pub memory_kind: String,
+    pub memory_source: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GpuEngine {
+    pub name: String,
+    pub utilization_percent: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -140,6 +149,8 @@ async fn collect() -> GpuSnapshot {
                     device.encoder_utilization_percent = row.encoder;
                     device.memory_used_bytes = row.mem_used;
                     device.memory_total_bytes = row.mem_total;
+                    device.memory_kind = "dedicated".into();
+                    device.memory_source = Some("nvidia-smi".into());
                     device.error = error.clone();
                     if row.encoder.is_none() {
                         device.error = append_error(
@@ -157,8 +168,11 @@ async fn collect() -> GpuSnapshot {
                         render_node: None,
                         utilization_percent: row.gpu,
                         encoder_utilization_percent: row.encoder,
+                        engine_utilization: Vec::new(),
                         memory_used_bytes: row.mem_used,
                         memory_total_bytes: row.mem_total,
+                        memory_kind: "dedicated".into(),
+                        memory_source: Some("nvidia-smi".into()),
                         error: error.clone().or_else(|| {
                             row.encoder.is_none().then(|| {
                                 encoder_error.clone().unwrap_or_else(|| {
@@ -194,17 +208,20 @@ async fn collect() -> GpuSnapshot {
             }
         }
         for device in devices.iter_mut().filter(|d| d.vendor == "intel") {
+            apply_intel_memory(device);
             match intel_gpu_top(device.render_node.as_deref()).await {
                 Ok(sample) => {
                     device.utilization_percent = sample.overall;
                     device.encoder_utilization_percent = sample.video;
-                    if sample.video.is_none() {
+                    device.engine_utilization = sample.engines;
+                    if !device.engine_utilization.iter().any(|engine| {
+                        intel_engine_class(&engine.name) == Some(2)
+                            && engine.utilization_percent.is_some()
+                    }) {
                         device.error = append_error(
                             device.error.take(),
                             "intel_gpu_top 未报告 Video 引擎计数器",
                         );
-                    } else if device.error.is_none() {
-                        device.error = Some("Video 引擎利用率同时包含编码与解码活动；此计数器不提供整体利用率和显存指标".into());
                     }
                 }
                 Err(err) => device.error = append_error(device.error.take(), &err),
@@ -268,8 +285,11 @@ fn linux_drm_devices_at(root: &Path) -> Vec<GpuDevice> {
             render_node: Some(format!("/dev/dri/{node}")),
             utilization_percent: None,
             encoder_utilization_percent: None,
+            engine_utilization: Vec::new(),
             memory_used_bytes: None,
             memory_total_bytes: None,
+            memory_kind: "unknown".into(),
+            memory_source: None,
             error: if vendor == "unknown" {
                 Some(format!("Unsupported PCI vendor 0x{vendor_id:04x}"))
             } else {
@@ -335,8 +355,11 @@ async fn windows_gpu_inventory() -> Vec<GpuDevice> {
                 render_node: None,
                 utilization_percent: None,
                 encoder_utilization_percent: None,
+                engine_utilization: Vec::new(),
                 memory_used_bytes: None,
                 memory_total_bytes: None,
+                memory_kind: "unknown".into(),
+                memory_source: None,
                 error: Some("Windows 未提供可读取的 GPU 利用率、编码引擎或显存计数器".into()),
             })
         })
@@ -398,6 +421,10 @@ fn apply_amd_sysfs(device: &mut GpuDevice, path: &Path) {
         read_number(&path.join("gpu_busy_percent")).filter(|n| (0.0..=100.0).contains(n));
     device.memory_used_bytes = read_bytes(&path.join("mem_info_vram_used"));
     device.memory_total_bytes = read_bytes(&path.join("mem_info_vram_total"));
+    if device.memory_total_bytes.is_some_and(|total| total > 0) {
+        device.memory_kind = "dedicated".into();
+        device.memory_source = Some("amd-sysfs".into());
+    }
     if device.utilization_percent.is_none() && device.memory_used_bytes.is_none() {
         device.error = Some("AMD sysfs 未提供 GPU 利用率或显存计数器".into());
     } else if device.encoder_utilization_percent.is_none() {
@@ -415,10 +442,163 @@ fn read_bytes(path: &Path) -> Option<u64> {
     (value.fract() == 0.0 && value <= u64::MAX as f64).then_some(value as u64)
 }
 
+#[derive(Debug, PartialEq)]
+struct IntelMemory {
+    dedicated: bool,
+    total: Option<u64>,
+    used: Option<u64>,
+}
+
+#[cfg(target_os = "linux")]
+fn apply_intel_memory(device: &mut GpuDevice) {
+    let Some(node) = device.render_node.as_deref() else {
+        return;
+    };
+    match i915_memory(node) {
+        Ok(memory) => {
+            device.memory_kind = if memory.dedicated {
+                "dedicated"
+            } else {
+                "shared"
+            }
+            .into();
+            device.memory_total_bytes = memory.total;
+            device.memory_used_bytes = memory.used;
+            device.memory_source = Some(
+                if memory.used.is_some() {
+                    "i915-memory-regions"
+                } else {
+                    "i915-memory-regions-total"
+                }
+                .into(),
+            );
+        }
+        Err(error) => {
+            device.error = append_error(
+                device.error.take(),
+                &format!("Intel 内存指标不可用：{error}"),
+            )
+        }
+    }
+}
+
+// Stable i915 uAPI layouts from drm/i915_drm.h. The query is read-only and
+// returns SYSTEM/DEVICE regions rather than inferring capacity from PCI names.
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct I915QueryItem {
+    query_id: u64,
+    length: i32,
+    flags: u32,
+    data_ptr: u64,
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct I915Query {
+    num_items: u32,
+    flags: u32,
+    items_ptr: u64,
+}
+
+#[cfg(target_os = "linux")]
+fn i915_memory(node: &str) -> Result<IntelMemory, String> {
+    use std::os::fd::AsRawFd;
+    let file = std::fs::File::open(node).map_err(|error| error.to_string())?;
+    let mut item = I915QueryItem {
+        query_id: 4,
+        length: 0,
+        flags: 0,
+        data_ptr: 0,
+    };
+    let mut query = I915Query {
+        num_items: 1,
+        flags: 0,
+        items_ptr: (&mut item as *mut I915QueryItem) as u64,
+    };
+    const REQUEST: libc::Ioctl = libc::_IOWR::<I915Query>(b'd' as u32, 0x40 + 0x39);
+    // SAFETY: query and its single item remain alive throughout both calls;
+    // the data buffer stays allocated and its exact size is provided to the OS.
+    if unsafe { libc::ioctl(file.as_raw_fd(), REQUEST, &mut query) } < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    if !(16..=MAX_COMMAND_BYTES as i32).contains(&item.length) {
+        return Err(format!("i915 memory query length {}", item.length));
+    }
+    let mut bytes = vec![0u8; item.length as usize];
+    item.data_ptr = bytes.as_mut_ptr() as u64;
+    if unsafe { libc::ioctl(file.as_raw_fd(), REQUEST, &mut query) } < 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    if item.length < 16 || item.length as usize > bytes.len() {
+        return Err("i915 memory query returned an invalid length".into());
+    }
+    let privileged = std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .is_some_and(|status| memory_accounting_capability(&status));
+    parse_i915_memory(&bytes[..item.length as usize], privileged)
+        .ok_or_else(|| "i915 memory query returned invalid regions".into())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn memory_accounting_capability(status: &str) -> bool {
+    status
+        .lines()
+        .find_map(|line| line.strip_prefix("CapEff:"))
+        .and_then(|bits| u64::from_str_radix(bits.trim(), 16).ok())
+        .is_some_and(|bits| bits & ((1u64 << 21) | (1u64 << 38)) != 0)
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_i915_memory(bytes: &[u8], privileged: bool) -> Option<IntelMemory> {
+    let count = u32::from_ne_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
+    let needed = count.checked_mul(88)?.checked_add(16)?;
+    if count == 0 || needed > bytes.len() {
+        return None;
+    }
+    let mut total = 0u64;
+    let mut used = Some(0u64);
+    let mut system = false;
+    let mut dedicated = false;
+    for region in bytes[16..needed].chunks_exact(88) {
+        let class = u16::from_ne_bytes(region[..2].try_into().ok()?);
+        let probed = u64::from_ne_bytes(region[8..16].try_into().ok()?);
+        let unallocated = u64::from_ne_bytes(region[16..24].try_into().ok()?);
+        if probed == 0 || probed == u64::MAX {
+            return None;
+        }
+        if class == 0 {
+            system = true;
+        }
+        if class != 1 {
+            continue;
+        }
+        dedicated = true;
+        total = total.checked_add(probed)?;
+        // Without CAP_PERFMON/CAP_SYS_ADMIN, kernels deliberately return
+        // unallocated == probed. Older kernels can also return that fallback:
+        // keep this ambiguous value unavailable even with effective capability.
+        used = if privileged && unallocated < probed {
+            used.and_then(|used| used.checked_add(probed - unallocated))
+        } else {
+            None
+        };
+    }
+    if !dedicated && !system {
+        return None;
+    }
+    Some(IntelMemory {
+        dedicated,
+        total: dedicated.then_some(total),
+        used: dedicated.then_some(used).flatten(),
+    })
+}
+
 #[derive(Default)]
 struct IntelMetrics {
     overall: Option<f64>,
     video: Option<f64>,
+    engines: Vec<GpuEngine>,
 }
 
 async fn intel_gpu_top(render_node: Option<&str>) -> Result<IntelMetrics, String> {
@@ -509,19 +689,53 @@ fn parse_intel_metrics(value: &serde_json::Value) -> IntelMetrics {
     let engines = sample
         .and_then(|s| s.get("engines"))
         .and_then(|v| v.as_object());
-    let video = engines.and_then(|engines| {
-        engines
-            .iter()
-            .find(|(name, _)| {
-                let name = name.to_ascii_lowercase();
-                name == "video" || name.starts_with("video/") || name.starts_with("video ")
-            })
-            .and_then(|(_, entry)| entry.get("busy").and_then(as_percent))
+    let mut engines: Vec<GpuEngine> = engines
+        .map(|engines| {
+            engines
+                .iter()
+                .filter_map(|(name, entry)| {
+                    intel_engine_class(name).map(|_| GpuEngine {
+                        name: name.clone(),
+                        utilization_percent: entry.get("busy").and_then(as_percent),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    engines.sort_by(|a, b| {
+        intel_engine_class(&a.name)
+            .cmp(&intel_engine_class(&b.name))
+            .then(a.name.cmp(&b.name))
     });
+    let videos: Vec<_> = engines
+        .iter()
+        .filter(|engine| intel_engine_class(&engine.name) == Some(2))
+        .collect();
+    // Keep the legacy single-engine field only when there is exactly one
+    // Video engine. Multiple hardware engines remain separately observable.
+    let video = if videos.len() == 1 {
+        videos[0].utilization_percent
+    } else {
+        None
+    };
     IntelMetrics {
         overall: None,
         video,
+        engines,
     }
+}
+
+fn intel_engine_class(name: &str) -> Option<u8> {
+    let name = name.to_ascii_lowercase();
+    ["render/3d", "blitter", "video", "videoenhance", "compute"]
+        .iter()
+        .position(|class| {
+            name == *class
+                || name.strip_prefix(class).is_some_and(|tail| {
+                    tail.starts_with('/') || tail.starts_with(' ') || tail.starts_with('-')
+                })
+        })
+        .map(|class| class as u8)
 }
 
 fn as_percent(value: &serde_json::Value) -> Option<f64> {

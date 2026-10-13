@@ -1,7 +1,7 @@
 //! Persistent render queue with immutable recipes and cooperative cancellation.
 use super::{assets, engine, model::*, store};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::workbench::{clips, recorder, store as recordings};
+use crate::server::workbench::{clips, recorder, session_groups, store as recordings};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,47 @@ impl ProgressSamples {
 }
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+/// A bounded filename stem works on both Unix and Windows. The task ID added
+/// by the caller provides uniqueness even after unsafe characters are removed.
+fn output_file_name(name: Option<&str>, id: i64) -> String {
+    let mut stem = String::new();
+    for c in name.unwrap_or("合成").chars() {
+        let c = if c.is_control()
+            || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        {
+            '_'
+        } else {
+            c
+        };
+        if stem.len() + c.len_utf8() > 120 {
+            break;
+        }
+        stem.push(c);
+    }
+    let stem = stem.trim_matches(|c: char| c.is_whitespace() || c == '.');
+    let stem = if stem.is_empty() { "合成" } else { stem };
+    let base = stem
+        .split('.')
+        .next()
+        .unwrap_or(stem)
+        .trim()
+        .to_ascii_uppercase();
+    let reserved = matches!(
+        base.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        base.strip_prefix(*prefix).is_some_and(|suffix| {
+            matches!(
+                suffix,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    });
+    if reserved {
+        return format!("clip-{stem}-{id}.mp4");
+    }
+    format!("{stem}-{id}.mp4")
 }
 impl RenderJobs {
     pub fn new(pool: ConnectionPool, root: impl Into<PathBuf>) -> Self {
@@ -123,7 +164,10 @@ impl RenderJobs {
                 .await
                 .map_err(|e| e.to_string())?
                 .ok_or_else(|| format!("图片 {id} 不存在"))?;
-            if asset.session_id != session_id {
+            if !store::asset_authorized(&self.pool, session_id, id)
+                .await
+                .map_err(|e| e.to_string())?
+            {
                 return Err("不能使用其他场次的遮挡图片".into());
             }
             if !tokio::fs::try_exists(&asset.render.path)
@@ -150,6 +194,14 @@ impl RenderJobs {
         let segments = recordings::session_segments(&self.pool, session_id)
             .await
             .map_err(|e| e.to_string())?;
+        let members = session_groups::timeline(&self.pool, session_id)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut output_name = Some(if session.title.trim().is_empty() {
+            format!("场次-{session_id}")
+        } else {
+            session.title.clone()
+        });
         let range = if let Some(cid) = clip_id {
             if range.is_some() {
                 return Err("指定切片时不能同时指定范围".into());
@@ -161,6 +213,7 @@ impl RenderJobs {
             if c.session_id != session_id {
                 return Err("切片不属于这个场次".into());
             }
+            output_name = Some(c.title);
             (c.in_ms, c.out_ms)
         } else if let Some(range) = range {
             range
@@ -225,14 +278,25 @@ impl RenderJobs {
                     .fetch_one(&self.pool)
                     .await
                     .map_err(|e| e.to_string())?;
+            let member = members
+                .iter()
+                .find(|member| member.source_session_id == s.session_id)
+                .ok_or_else(|| format!("分段 {} 不属于当前场次", s.id))?;
+            let source_started_at: Option<i64> =
+                sqlx::query_scalar("SELECT started_at FROM stream_sessions WHERE id=?")
+                    .bind(s.session_id)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(|e| e.to_string())?;
             sources.push(RenderSource {
                 segment_id: s.id,
+                source_session_id: s.session_id,
                 path,
                 danmaku_path: xml,
                 start_ms: s.start_ms,
                 end_ms: end,
                 source_origin_ms: source_origin_ms
-                    .or_else(|| session.started_at.map(|t| t + s.start_ms)),
+                    .or_else(|| source_started_at.map(|t| t + s.start_ms - member.offset_ms)),
                 trim_start_ms: (range.0 - s.start_ms).max(0),
                 trim_end_ms: (range.1.min(end) - s.start_ms),
             });
@@ -249,6 +313,7 @@ impl RenderJobs {
         Ok(RenderSpec {
             session_id,
             clip_id,
+            output_name,
             in_ms: range.0,
             out_ms: range.1,
             recipe,
@@ -575,6 +640,7 @@ impl RenderJobs {
                 .iter()
                 .map(|s| engine::SourceSpan {
                     segment_id: s.segment_id,
+                    source_session_id: s.source_session_id,
                     path: s.path.clone(),
                     danmaku_path: s.danmaku_path.clone(),
                     start_ms: s.start_ms,
@@ -590,7 +656,7 @@ impl RenderJobs {
                 .iter()
                 .map(|a| (a.id.to_string(), a.path.clone()))
                 .collect(),
-            output_path: output_dir.join(format!("{id}.mp4")),
+            output_path: output_dir.join(output_file_name(spec.output_name.as_deref(), id)),
             font_path: spec.font_path.clone(),
         };
         // Coalesce fast progress updates and write them in order. Await the
@@ -689,6 +755,34 @@ impl RenderJobs {
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+    #[test]
+    fn output_names_are_safe_bounded_and_unique() {
+        assert_eq!(
+            output_file_name(Some(" .剪辑/\\:*?\"<>|\n. "), 42),
+            "剪辑__________-42.mp4"
+        );
+        assert_eq!(output_file_name(Some("..."), 42), "合成-42.mp4");
+        assert_eq!(output_file_name(None, 43), "合成-43.mp4");
+        for name in [
+            "CON.txt",
+            "aux.foo",
+            "NUL.a",
+            "LPT1.x",
+            "COM9.txt",
+            "COM¹.txt",
+            "LPT².txt",
+            "CONIN$.txt",
+        ] {
+            assert_eq!(
+                output_file_name(Some(name), 42),
+                format!("clip-{name}-42.mp4")
+            );
+        }
+        assert_eq!(output_file_name(Some("COM10.txt"), 42), "COM10.txt-42.mp4");
+        let long = output_file_name(Some(&"中".repeat(100)), 42);
+        assert!(long.len() <= 127);
+        assert!(!long.contains('/'));
+    }
     #[tokio::test]
     async fn coalesced_final_snapshot_keeps_last_encoding_speed_for_slow_writer() {
         let mut samples = ProgressSamples::default();

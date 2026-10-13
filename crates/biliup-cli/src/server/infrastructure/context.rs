@@ -1,5 +1,6 @@
 use crate::server::common::download::DownloadTask;
 use crate::server::common::recording_policy::Rejection;
+use crate::server::common::upload_observation::UploadObservations;
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::downloader::DownloadConfig;
@@ -71,6 +72,10 @@ impl Context {
 
     pub fn pool(&self) -> &ConnectionPool {
         &self.pool
+    }
+
+    pub(crate) fn upload_observations(&self) -> Option<&Arc<UploadObservations>> {
+        self.worker.upload_observations.as_ref()
     }
 
     pub async fn change_status(&self, stage: Stage, status: WorkerStatus) {
@@ -151,6 +156,7 @@ pub struct Worker {
     /// 全局配置
     config: Arc<RwLock<Config>>,
     douyu_keeper: Option<Arc<DouyuCookieKeeper>>,
+    upload_observations: Option<Arc<UploadObservations>>,
     /// HTTP客户端
     pub client: StatelessClient,
     /// 最近一次开播探测被录制策略挡下的原因，仅用于向界面解释「为什么没在录」。
@@ -183,6 +189,7 @@ impl Worker {
             upload_streamer,
             config,
             douyu_keeper: None,
+            upload_observations: None,
             client,
             last_rejection: RwLock::new(None),
             monitor_changes: watch::channel(()).0,
@@ -195,6 +202,11 @@ impl Worker {
 
     pub fn with_douyu_keeper(mut self, keeper: Arc<DouyuCookieKeeper>) -> Self {
         self.douyu_keeper = Some(keeper);
+        self
+    }
+
+    pub fn with_upload_observations(mut self, observations: Arc<UploadObservations>) -> Self {
+        self.upload_observations = Some(observations);
         self
     }
 

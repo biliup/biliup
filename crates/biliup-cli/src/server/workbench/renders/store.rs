@@ -1,6 +1,6 @@
 use super::model::*;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
-use crate::server::workbench::retention;
+use crate::server::workbench::{retention, session_groups};
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row, SqliteConnection};
 use std::path::PathBuf;
@@ -48,12 +48,20 @@ fn job(row: &SqliteRow) -> sqlx::Result<JobRecord> {
     };
     let eta_ms = estimate_remaining(&state, processed_ms, total_ms, speed);
     let requested_encoder = spec.recipe.encoding.encoder.name().to_owned();
+    let output_path = row
+        .try_get::<Option<String>, _>("output_path")?
+        .map(PathBuf::from);
+    let file_name = output_path
+        .as_ref()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned());
     Ok(JobRecord {
         view: JobView {
             id,
             session_id: row.try_get("session_id")?,
             clip_id: row.try_get("clip_id")?,
             download_url: (state == "ready").then(|| format!("/v1/renders/{id}/download")),
+            file_name,
             state,
             phase,
             ratio: row.try_get("ratio")?,
@@ -79,9 +87,7 @@ fn job(row: &SqliteRow) -> sqlx::Result<JobRecord> {
             eta_ms,
         },
         spec,
-        output_path: row
-            .try_get::<Option<String>, _>("output_path")?
-            .map(PathBuf::from),
+        output_path,
     })
 }
 /// FFmpeg speed is media seconds per wall-clock second. Preparation and final
@@ -131,6 +137,14 @@ pub async fn save_recipe(
     now: i64,
 ) -> sqlx::Result<()> {
     let mut tx = pool.begin().await?;
+    // Check inherited references before replacing the recipe's reference set.
+    for id in asset_ids(recipe) {
+        if !asset_authorized_connection(&mut tx, session_id, id).await? {
+            return Err(sqlx::Error::Protocol(
+                "遮挡图片不存在或不属于当前场次".into(),
+            ));
+        }
+    }
     sqlx::query("INSERT INTO render_recipes(session_id,recipe_json,updated_at) VALUES(?,?,?) ON CONFLICT(session_id) DO UPDATE SET recipe_json=excluded.recipe_json,updated_at=excluded.updated_at")
         .bind(session_id).bind(serde_json::to_string(recipe).map_err(json_error)?).bind(now).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM render_recipe_assets WHERE session_id=?")
@@ -138,18 +152,6 @@ pub async fn save_recipe(
         .execute(&mut *tx)
         .await?;
     for id in asset_ids(recipe) {
-        let belongs: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM render_assets WHERE id=? AND session_id=?)",
-        )
-        .bind(id)
-        .bind(session_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        if !belongs {
-            return Err(sqlx::Error::Protocol(
-                "遮挡图片不存在或不属于当前场次".into(),
-            ));
-        }
         sqlx::query("INSERT INTO render_recipe_assets(session_id,asset_id) VALUES(?,?)")
             .bind(session_id)
             .bind(id)
@@ -157,6 +159,29 @@ pub async fn save_recipe(
             .await?;
     }
     tx.commit().await
+}
+const ASSET_AUTHORIZED: &str = "SELECT EXISTS(SELECT 1 FROM render_assets a WHERE a.id=?1 AND (a.session_id=?2 OR EXISTS(SELECT 1 FROM render_recipe_assets r WHERE r.session_id=?2 AND r.asset_id=a.id) OR EXISTS(SELECT 1 FROM render_job_assets ja JOIN render_jobs j ON j.id=ja.job_id WHERE j.session_id=?2 AND ja.asset_id=a.id)))";
+pub async fn asset_authorized(
+    pool: &ConnectionPool,
+    session_id: i64,
+    asset_id: i64,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(ASSET_AUTHORIZED)
+        .bind(asset_id)
+        .bind(session_id)
+        .fetch_one(pool)
+        .await
+}
+async fn asset_authorized_connection(
+    conn: &mut SqliteConnection,
+    session_id: i64,
+    asset_id: i64,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar(ASSET_AUTHORIZED)
+        .bind(asset_id)
+        .bind(session_id)
+        .fetch_one(conn)
+        .await
 }
 pub fn asset_ids(recipe: &RenderRecipe) -> std::collections::BTreeSet<i64> {
     recipe
@@ -168,6 +193,7 @@ pub fn asset_ids(recipe: &RenderRecipe) -> std::collections::BTreeSet<i64> {
 }
 pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx::Result<JobRecord> {
     let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
+    let members = session_groups::timeline(pool, spec.session_id).await?;
     let mut tx = pool.begin().await?;
     // Hold a write transaction while checking all sources, so cleanup cannot race enqueue.
     let sql = format!(
@@ -183,11 +209,25 @@ pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx:
         .await?;
     let record = job(&row)?;
     for source in &spec.sources {
+        let source_session_id = if source.source_session_id == 0 {
+            spec.session_id
+        } else {
+            source.source_session_id
+        };
+        if !members
+            .iter()
+            .any(|member| member.source_session_id == source_session_id)
+        {
+            return Err(sqlx::Error::Protocol(format!(
+                "分段 {} 的来源不属于当前场次",
+                source.segment_id
+            )));
+        }
         let available: Option<(String, String, Option<String>)> = sqlx::query_as(
             "SELECT state,path,danmaku_path FROM segments WHERE id=? AND session_id=?",
         )
         .bind(source.segment_id)
-        .bind(spec.session_id)
+        .bind(source_session_id)
         .fetch_optional(&mut *tx)
         .await?;
         if !available.is_some_and(|(state, path, xml)| {
@@ -208,14 +248,13 @@ pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx:
     }
     for a in &spec.assets {
         let matching: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM render_assets WHERE id=? AND session_id=? AND sha256=?)",
+            "SELECT EXISTS(SELECT 1 FROM render_assets WHERE id=? AND sha256=?)",
         )
         .bind(a.id)
-        .bind(spec.session_id)
         .bind(&a.sha256)
         .fetch_one(&mut *tx)
         .await?;
-        if !matching {
+        if !matching || !asset_authorized_connection(&mut tx, spec.session_id, a.id).await? {
             return Err(sqlx::Error::Protocol(
                 "合成任务图片快照已变化或不属于当前场次".into(),
             ));
@@ -250,7 +289,9 @@ pub async fn get(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<JobRecor
 }
 pub async fn list(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Vec<JobView>> {
     sqlx::query(&format!(
-        "SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE session_id=? ORDER BY id DESC LIMIT 100"
+        "SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE session_id=?1 OR session_id IN
+         (SELECT source_session_id FROM session_group_members WHERE group_session_id=?1)
+         ORDER BY id DESC LIMIT 100"
     ))
     .bind(session_id)
     .fetch_all(pool)

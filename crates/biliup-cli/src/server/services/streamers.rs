@@ -137,7 +137,6 @@ pub async fn toggle_pause(managers: &DownloadManager, id: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::api::live_media::ImageProxy;
     use crate::server::common::system_stats::SystemMonitor;
     use crate::server::config::Config;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
@@ -203,6 +202,8 @@ mod tests {
             Arc::new(BiliBackend::new(config.clone(), client.clone())),
         ));
         let services = ServiceRegister {
+            upload_observations: managers.upload_observations(),
+            room_cover_refresh: None,
             renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
                 pool.clone(),
                 dir.path().join("renders"),
@@ -218,7 +219,6 @@ mod tests {
             config,
             client,
             log_handle,
-            image_proxy: Arc::new(ImageProxy::new()),
             system: SystemMonitor::spawn(),
         };
         Fixture {

@@ -1,7 +1,7 @@
 'use client'
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import mpegts from 'mpegts.js'
-import { describeMpegtsError, destroyMpegts, type LoaderHooks, mpegtsLiveConfig } from '@/app/ui/Player'
+import { attachMpegtsDiagnostics, describeMpegtsError, destroyMpegts, type LoaderHooks, mpegtsLiveConfig } from '@/app/ui/Player'
 import { mediaUrl } from '@/app/lib/sessions'
 import styles from './replay.module.scss'
 
@@ -125,6 +125,7 @@ const DvrPlayer = forwardRef<
     video.muted = initialMuted.current
     let serverError = false
     let disposed = false
+    let terminal = false
     const cb = () => callbacks.current
 
     if (!mpegts.isSupported()) {
@@ -141,6 +142,7 @@ const DvrPlayer = forwardRef<
           return
         }
         serverError = true
+        terminal = true
         const status = res.status
         res
           .clone()
@@ -157,7 +159,8 @@ const DvrPlayer = forwardRef<
       { ...mpegtsLiveConfig('relay'), ...hooks } as mpegts.Config
     )
     player.on(mpegts.Events.ERROR, (errorType: string, detail: string, info?: { code?: number; msg?: string }) => {
-      if (serverError || disposed) return
+      if (serverError || disposed || terminal) return
+      terminal = true
       const network = errorType === mpegts.ErrorTypes.NETWORK_ERROR
       cb().onPhase('error', describeMpegtsError(errorType, detail, info), network ? 0 : undefined)
     })
@@ -177,15 +180,23 @@ const DvrPlayer = forwardRef<
       alignToFrom()
       cb().onPosition(positionOf(video, t, from))
     }
-    const onPlaying = () => cb().onPhase('playing')
+    const onPlaying = () => { if (!terminal) cb().onPhase('playing') }
     const onPause = () => {
-      if (!video.ended) cb().onPhase('paused')
+      if (!terminal && !video.ended) cb().onPhase('paused')
     }
-    const onWaiting = () => cb().onPhase('waiting')
+    const onWaiting = () => { if (!terminal) cb().onPhase('waiting') }
     const onEnded = () => {
+      if (disposed || serverError || terminal) return
+      terminal = true
       cb().onPhase('ended')
       cb().onEnded(positionOf(video, t, from))
     }
+    const detachDiagnostics = attachMpegtsDiagnostics(video, player, onEnded, (message) => {
+      if (!disposed && !serverError && !terminal) {
+        terminal = true
+        cb().onPhase('error', message)
+      }
+    })
     const onVolume = () => cb().onMutedChange(video.muted)
     video.addEventListener('progress', onProgress)
     video.addEventListener('loadeddata', onProgress)
@@ -214,6 +225,7 @@ const DvrPlayer = forwardRef<
 
     return () => {
       disposed = true
+      detachDiagnostics()
       video.removeEventListener('progress', onProgress)
       video.removeEventListener('loadeddata', onProgress)
       video.removeEventListener('timeupdate', onTime)

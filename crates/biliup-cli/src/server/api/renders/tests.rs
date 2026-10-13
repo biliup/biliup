@@ -481,11 +481,12 @@ async fn ready_products_support_range_head_and_attachment() {
     let f = fixture().await;
     let root = f.jobs.root();
     tokio::fs::create_dir_all(root).await.unwrap();
-    let path = root.join("product.mp4");
+    let path = root.join("剪辑-1.mp4");
     tokio::fs::write(&path, b"0123456789").await.unwrap();
     let spec = RenderSpec {
         session_id: f.ended,
         clip_id: None,
+        output_name: None,
         in_ms: 0,
         out_ms: 1000,
         recipe: RenderRecipe::default(),
@@ -551,6 +552,12 @@ async fn ready_products_support_range_head_and_attachment() {
         attachment.headers()[header::CONTENT_DISPOSITION]
             .to_str()
             .unwrap()
+            .contains("filename*=UTF-8''%E5%89%AA%E8%BE%91-1.mp4")
+    );
+    assert!(
+        attachment.headers()[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
             .starts_with("attachment;")
     );
     let view = json_of(
@@ -567,6 +574,7 @@ async fn ready_products_support_range_head_and_attachment() {
     )
     .await;
     assert_eq!(view["state"], "ready");
+    assert_eq!(view["file_name"], "剪辑-1.mp4");
     assert!(view.get("spec").is_none());
     assert!(view.get("output_path").is_none());
     assert_eq!(
@@ -582,6 +590,156 @@ async fn ready_products_support_range_head_and_attachment() {
         .status(),
         StatusCode::CONFLICT
     );
+}
+
+#[tokio::test]
+async fn group_lists_inherited_images_and_saves_its_independent_recipe() {
+    let f = fixture().await;
+    let asset = upload(&f, f.ended).await;
+    let recipe = RenderRecipe {
+        regions: vec![MaskRegion {
+            id: "inherited-image".into(),
+            effect_type: EffectType::Image,
+            asset_id: asset["id"].as_i64(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    store::save_recipe(&f.pool, f.ended, &recipe, recorder::now_ms())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE stream_sessions SET streamer_id=1,started_at=CASE WHEN id=? THEN 1 ELSE 2000 END",
+    )
+    .bind(f.ended)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let group = crate::server::workbench::session_groups::create(&f.pool, &[f.ended, f.live])
+        .await
+        .unwrap();
+    let listed = json_of(
+        call(
+            &f.app,
+            Some(&f.viewer),
+            "GET",
+            &format!("/v1/sessions/{group}/render-assets"),
+            None,
+            Body::empty(),
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(listed["assets"][0]["id"], asset["id"]);
+    let mut edited = recipe.clone();
+    edited.regions[0].opacity = 0.5;
+    let saved = json_call(
+        &f,
+        Some(&f.op),
+        "PUT",
+        &format!("/v1/sessions/{group}/render-recipe"),
+        serde_json::to_value(&edited).unwrap(),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    assert_eq!(store::recipe(&f.pool, group).await.unwrap(), edited);
+    assert_eq!(store::recipe(&f.pool, f.ended).await.unwrap(), recipe);
+    let rejected = json_call(
+        &f,
+        Some(&f.op),
+        "PUT",
+        &format!("/v1/sessions/{}/render-recipe", f.live),
+        serde_json::to_value(&recipe).unwrap(),
+    )
+    .await;
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn group_render_request_for_inherited_clip_keeps_original_snapshot_and_history() {
+    let f = fixture().await;
+    let permit = crate::server::workbench::transcode::acquire(&CancellationToken::new())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE stream_sessions SET streamer_id=1,started_at=CASE WHEN id=? THEN 1 ELSE 2000 END",
+    )
+    .bind(f.ended)
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let video = f.dir.path().join("old-source.mp4");
+    std::fs::write(&video, b"queued fixture never decoded").unwrap();
+    sqlx::query(
+        "INSERT INTO segments(session_id,path,container,state,start_ms,end_ms)
+        VALUES(?,?,'mp4','finished',0,4000)",
+    )
+    .bind(f.ended)
+    .bind(video.to_string_lossy().into_owned())
+    .execute(&f.pool)
+    .await
+    .unwrap();
+    let clip = crate::server::workbench::clips::insert(
+        &f.pool,
+        f.ended,
+        &crate::server::workbench::clips::NewClip {
+            marker_id: None,
+            in_ms: 1000,
+            out_ms: 3000,
+            title: "旧切片".into(),
+            created_by: None,
+            created_at: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let group = crate::server::workbench::session_groups::create(&f.pool, &[f.ended, f.live])
+        .await
+        .unwrap();
+    let queued = json_of(
+        json_call(
+            &f,
+            Some(&f.op),
+            "POST",
+            &format!("/v1/sessions/{group}/renders"),
+            json!({"clip_id":clip.id}),
+        )
+        .await,
+        StatusCode::ACCEPTED,
+    )
+    .await;
+    let id = queued["id"].as_i64().unwrap();
+    assert_eq!(queued["session_id"], f.ended);
+    let spec = store::get(&f.pool, id).await.unwrap().unwrap().spec;
+    assert_eq!(spec.session_id, f.ended);
+    assert_eq!((spec.in_ms, spec.out_ms), (1000, 3000));
+    assert_eq!(spec.sources[0].source_session_id, f.ended);
+    let list = json_of(
+        call(
+            &f.app,
+            Some(&f.viewer),
+            "GET",
+            &format!("/v1/sessions/{group}/renders"),
+            None,
+            Body::empty(),
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(list["jobs"][0]["id"], id);
+    assert_eq!(list["jobs"][0]["session_id"], f.ended);
+    f.jobs.cancel(id).await.unwrap();
+    drop(permit);
 }
 
 #[tokio::test]
@@ -913,6 +1071,7 @@ async fn global_render_list_enforces_permissions_and_validates_pagination() {
         let spec = RenderSpec {
             session_id,
             clip_id: None,
+            output_name: None,
             in_ms: 0,
             out_ms: 1000,
             recipe: RenderRecipe::default(),

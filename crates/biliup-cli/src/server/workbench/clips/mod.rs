@@ -207,6 +207,7 @@ pub struct NewClip {
 
 /// 插入切片并引用它覆盖的分段（同一个事务）。
 pub async fn insert(pool: &ConnectionPool, session_id: i64, clip: &NewClip) -> sqlx::Result<Clip> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let mut tx = pool.begin().await?;
     let clip = insert_in(&mut tx, session_id, clip).await?;
     tx.commit().await?;
@@ -302,6 +303,7 @@ pub async fn update(
     changes: &ClipChanges,
     now: i64,
 ) -> sqlx::Result<UpdateOutcome> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let mut tx = pool.begin().await?;
     let sql = format!("SELECT {COLUMNS} FROM clips WHERE id = ? AND session_id = ?");
     let Some(current) = sqlx::query(&sql)

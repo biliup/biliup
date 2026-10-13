@@ -422,9 +422,30 @@ pub async fn session_density(
         .map(|s| s.end_ms.unwrap_or(s.start_ms))
         .max()
         .unwrap_or(0);
+    let mut origins = HashMap::new();
+    if session.kind == "group" {
+        for member in crate::server::workbench::session_groups::timeline(pool, session_id).await? {
+            let source = store::session(pool, member.source_session_id).await?;
+            // Wallclock XMLs use the source's own origin, shifted onto the view timeline.
+            origins.insert(
+                member.source_session_id,
+                source
+                    .and_then(|s| s.started_at)
+                    .map(|at| at - member.offset_ms),
+            );
+        }
+    }
     let files: Vec<(PathBuf, Alignment)> = segments
         .iter()
-        .filter_map(|segment| danmaku_file(segment, session.started_at))
+        .filter_map(|segment| {
+            danmaku_file(
+                segment,
+                origins
+                    .get(&segment.session_id)
+                    .copied()
+                    .unwrap_or(session.started_at),
+            )
+        })
         .collect();
     let density = tokio::task::spawn_blocking(move || {
         let mut comments = Vec::new();

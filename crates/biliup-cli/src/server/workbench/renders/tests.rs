@@ -21,6 +21,183 @@ async fn spec(pool: &ConnectionPool, root: PathBuf, session: i64) -> RenderSpec 
         .await
         .unwrap()
 }
+async fn group_fixture(
+    dir: &tempfile::TempDir,
+    pool: &ConnectionPool,
+    first: i64,
+) -> (i64, i64, i64) {
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(pool)
+        .await
+        .unwrap();
+    // Media lasts 10 seconds but source wall time lasts 12 seconds. The second
+    // view offset must use the media duration plus the 5 second real gap.
+    sqlx::query("UPDATE stream_sessions SET streamer_id=1,ended_at=13000 WHERE id=?")
+        .bind(first)
+        .execute(pool)
+        .await
+        .unwrap();
+    let second: i64 = sqlx::query_scalar("INSERT INTO stream_sessions(name,url,title,date,live_cover_path,streamer_id,started_at,ended_at) VALUES('a','https://a','second','2026-10-09','',1,18000,28000) RETURNING id")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let path = dir.path().join("second-source.mp4");
+    std::fs::write(&path, b"second source").unwrap();
+    let segment: i64 = sqlx::query_scalar("INSERT INTO segments(session_id,path,container,state,start_ms,end_ms) VALUES(?,?,'mp4','finished',0,10000) RETURNING id")
+        .bind(second)
+        .bind(path.to_string_lossy().as_ref())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let group = crate::server::workbench::session_groups::create(pool, &[first, second])
+        .await
+        .unwrap();
+    (group, second, segment)
+}
+
+#[tokio::test]
+async fn grouped_render_maps_sources_and_pins_without_changing_absolute_origins() {
+    let (dir, pool, first, first_segment) = setup().await;
+    let (group, second, second_segment) = group_fixture(&dir, &pool, first).await;
+    let jobs = RenderJobs::new(pool.clone(), dir.path().join("renders"));
+    let spec = jobs
+        .make_spec(group, None, Some((8000, 18000)), RenderRecipe::default())
+        .await
+        .unwrap();
+    assert_eq!(spec.sources.len(), 2);
+    assert_eq!(spec.sources[0].source_session_id, first);
+    assert_eq!(spec.sources[0].source_origin_ms, Some(1000));
+    assert_eq!(spec.sources[0].trim_start_ms, 8000);
+    assert_eq!(spec.sources[0].trim_end_ms, 10000);
+    assert_eq!(spec.sources[1].source_session_id, second);
+    assert_eq!(spec.sources[1].start_ms, 15000);
+    assert_eq!(spec.sources[1].source_origin_ms, Some(18000));
+    assert_eq!(spec.sources[1].trim_start_ms, 0);
+    assert_eq!(spec.sources[1].trim_end_ms, 3000);
+    let job = store::insert(&pool, &spec, now_ms()).await.unwrap();
+    for segment in [first_segment, second_segment] {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT pin_count FROM segments WHERE id=?")
+                .bind(segment)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            1
+        );
+    }
+    let mut forged = spec.clone();
+    forged.sources[1].source_session_id = first;
+    assert!(store::insert(&pool, &forged, now_ms()).await.is_err());
+    forged.sources[1].source_session_id = group;
+    assert!(store::insert(&pool, &forged, now_ms()).await.is_err());
+    assert!(
+        store::terminal(&pool, job.view.id, "cancelled", None, now_ms())
+            .await
+            .unwrap()
+    );
+    for segment in [first_segment, second_segment] {
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT pin_count FROM segments WHERE id=?")
+                .bind(segment)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+async fn group_recipe_assets_remain_authorized_in_saved_job_snapshots() {
+    let (dir, pool, first, _) = setup().await;
+    let root = dir.path().join("renders");
+    let asset = assets::upload(&pool, &root, first, "image/png", &png(), now_ms())
+        .await
+        .unwrap();
+    let recipe = RenderRecipe {
+        regions: vec![MaskRegion {
+            id: "inherited".into(),
+            effect_type: EffectType::Image,
+            asset_id: Some(asset.id),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    store::save_recipe(&pool, first, &recipe, now_ms())
+        .await
+        .unwrap();
+    let (group, _, _) = group_fixture(&dir, &pool, first).await;
+    let jobs = RenderJobs::new(pool.clone(), root);
+    assert_eq!(store::recipe(&pool, group).await.unwrap(), recipe);
+    assert_eq!(jobs.validate_assets(group, &recipe).await.unwrap().len(), 1);
+    store::save_recipe(&pool, group, &recipe, now_ms())
+        .await
+        .unwrap();
+    let spec = jobs
+        .make_spec(group, None, None, recipe.clone())
+        .await
+        .unwrap();
+    let original = store::insert(&pool, &spec, now_ms()).await.unwrap();
+    store::terminal(&pool, original.view.id, "cancelled", None, now_ms())
+        .await
+        .unwrap();
+    store::save_recipe(&pool, group, &RenderRecipe::default(), now_ms())
+        .await
+        .unwrap();
+    // Retry authorization comes from the old immutable job even when the new
+    // working recipe no longer references this member-owned image.
+    assert!(store::insert(&pool, &spec, now_ms()).await.is_ok());
+    assert!(assets::delete(&pool, asset.id).await.is_err());
+    assert!(jobs.validate_assets(first + 9999, &recipe).await.is_err());
+}
+
+#[tokio::test]
+async fn legacy_job_sources_default_to_real_session_and_product_name_is_frozen() {
+    let (dir, pool, session, _) = setup().await;
+    let original = spec(&pool, dir.path().join("renders"), session).await;
+    let mut json = serde_json::to_value(&original).unwrap();
+    json.as_object_mut().unwrap().remove("output_name");
+    for source in json["sources"].as_array_mut().unwrap() {
+        source.as_object_mut().unwrap().remove("source_session_id");
+    }
+    let legacy: RenderSpec = serde_json::from_value(json).unwrap();
+    assert_eq!(legacy.sources[0].source_session_id, 0);
+    assert_eq!(legacy.output_name, None);
+    let job = store::insert(&pool, &legacy, now_ms()).await.unwrap();
+    assert_eq!(
+        store::get(&pool, job.view.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .spec
+            .output_name,
+        None
+    );
+    let clip = crate::server::workbench::clips::insert(
+        &pool,
+        session,
+        &crate::server::workbench::clips::NewClip {
+            marker_id: None,
+            in_ms: 100,
+            out_ms: 900,
+            title: "Original title".into(),
+            created_by: None,
+            created_at: now_ms(),
+        },
+    )
+    .await
+    .unwrap();
+    let frozen = RenderJobs::new(pool.clone(), dir.path().join("renders"))
+        .make_spec(session, Some(clip.id), None, RenderRecipe::default())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE clips SET title='Edited title' WHERE id=?")
+        .bind(clip.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(frozen.output_name.as_deref(), Some("Original title"));
+}
 #[test]
 fn recipe_rejects_nonfinite_outside_duplicate_and_bad_intervals() {
     let mut recipe = RenderRecipe::default();

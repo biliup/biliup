@@ -25,6 +25,8 @@ export interface RenderEncoderCapability {
 }
 export interface RenderJob {
   id: number; session_id: number; clip_id: number | null
+  view_session_id?: number; source_session_id?: number
+  file_name?: string | null
   state: 'queued' | 'running' | 'ready' | 'failed' | 'cancelled'; phase: string; ratio: number | null
   error: string | null; output_bytes: number | null; duration_ms: number | null; created_at: number
   download_url: string | null
@@ -60,6 +62,9 @@ export interface RenderGpuDevice {
   id: string; name: string; vendor: 'nvidia' | 'intel' | 'amd' | 'unknown'; render_node: string | null
   utilization_percent: number | null; encoder_utilization_percent: number | null
   memory_used_bytes: number | null; memory_total_bytes: number | null; error: string | null
+  engine_utilization: { name: string; utilization_percent: number | null }[]
+  memory_kind: 'dedicated' | 'shared' | 'unknown'
+  memory_source: string | null
 }
 export interface RenderGpuSnapshot { devices: RenderGpuDevice[]; sampled_at: number }
 export const assetUrl = (id: number) => `${API_BASE}/v1/render-assets/${id}`

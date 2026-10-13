@@ -1,7 +1,9 @@
 'use client'
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Popover, Tooltip } from '@douyinfe/semi-ui'
+import { IconFlag } from '@douyinfe/semi-icons'
 import type { Marker } from '@/app/lib/markers'
-import { formatSessionTime } from '@/app/lib/markers'
+import { formatSessionTime, markerClusters } from '@/app/lib/markers'
 import {
   ceilPoint,
   floorPoint,
@@ -134,22 +136,91 @@ function Pins({
   to: number
   onPick: (m: Marker) => void
 }) {
+  const [hovered, setShown] = useState<number | null>(null)
+  const [focused, setFocused] = useState<number | null>(null)
+  const shown = hovered ?? focused
+  const [opened, setOpened] = useState<number | null>(null)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (hoverTimer.current !== null) clearTimeout(hoverTimer.current) }, [])
+  const enterMenu = (id: number) => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current)
+    setShown(id)
+  }
+  const leaveMenu = () => { hoverTimer.current = setTimeout(() => setShown(null), 150) }
+  const closeMenu = () => {
+    if (hoverTimer.current !== null) clearTimeout(hoverTimer.current)
+    setOpened(null); setShown(null); setFocused(null)
+  }
+  const visible = markerClusters(markers, from, to)
+  const description = (m: Marker) => `${formatPrecise(m.at_ms)} · ${m.label || '未命名标记'} · 前 ${formatSpan(m.lookback_ms)}、后 ${formatSpan(m.lookahead_ms)} · 范围 ${formatPrecise(Math.max(0, m.at_ms - m.lookback_ms))} → ${formatPrecise(m.at_ms + m.lookahead_ms)}`
   return (
     <>
-      {markers.map((m) => {
-        if (m.at_ms < from || m.at_ms > to) return null
-        return (
-          <div
-            key={m.id}
-            className={styles.pin}
-            data-marker-id={m.id}
-            style={{ left: `${pct(m.at_ms, from, to)}%`, ...(m.color ? { color: m.color } : null) }}
-            title={`${formatSessionTime(m.at_ms)} ${m.label || '标记'}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onPick(m)
+      {visible.map((cluster) => {
+        const m = cluster[0]
+        const position = pct(m.at_ms, from, to)
+        const range = `${formatPrecise(Math.max(0, m.at_ms - m.lookback_ms))} → ${formatPrecise(m.at_ms + m.lookahead_ms)}`
+        const title = description(m)
+        if (cluster.length > 1) return <Popover key={m.id} trigger="custom" position="top" visible={opened === m.id || shown === m.id}
+          guardFocus={false} returnFocusOnClose={false} onEscKeyDown={closeMenu}
+          onClickOutSide={closeMenu} content={
+            <div className={styles.markerClusterList} role="group" aria-label="重合标记" data-marker-cluster-menu={m.id}
+              onMouseEnter={() => enterMenu(m.id)} onMouseLeave={leaveMenu}
+              onFocusCapture={() => setFocused(m.id)} onBlurCapture={event => {
+                if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFocused(null)
+              }}>
+              {cluster.map(marker => <button type="button" key={marker.id} data-marker-id={marker.id}
+                className={styles.markerClusterItem} style={marker.color ? { color: marker.color } : undefined}
+                onPointerDown={event => event.stopPropagation()}
+                onClick={event => { event.stopPropagation(); closeMenu(); onPick(marker) }}>
+                <IconFlag size="small" aria-hidden="true" /><span>{description(marker)}</span>
+              </button>)}
+            </div>
+          }>
+          <button type="button" className={styles.pin} data-marker-cluster={cluster.map(marker => marker.id).join(',')}
+            style={{ left: `${position}%`, ...(m.color ? { color: m.color } : null) }}
+            aria-label={`这里有 ${cluster.length} 个标记，打开列表选择。${cluster.map(description).join('；')}`}
+            aria-expanded={opened === m.id || shown === m.id}
+            onFocus={() => setFocused(m.id)} onBlur={event => {
+              if (!(event.relatedTarget instanceof Element) || !event.relatedTarget.closest(`[data-marker-cluster-menu="${m.id}"]`)) setFocused(null)
             }}
-          />
+            onMouseEnter={() => enterMenu(m.id)} onMouseLeave={leaveMenu}
+            onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); setOpened(opened === m.id ? null : m.id) }}
+            onKeyDown={event => {
+              if (!['Enter', ' ', 'ArrowDown'].includes(event.key)) return
+              event.preventDefault(); event.stopPropagation(); setOpened(m.id)
+              setTimeout(() => document.querySelector<HTMLButtonElement>(`[data-marker-cluster-menu="${m.id}"] button`)?.focus(), 0)
+            }}>
+            <IconFlag size="small" aria-hidden="true" /><span className={styles.markerCount}>{cluster.length}</span>
+          </button>
+        </Popover>
+        return (
+          <Tooltip key={m.id} trigger="custom" visible={shown === m.id} position="top" content={
+            <div className={styles.markerTip}>
+              <strong>{formatPrecise(m.at_ms)} · {m.label || '未命名标记'}</strong>
+              <span>前 {formatSpan(m.lookback_ms)} · 后 {formatSpan(m.lookahead_ms)}</span>
+              <span>{range}{m.color ? ` · ${m.color}` : ''}</span>
+            </div>
+          }>
+            <button
+              type="button"
+              className={styles.pin}
+              data-marker-id={m.id}
+              style={{ left: `${position}%`, ...(m.color ? { color: m.color } : null) }}
+              aria-label={title}
+              onFocus={() => setFocused(m.id)}
+              onBlur={() => setFocused(null)}
+              onMouseEnter={() => setShown(m.id)}
+              onMouseLeave={() => setShown(null)}
+              onPointerDown={e => e.stopPropagation()}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation() }}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPick(m)
+              }}
+            >
+              <IconFlag size="small" aria-hidden="true" />
+            </button>
+          </Tooltip>
         )
       })}
     </>

@@ -16,6 +16,7 @@ use super::{Archive, ClipVars, StudioOverride, cover_file, session_info, templat
 use crate::server::common::upload::{
     UploadContext, initialize_upload_context, submit_to_bilibili, upload_single_file_with_progress,
 };
+use crate::server::common::upload_observation::{NewTask, UploadObservations};
 use crate::server::config::Config;
 use crate::server::errors::AppError;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -294,6 +295,7 @@ struct Job {
     submitting: bool,
     /// 投稿请求结果未知；只能由用户确认后重新入队。
     submit_unknown: bool,
+    observation: Option<crate::server::common::upload_observation::TaskGuard>,
 }
 
 #[derive(Default)]
@@ -325,6 +327,7 @@ pub struct ClipPublisher {
     pool: ConnectionPool,
     exports: Arc<ClipExports>,
     backend: Arc<dyn Bilibili>,
+    observations: Option<Arc<UploadObservations>>,
     /// Serializes session deletion with publication validation and in-memory admission.
     session_admission: tokio::sync::Mutex<()>,
     #[cfg(test)]
@@ -362,6 +365,7 @@ impl ClipPublisher {
             pool,
             exports,
             backend,
+            observations: None,
             session_admission: tokio::sync::Mutex::new(()),
             #[cfg(test)]
             session_admission_attempts: Mutex::new(None),
@@ -369,6 +373,11 @@ impl ClipPublisher {
             wake: Notify::new(),
             next_id: AtomicU64::new(1),
         }
+    }
+
+    pub fn with_observations(mut self, observations: Arc<UploadObservations>) -> Self {
+        self.observations = Some(observations);
+        self
     }
 
     /// Holds the shared boundary while an API validates a session's clips and admits jobs,
@@ -460,6 +469,14 @@ impl ClipPublisher {
             created_at: now,
             updated_at: now,
         };
+        let observation = self.observations.as_ref().map(|observations| {
+            let mut observation = observations.register(NewTask {
+                source: "clip", scheduler_group: "clip-publish", title: "切片投稿", streamer_name: None,
+                session_id: Some(session_id), template_name: None, fifo: true,
+            });
+            observation.pin();
+            observation
+        });
         queue.jobs.push(Job {
             view: view.clone(),
             settings,
@@ -467,6 +484,7 @@ impl ClipPublisher {
             videos: vec![None; clips.len()],
             submitting: false,
             submit_unknown: false,
+            observation,
         });
         prune(&mut queue.jobs);
         drop(queue);
@@ -480,6 +498,10 @@ impl ClipPublisher {
         let was = queue.paused.take().is_some();
         for job in &mut queue.jobs {
             if job.view.state == JobState::Paused {
+                if let Some(observation) = &mut job.observation {
+                    observation.reopen();
+                    observation.observation().queued();
+                }
                 job.view.state = JobState::Queued;
                 job.view.detail = "排队中".into();
                 job.view.error = None;
@@ -510,6 +532,10 @@ impl ClipPublisher {
                 "{}；确认没有之后再发布时带上 confirm_unknown: true",
                 UNKNOWN_HINT
             )));
+        }
+        if let Some(observation) = &mut job.observation {
+            observation.reopen();
+            observation.observation().requeue();
         }
         job.view.state = JobState::Queued;
         job.view.error = None;
@@ -547,6 +573,9 @@ impl ClipPublisher {
             job.view.detail = "正在取消".into();
             job.view.updated_at = now_ms();
             return Ok(true);
+        }
+        if let Some(observation) = queue.jobs[index].observation.take() {
+            observation.finish("cancelled", None, None);
         }
         queue.jobs.remove(index);
         drop(queue);
@@ -645,6 +674,7 @@ impl ClipPublisher {
                 Ok(outcome) => outcome,
                 Err(e) => Outcome::Failed(format!("发布任务异常退出：{e}")),
             };
+            self.finish_observation(id, &outcome);
             self.finish(id, outcome);
         }
     }
@@ -724,6 +754,48 @@ impl ClipPublisher {
     }
 
     async fn run(&self, id: u64) -> Outcome {
+        if self.snapshot(id).is_none() {
+            return Outcome::Failed("任务不见了".into());
+        }
+        let observation = lock(&self.queue).jobs.iter().find(|job| job.view.id == id)
+            .and_then(|job| job.observation.as_ref().map(|guard| guard.observation()));
+        let outcome = if let Some(observation) = &observation {
+            observation.scope(self.run_inner(id)).await
+        } else {
+            self.run_inner(id).await
+        };
+        outcome
+    }
+
+    fn finish_observation(&self, id: u64, outcome: &Outcome) {
+        let mut queue = lock(&self.queue);
+        if let Some(job) = queue.jobs.iter_mut().find(|job| job.view.id == id)
+            && let Some(guard) = &mut job.observation
+        {
+            match &outcome {
+                Outcome::Done { bvid, .. } => {
+                    guard.finish_and_keep("succeeded", None, Some(bvid));
+                }
+                Outcome::Paused(message) => guard.finish_and_keep("paused", Some(message), None),
+                Outcome::SubmitUnknown(message) => {
+                    guard.finish_and_keep("unknown", Some(message), None);
+                }
+                Outcome::Failed(message) => {
+                    let observation = guard.observation();
+                    if observation.is_submitting() {
+                        guard.finish_and_keep("unknown", Some(message), None);
+                    } else {
+                        guard.finish_and_keep("failed", Some(message), None);
+                    }
+                }
+                Outcome::Cancelled => {
+                    guard.finish_and_keep("cancelled", None, None);
+                }
+            }
+        }
+    }
+
+    async fn run_inner(&self, id: u64) -> Outcome {
         let Some((view, settings, mode, mut videos)) = self.snapshot(id) else {
             return Outcome::Failed("任务不见了".into());
         };
@@ -759,6 +831,10 @@ impl ClipPublisher {
         }
         let title = archive.render().title;
         self.update(id, |job| job.view.title = Some(title.clone()));
+        if let Some(task) = crate::server::common::upload_observation::TaskObservation::current() {
+            task.title(&title);
+            task.template_name(Some(&archive.template.template_name));
+        }
         // 3. 登录、上传
         self.progress(id, Step::Upload, "登录 B 站、选上传线路", None);
         let connection = match self.backend.connect(&archive.template).await {

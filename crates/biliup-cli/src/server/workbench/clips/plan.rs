@@ -14,7 +14,7 @@
 use super::super::dvr::{self, flv, ts};
 use super::super::index::{Container, KeyframeIndex};
 use super::super::store::{self, SegmentRow, SegmentState};
-use super::super::{live, readable, segment_index};
+use super::super::{readable, segment_index};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -296,7 +296,7 @@ pub async fn compute(
     let cut_in_ms = first.start_ms;
     let open_ended = cut_out_ms.is_none()
         && pieces.last().map(|p| p.segment_id) == last_segment
-        && live::is_recording(session_id);
+        && super::super::session_groups::is_recording(pool, session_id).await?;
     let cut_out_ms = cut_out_ms.unwrap_or_else(|| pieces.last().map_or(out_ms, |p| p.end_ms));
     let plan = Plan {
         container,

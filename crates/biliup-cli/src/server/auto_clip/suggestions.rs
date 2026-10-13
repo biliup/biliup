@@ -42,6 +42,10 @@ impl SuggestionState {
 pub struct Suggestion {
     pub id: i64,
     pub session_id: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_session_id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_session_id: Option<i64>,
     pub job_id: Option<i64>,
     /// 场次时间，已吸附到关键帧
     pub in_ms: i64,
@@ -70,6 +74,8 @@ impl Suggestion {
         Ok(Suggestion {
             id: row.try_get("id")?,
             session_id: row.try_get("session_id")?,
+            view_session_id: None,
+            source_session_id: None,
             job_id: row.try_get("job_id")?,
             in_ms: row.try_get("in_ms")?,
             out_ms: row.try_get("out_ms")?,
@@ -85,6 +91,19 @@ impl Suggestion {
             expires_at: (state == SuggestionState::Pending)
                 .then(|| created_at.saturating_add(EXPIRE_AFTER_MS)),
         })
+    }
+
+    pub fn in_view(mut self, view_session_id: i64, offset_ms: i64) -> Self {
+        if view_session_id != self.session_id {
+            self.view_session_id = Some(view_session_id);
+            self.source_session_id = Some(self.session_id);
+            self.in_ms += offset_ms;
+            self.out_ms += offset_ms;
+            for image in &mut self.evidence.images {
+                *image += offset_ms;
+            }
+        }
+        self
     }
 }
 
@@ -105,6 +124,7 @@ pub async fn replace_pending(
     candidates: &[Candidate],
     now: i64,
 ) -> sqlx::Result<Vec<Suggestion>> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let mut tx = pool.begin().await?;
     let stale: Vec<i64> = sqlx::query_scalar(
         "DELETE FROM clip_suggestions WHERE session_id = ? AND state = 'pending' RETURNING id",
@@ -219,8 +239,12 @@ pub async fn accept(
     acceptance: &Acceptance,
     now: i64,
 ) -> sqlx::Result<AcceptOutcome> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let mut tx = pool.begin().await?;
-    let sql = format!("SELECT {COLUMNS} FROM clip_suggestions WHERE id = ? AND session_id = ?");
+    let sql = format!("SELECT {COLUMNS}, COALESCE((SELECT offset_ms FROM session_group_members
+         WHERE group_session_id=?2 AND source_session_id=clip_suggestions.session_id),0) AS view_offset
+         FROM clip_suggestions WHERE id=?1 AND (session_id=?2 OR session_id IN
+         (SELECT source_session_id FROM session_group_members WHERE group_session_id=?2))");
     let Some(row) = sqlx::query(&sql)
         .bind(id)
         .bind(session_id)
@@ -229,7 +253,8 @@ pub async fn accept(
     else {
         return Ok(AcceptOutcome::NotFound);
     };
-    let suggestion = Suggestion::from_row(&row)?;
+    let offset: i64 = row.try_get("view_offset")?;
+    let suggestion = Suggestion::from_row(&row)?.in_view(session_id, offset);
     if suggestion.state != SuggestionState::Pending {
         return Ok(AcceptOutcome::NotPending(Box::new(suggestion)));
     }
@@ -266,7 +291,7 @@ pub async fn accept(
     retention::unpin(&mut tx, &pin_owner(id)).await?;
     tx.commit().await?;
     Ok(AcceptOutcome::Accepted {
-        suggestion: Box::new(Suggestion::from_row(&row)?),
+        suggestion: Box::new(Suggestion::from_row(&row)?.in_view(session_id, offset)),
         clip: Box::new(clip),
     })
 }

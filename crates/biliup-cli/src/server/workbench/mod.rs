@@ -18,6 +18,7 @@ pub mod markers;
 pub mod recorder;
 pub mod retention;
 pub mod renders;
+pub mod session_groups;
 pub mod store;
 pub mod transcode;
 

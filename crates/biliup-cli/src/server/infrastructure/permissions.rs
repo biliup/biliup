@@ -254,7 +254,24 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/login_by_qrcode" if method == Method::POST => AccountManage,
         "/bili/archive/pre" if get => UploadSubmit,
         "/v1/uploads" if method == Method::POST => UploadSubmit,
-        "/v1/videos" if get => FileView,
+        "/v1/videos"
+        | "/v1/activity-events"
+        | "/v1/files/location"
+        | "/v1/upload-queue"
+        | "/v1/upload-queue/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/files/reveal" if method == Method::POST => FileView,
+        "/v1/session-merge-candidates" if get => ClipEdit,
+        "/v1/session-groups"
+        | "/v1/session-merge-candidates/{id}/confirm"
+        | "/v1/session-merge-candidates/{id}/dismiss"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
         "/v1/status" if get => StreamerView,
         // 三个角色都有 StreamerView，等于登录即可
         "/v1/tools" if get => StreamerView,

@@ -1,0 +1,17 @@
+.root {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.remote { color: var(--semi-color-text-3); font-size: 11px; }
+.path {
+  max-width: min(100%, 320px);
+  overflow: hidden;
+  color: var(--semi-color-text-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

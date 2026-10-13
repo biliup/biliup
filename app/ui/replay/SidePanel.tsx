@@ -139,7 +139,7 @@ function MarkerRow({
             onCancel={() => setRenaming(false)}
             onSave={async (label) => {
               try {
-                await renameMarker(marker.session_id, marker.id, label)
+                await renameMarker(marker.view_session_id ?? marker.session_id, marker.id, label, marker.session_id)
                 setRenaming(false)
               } catch (e) {
                 if (!(e instanceof ReportedError)) Toast.error({ content: `改名失败：${errorText(e)}`, duration: 4 })
@@ -152,6 +152,7 @@ function MarkerRow({
               {marker.label || '未命名标记'}
             </span>
             <span className={styles.rowMeta}>{rangeText(marker)}</span>
+            {marker.view_session_id != null && marker.view_session_id !== marker.session_id ? <span className={styles.rowMeta}>来源场次 #{marker.session_id}</span> : null}
           </>
         )}
       </div>
@@ -185,7 +186,7 @@ function MarkerRow({
               okText="删除"
               okType="danger"
               onConfirm={() =>
-                deleteMarker(marker.session_id, marker.id).then(
+                deleteMarker(marker.view_session_id ?? marker.session_id, marker.id, marker.session_id).then(
                   () => Toast.success({ content: `已删除 ${time} 的标记`, duration: 2 }),
                   (e: unknown) => {
                     if (!(e instanceof ReportedError)) Toast.error({ content: `删除失败：${errorText(e)}`, duration: 4 })
@@ -574,6 +575,7 @@ function ClipRow({
             <span className={styles.rowMeta}>
               {formatPrecise(clip.in_ms)} → {formatPrecise(clip.out_ms)} · {formatSpan(clip.out_ms - clip.in_ms)}
             </span>
+            {clip.view_session_id != null && clip.view_session_id !== clip.session_id ? <span className={styles.rowMeta}>来源场次 #{clip.session_id}</span> : null}
             <ClipStatus clip={clip} />
             {job && (queued || clip.state !== 'published') ? <JobStatus job={job} canSubmit={canSubmit} /> : null}
             {unknown ? (

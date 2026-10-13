@@ -229,6 +229,94 @@ async fn fixture() -> Fixture {
     }
 }
 
+#[tokio::test]
+async fn group_publish_jobs_include_sources_and_preserve_canonical_owners() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+        .await
+        .unwrap();
+    for (id, kind) in [(1, "source"), (2, "source"), (3, "group"), (4, "source")] {
+        sqlx::query("INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path,kind) VALUES(?, '主播', 'https://example.test/1', '直播', '2026-10-13', '', ?)")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for (ordinal, source) in [(0, 1), (1, 2)] {
+        sqlx::query("INSERT INTO session_group_members(group_session_id,source_session_id,ordinal,offset_ms) VALUES(3,?,?,?)")
+            .bind(source)
+            .bind(ordinal)
+            .bind(ordinal * 2000)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let exports = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let publisher = Arc::new(ClipPublisher::new(
+        pool.clone(),
+        exports,
+        Arc::new(Arc::new(Fake::default())),
+    ));
+    let mut expected = Vec::new();
+    for session in 1..=4 {
+        let clip = clips::insert(
+            &pool,
+            session,
+            &clips::NewClip::builder()
+                .in_ms(0)
+                .out_ms(1000)
+                .title("切片")
+                .created_at(1)
+                .build(),
+        )
+        .await
+        .unwrap();
+        let job = publisher
+            .enqueue(
+                session,
+                &[clip],
+                Settings::default(),
+                Mode::Quick,
+                None,
+                false,
+            )
+            .unwrap();
+        if session <= 3 {
+            expected.push((job.id, session));
+        }
+    }
+
+    let Json(group) = list_publish_jobs(
+        State(pool.clone()),
+        State(publisher.clone()),
+        Query(JobsQuery { session: Some(3) }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        group
+            .jobs
+            .iter()
+            .map(|job| (job.id, job.session_id))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let Json(source) = list_publish_jobs(
+        State(pool.clone()),
+        State(publisher.clone()),
+        Query(JobsQuery { session: Some(1) }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(source.jobs.len(), 1);
+    assert_eq!(source.jobs[0].session_id, 1);
+    let Json(all) = list_publish_jobs(State(pool), State(publisher), Query(JobsQuery::default()))
+        .await
+        .unwrap();
+    assert_eq!(all.jobs.len(), 4);
+}
+
 async fn login(app: &Router, username: &str, password: &str) -> String {
     let response = send(
         app,

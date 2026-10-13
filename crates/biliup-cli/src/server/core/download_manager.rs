@@ -1,4 +1,5 @@
 use crate::server::common::upload::UActor;
+use crate::server::common::upload_observation::UploadObservations;
 use crate::server::core::monitor::Monitor;
 use crate::server::core::slots::Slots;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -22,6 +23,7 @@ pub struct DownloadManager {
     upload_slots: Arc<Slots>,
     /// 上传Actor任务句柄
     u_kill: JoinHandle<()>,
+    observations: Arc<UploadObservations>,
 }
 
 impl DownloadManager {
@@ -32,6 +34,7 @@ impl DownloadManager {
     /// * `pool2_size` - 上传池容量
     /// * `pool` - 数据库连接池
     pub fn new(pool1_size: u32, pool2_size: u32, pool: ConnectionPool) -> Self {
+        let observations = UploadObservations::new(pool.clone());
         // 创建消息通道
         let (up_tx, up_rx) = bounded(16);
         let download_slots = Arc::new(Slots::new(pool1_size as usize));
@@ -47,6 +50,7 @@ impl DownloadManager {
             download_slots,
             upload_slots,
             u_kill,
+            observations,
         }
     }
 
@@ -82,6 +86,7 @@ impl DownloadManager {
     pub(crate) fn upload_slots(&self) -> Arc<Slots> {
         self.upload_slots.clone()
     }
+    pub(crate) fn upload_observations(&self) -> Arc<UploadObservations> { self.observations.clone() }
 
     pub async fn add_plugin(&self, plugin: Arc<dyn LivePlugin + Send + Sync>) {
         let name = plugin.name().to_string();

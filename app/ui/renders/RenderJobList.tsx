@@ -2,6 +2,7 @@
 import { useState } from 'react'
 import { Button, Progress, Toast } from '@douyinfe/semi-ui'
 import { apiResourceUrl, renderJobAction, type RenderJob } from '@/app/lib/renders'
+import RevealFileButton from '@/app/ui/RevealFileButton'
 import styles from './renders.module.scss'
 
 const stateLabels: Record<RenderJob['state'], string> = {
@@ -54,8 +55,10 @@ export default function RenderJobList({ jobs, canEdit, canDownload }: {
           <span>{job.clip_id ? `切片 #${job.clip_id}` : '整场'}</span>
           <span>{job.phase}</span>
         </div>
+        {job.file_name && <div className={styles.outputFile} title={job.file_name}>产物：{job.file_name}</div>}
         <RenderJobProgress job={job} />
         <div className={styles.jobActions}>
+          {job.file_name && <RevealFileButton request={{ kind: 'render', id: job.id }} allowed={canDownload} />}
           {['queued', 'running'].includes(job.state) && <Button size="small" disabled={!canEdit || busy !== null} loading={busy === job.id} onClick={() => void action(job, 'cancel')}>取消</Button>}
           {['failed', 'cancelled'].includes(job.state) && <Button size="small" disabled={!canEdit || busy !== null} loading={busy === job.id} onClick={() => void action(job, 'retry')}>重试</Button>}
           {job.state === 'ready' && canDownload && <>

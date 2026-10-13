@@ -449,10 +449,24 @@ pub struct JobsQuery {
 
 /// `GET /v1/publish-jobs?session=`
 pub async fn list_publish_jobs(
+    State(pool): State<ConnectionPool>,
     State(publisher): State<Arc<ClipPublisher>>,
     Query(query): Query<JobsQuery>,
-) -> Json<QueueView> {
-    Json(publisher.view(query.session))
+) -> Result<Json<QueueView>, Response> {
+    let Some(session) = query.session else {
+        return Ok(Json(publisher.view(None)));
+    };
+    let members = crate::server::workbench::session_groups::timeline(&pool, session)
+        .await
+        .map_err(internal)?;
+    let mut view = publisher.view(None);
+    view.jobs.retain(|job| {
+        job.session_id == session
+            || members
+                .iter()
+                .any(|member| member.source_session_id == job.session_id)
+    });
+    Ok(Json(view))
 }
 
 /// `POST /v1/publish-jobs/resume`：601 暂停后继续。

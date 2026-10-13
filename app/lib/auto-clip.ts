@@ -90,6 +90,8 @@ export type SuggestionState = 'pending' | 'accepted' | 'dismissed' | 'expired'
 export interface Suggestion {
   id: number
   session_id: number
+  view_session_id?: number | null
+  source_session_id?: number | null
   job_id: number | null
   in_ms: number
   out_ms: number
@@ -285,22 +287,24 @@ export async function cancelAutoClip(sessionId: number): Promise<void> {
 
 /** 接受候选：按给的入点、出点（不给就用候选自己的）建切片草稿 */
 export async function acceptSuggestion(
-  s: Pick<Suggestion, 'id' | 'session_id'>,
+  s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>,
   body: { in_ms?: number; out_ms?: number; title?: string } = {}
 ): Promise<{ suggestion: Suggestion; clip: Clip }> {
   const result = await postJson<{ suggestion: Suggestion; clip: Clip }>(
-    `${suggestionsUrl(s.session_id)}/${s.id}/accept`,
+    `${suggestionsUrl(s.view_session_id ?? s.session_id)}/${s.id}/accept`,
     body
   )
   refreshClip(result.clip)
   void mutate(suggestionsUrl(s.session_id))
+  if (s.view_session_id != null && s.view_session_id !== s.session_id) void mutate(suggestionsUrl(s.view_session_id))
   return result
 }
 
-export async function dismissSuggestion(s: Pick<Suggestion, 'id' | 'session_id'>): Promise<Suggestion> {
-  const res = await send(`${suggestionsUrl(s.session_id)}/${s.id}/dismiss`, { method: 'POST' })
+export async function dismissSuggestion(s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>): Promise<Suggestion> {
+  const res = await send(`${suggestionsUrl(s.view_session_id ?? s.session_id)}/${s.id}/dismiss`, { method: 'POST' })
   const updated: Suggestion = await res.json()
   void mutate(suggestionsUrl(s.session_id))
+  if (s.view_session_id != null && s.view_session_id !== s.session_id) void mutate(suggestionsUrl(s.view_session_id))
   return updated
 }
 

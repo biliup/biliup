@@ -90,6 +90,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         icon: <Ic d="M12 16V4m0 0L8 8m4-4l4 4" extra="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2" />,
       },
       {
+        href: '/upload-queue',
+        perm: 'file.view',
+        label: '上传队列',
+        icon: <Ic d="M4 6h12M4 12h12M4 18h8" extra="M19 12v8m0-8l-3 3m3-3l3 3" />,
+      },
+      {
         href: '/archives',
         perm: 'account.manage',
         label: 'B站稿件',

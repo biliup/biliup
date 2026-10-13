@@ -74,6 +74,20 @@ fn joins_reordered_multi_vendor_adapters_by_exact_luid() {
 }
 
 #[test]
+fn memory_kind_uses_explicit_dxgi_capacity_instead_of_vendor_guessing() {
+    let devices = parse(json!({"Adapters": [
+        adapter("Intel integrated", 0x8086, "00000000:00100001", 0),
+        {"Name": "Intel unknown", "VendorId": 0x8086, "Luid": "00000000:00100002", "DedicatedVideoMemory": null},
+        adapter("AMD integrated", 0x1002, "00000000:00100003", 0),
+        adapter("Intel Arc", 0x8086, "00000000:00100004", 8_000_000_000),
+    ]}));
+    assert_eq!(devices[0].memory_kind, "shared");
+    assert_eq!(devices[1].memory_kind, "unknown");
+    assert_eq!(devices[2].memory_kind, "shared");
+    assert_eq!(devices[3].memory_kind, "dedicated");
+}
+
+#[test]
 fn sums_processes_per_physical_engine_then_uses_busiest_engine() {
     let devices = parse(json!({
         "Adapters": [adapter("Intel Arc", 0x8086, "00000000:00123456", 8_000_000_000)],

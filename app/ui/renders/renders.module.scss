@@ -37,6 +37,7 @@
 .jobHeading strong,
 .gpuHeading strong { min-width: 0; overflow-wrap: anywhere; }
 .jobSubheading { margin: 5px 0 8px; color: var(--semi-color-text-2); font-size: 12px; }
+.outputFile { margin: 2px 0 8px; overflow: hidden; color: var(--semi-color-text-2); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .jobSubheading a,
 .jobActions a { color: var(--semi-color-primary); text-decoration: none; }
 .jobSubheading a:hover,

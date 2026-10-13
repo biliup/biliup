@@ -181,6 +181,15 @@ mod tests {
 
     /// 与 `router.rs` 同形的全部业务路由，处理函数一律返回 200，只看访问控制层的裁决。
     const ROUTES: &[(&str, &str)] = &[
+        ("GET", "/v1/activity-events"),
+        ("GET", "/v1/files/location"),
+        ("POST", "/v1/files/reveal"),
+        ("GET", "/v1/upload-queue"),
+        ("GET", "/v1/upload-queue/upload-1"),
+        ("GET", "/v1/session-merge-candidates"),
+        ("POST", "/v1/session-merge-candidates/1/confirm"),
+        ("POST", "/v1/session-merge-candidates/1/dismiss"),
+        ("POST", "/v1/session-groups"),
         ("GET", "/v1/streamers"),
         ("POST", "/v1/streamers"),
         ("PUT", "/v1/streamers"),
@@ -252,7 +261,12 @@ mod tests {
         let operate = (true, false);
         let admin = (false, false);
         match (method, path) {
-            ("GET", "/v1/streamers")
+            ("GET", "/v1/activity-events")
+            | ("GET", "/v1/files/location")
+            | ("POST", "/v1/files/reveal")
+            | ("GET", "/v1/upload-queue")
+            | ("GET", "/v1/upload-queue/upload-1")
+            | ("GET", "/v1/streamers")
             | ("GET", "/v1/streamers/1/cover")
             | ("GET", "/v1/streamers/1/avatar")
             | ("GET", "/v1/streamers/1/live")
@@ -281,7 +295,11 @@ mod tests {
             | ("GET", "/static/ds_update.log")
             | ("GET", "/static/a.flv")
             | ("GET", "/v1/ws/logs") => view,
-            ("POST", "/v1/streamers")
+            ("GET", "/v1/session-merge-candidates")
+            | ("POST", "/v1/session-merge-candidates/1/confirm")
+            | ("POST", "/v1/session-merge-candidates/1/dismiss")
+            | ("POST", "/v1/session-groups")
+            | ("POST", "/v1/streamers")
             | ("PUT", "/v1/streamers")
             | ("DELETE", "/v1/streamers/1")
             | ("PUT", "/v1/streamers/1/pause")
@@ -316,6 +334,21 @@ mod tests {
                 .delete(|| async { StatusCode::OK })
         };
         Router::new()
+            .route("/v1/activity-events", ok())
+            .route("/v1/files/location", ok())
+            .route("/v1/files/reveal", post(|| async { StatusCode::OK }))
+            .route("/v1/upload-queue", ok())
+            .route("/v1/upload-queue/{id}", ok())
+            .route("/v1/session-merge-candidates", ok())
+            .route(
+                "/v1/session-merge-candidates/{id}/confirm",
+                post(|| async { StatusCode::OK }),
+            )
+            .route(
+                "/v1/session-merge-candidates/{id}/dismiss",
+                post(|| async { StatusCode::OK }),
+            )
+            .route("/v1/session-groups", post(|| async { StatusCode::OK }))
             .route("/v1/streamers", any())
             .route("/v1/streamers/{id}", delete(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/pause", put(|| async { StatusCode::OK }))

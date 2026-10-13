@@ -289,6 +289,7 @@ fn source_with(xml: &str, dir: &Path) -> RenderSource {
     let path = dir.join("source.xml");
     std::fs::write(&path, xml).unwrap();
     RenderSource {
+        source_session_id: 0,
         segment_id: 1,
         path: dir.join("source.flv"),
         danmaku_path: Some(path),

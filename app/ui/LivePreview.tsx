@@ -299,17 +299,17 @@ export function LivePreviewPlayer({
     setNonce((n) => n + 1)
   }
 
-  // 播放器一旦起播就当作在放（mpegts.js 没有可靠的 first-frame 事件；错误会另行回调）
-  useEffect(() => {
-    if (phase !== 'connecting') return
-    const t = setTimeout(() => {
-      playingSinceRef.current = Date.now()
-      setPhase((p) => (p === 'connecting' ? 'playing' : p))
-    }, 1500)
-    return () => clearTimeout(t)
-  }, [phase, nonce])
+  const handlePlaying = useCallback(() => {
+    playingSinceRef.current = Date.now()
+    setMessage(null)
+    setPhase('playing')
+  }, [])
+  const handleConnecting = useCallback(() => {
+    playingSinceRef.current = 0
+    setPhase('connecting')
+  }, [])
 
-  const pending = source === null
+  const pending = source === null || (source.kind === 'relay' && (!format || (format === 'fmp4' && !codecs)))
   const showPlayer = (phase === 'connecting' || phase === 'playing') && !pending
   const badge =
     source?.kind === 'direct'
@@ -339,6 +339,8 @@ export function LivePreviewPlayer({
           autoplay
           onEnded={handleEnded}
           onError={handleError}
+          onConnecting={handleConnecting}
+          onPlaying={handlePlaying}
           onStall={handleStall}
           danmaku={danmakuLayer}
           lease={lease}
@@ -376,7 +378,7 @@ export function LivePreviewPlayer({
           ) : null}
           <div className={styles.overlayText}>
             {pending
-              ? '正在获取直链…'
+              ? source === null ? '正在获取直链…' : '正在等待媒体初始化…'
               : phase === 'connecting'
                 ? source.kind === 'direct'
                   ? '正在连接 CDN…'
@@ -425,7 +427,7 @@ export function useOpenLivePage(): (id: number, e?: React.MouseEvent | React.Key
 
 /**
  * 「预览」按钮：进入直播预览页。录制中且下载器能旁路时可点；否则禁用并用 tooltip 说明原因
- * （ffmpeg / streamlink 子进程落盘、fMP4、HEVC、容器尚未确定）。
+ * （ffmpeg / streamlink 子进程落盘、容器尚未确定）。
  */
 export function LivePreviewButton({
   streamer,

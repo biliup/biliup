@@ -165,6 +165,9 @@ impl RenderRecipe {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenderSource {
     pub segment_id: i64,
+    /// Real recording owner. Legacy snapshots use the render's session_id.
+    #[serde(default)]
+    pub source_session_id: i64,
     pub path: PathBuf,
     pub danmaku_path: Option<PathBuf>,
     pub start_ms: i64,
@@ -185,6 +188,9 @@ pub struct RenderAsset {
 pub struct RenderSpec {
     pub session_id: i64,
     pub clip_id: Option<i64>,
+    /// Name captured at enqueue, so retries do not depend on later title edits.
+    #[serde(default)]
+    pub output_name: Option<String>,
     pub in_ms: i64,
     pub out_ms: i64,
     pub recipe: RenderRecipe,
@@ -214,6 +220,7 @@ pub struct JobView {
     pub duration_ms: Option<i64>,
     pub created_at: i64,
     pub download_url: Option<String>,
+    pub file_name: Option<String>,
     pub session_name: String,
     pub session_title: String,
     pub requested_encoder: String,

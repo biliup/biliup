@@ -149,8 +149,18 @@ fn parse_snapshot(bytes: &[u8]) -> Result<Vec<super::GpuDevice>, String> {
             render_node: None,
             utilization_percent: sample.overall,
             encoder_utilization_percent: sample.encode,
+            engine_utilization: Vec::new(),
             memory_used_bytes: sample.dedicated_used,
             memory_total_bytes: memory_total,
+            memory_kind: if memory_total.is_some() {
+                "dedicated"
+            } else if adapter.dedicated_video_memory == Some(0) {
+                "shared"
+            } else {
+                "unknown"
+            }
+            .into(),
+            memory_source: Some("wddm-dxgi".into()),
             error: (!errors.is_empty()).then(|| errors.join("；")),
         });
     }

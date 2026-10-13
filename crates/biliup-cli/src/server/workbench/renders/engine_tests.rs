@@ -52,6 +52,7 @@ async fn fixture(path: &Path, color: &str, size: &str, codec: &str, audio: bool,
 fn source(path: PathBuf, id: i64, start: i64, end: i64, from: i64, to: i64) -> SourceSpan {
     SourceSpan {
         segment_id: id,
+        source_session_id: 0,
         path,
         danmaku_path: None,
         start_ms: start,

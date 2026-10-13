@@ -4,7 +4,7 @@
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::clips::publish::queue::ClipPublisher;
 use crate::server::workbench::renders::{RenderJobs, RenderRecipe, assets, engine, store};
-use crate::server::workbench::{recorder, store as recordings};
+use crate::server::workbench::{recorder, session_groups, store as recordings};
 use axum::Json;
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, FromRef, Path, Query, Request, State};
@@ -66,7 +66,7 @@ pub async fn get_render_recipe(
     }
 }
 
-/// Saves a recipe only after validating all asset IDs belong to this session.
+/// Validates ownership or an inherited recipe/job reference before saving.
 pub async fn put_render_recipe(
     State(pool): State<ConnectionPool>,
     State(jobs): State<Arc<RenderJobs>>,
@@ -92,10 +92,23 @@ pub async fn list_render_assets(
     if let Err(response) = require_session(&pool, id).await {
         return response;
     }
-    match assets::list(&pool, id).await {
-        Ok(assets) => Json(serde_json::json!({ "assets": assets })).into_response(),
-        Err(error) => internal(error),
+    let ids: Vec<i64> = match sqlx::query_scalar("SELECT a.id FROM render_assets a WHERE a.session_id=?1 OR EXISTS(SELECT 1 FROM render_recipe_assets r WHERE r.session_id=?1 AND r.asset_id=a.id) OR EXISTS(SELECT 1 FROM render_job_assets ja JOIN render_jobs j ON j.id=ja.job_id WHERE j.session_id=?1 AND ja.asset_id=a.id) ORDER BY a.id DESC")
+        .bind(id)
+        .fetch_all(&pool)
+        .await
+    {
+        Ok(ids) => ids,
+        Err(error) => return internal(error),
+    };
+    let mut views = Vec::new();
+    for asset_id in ids {
+        match assets::get(&pool, asset_id).await {
+            Ok(Some(asset)) => views.push(asset.view()),
+            Ok(None) => {}
+            Err(error) => return internal(error),
+        }
     }
+    Json(serde_json::json!({ "assets": views })).into_response()
 }
 
 /// Raw PNG/JPEG request body, capped before buffering. No multipart filenames
@@ -274,14 +287,29 @@ pub async fn create_render(
     {
         return conflict("切片正在发布队列中，请先移出队列再合成");
     }
+    // Existing clips keep their own coordinates and render history after grouping.
+    let owner = if let Some(cid) = body.clip_id {
+        let clip = match crate::server::workbench::clips::get(&pool, cid).await {
+            Ok(Some(clip)) => clip,
+            Ok(None) => return not_found("切片不存在"),
+            Err(error) => return internal(error),
+        };
+        match session_groups::view_offset(&pool, id, clip.session_id).await {
+            Ok(Some(_)) => clip.session_id,
+            Ok(None) => return bad_request("切片不属于这个场次"),
+            Err(error) => return internal(error),
+        }
+    } else {
+        id
+    };
     let recipe = match body.recipe {
         Some(recipe) => recipe,
-        None => match store::recipe(&pool, id).await {
+        None => match store::recipe(&pool, owner).await {
             Ok(recipe) => recipe,
             Err(error) => return internal(error),
         },
     };
-    let spec = match jobs.make_spec(id, body.clip_id, None, recipe).await {
+    let spec = match jobs.make_spec(owner, body.clip_id, None, recipe).await {
         Ok(spec) => spec,
         Err(error) => return bad_request(error),
     };
@@ -383,6 +411,10 @@ pub async fn download_render(
     let Some(path) = record.output_path else {
         return conflict("合成产物不存在");
     };
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| format!("render-{jid}.mp4"));
     let path = match owned_file(jobs.root(), &path).await {
         Ok(path) => path,
         Err(response) => return response,
@@ -395,12 +427,18 @@ pub async fn download_render(
         .headers_mut()
         .insert(header::CONTENT_TYPE, HeaderValue::from_static("video/mp4"));
     let disposition = format!(
-        "{}; filename=\"render-{jid}.mp4\"",
+        "{}; filename=\"{}\"; filename*=UTF-8''{}",
         if query.attachment {
             "attachment"
         } else {
             "inline"
-        }
+        },
+        if file_name.bytes().all(|byte| (0x20..0x7f).contains(&byte)) {
+            file_name.replace('\\', "\\\\").replace('"', "\\\"")
+        } else {
+            format!("render-{jid}.mp4")
+        },
+        urlencoding::encode(&file_name),
     );
     if let Ok(value) = HeaderValue::from_str(&disposition) {
         response
@@ -460,10 +498,18 @@ pub async fn preview_render(
         Err(error) => return internal(error),
     };
     let canvas_path: Option<String> = if let Some(canvas_id) = body.canvas_segment_id {
-        match sqlx::query_scalar("SELECT path FROM segments WHERE id=? AND session_id=? AND state IN ('finished','pending_delete')")
-            .bind(canvas_id).bind(id).fetch_optional(&pool).await {
-            Ok(Some(path)) => Some(path),
-            Ok(None) => return bad_request("预览画布分段不存在或不属于当前场次"),
+        match recordings::session_segments(&pool, id).await {
+            Ok(segments) => match segments.into_iter().find(|segment| {
+                segment.id == canvas_id
+                    && matches!(
+                        segment.state,
+                        recordings::SegmentState::Finished
+                            | recordings::SegmentState::PendingDelete
+                    )
+            }) {
+                Some(segment) => Some(segment.path),
+                None => return bad_request("预览画布分段不存在或不属于当前场次"),
+            },
             Err(error) => return internal(error),
         }
     } else {

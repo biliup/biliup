@@ -15,7 +15,7 @@ import styles from './system-chart.module.scss'
  * 不画坐标轴，hover 显示时刻与读数。配色每次绘制时从 Semi 的 CSS 变量读，切换深浅色不用重建实例。
  */
 
-export type SystemChartKind = 'cpu' | 'net'
+export type SystemChartKind = 'cpu' | 'net' | 'disk'
 
 /** CPU 图 Y 轴上限的下限（%） */
 const CPU_MIN_TOP = 25
@@ -64,8 +64,8 @@ function buildOptions(kind: SystemChartKind, width: number, height: number, wind
       ? [{}, { label: 'CPU', stroke: cpuLine, fill: cpuFill, width: 1.5, spanGaps: false, points: { show: false } }]
       : [
           {},
-          { label: '下行', stroke: rxLine, fill: rxFill, width: 1.5, spanGaps: false, points: { show: false } },
-          { label: '上行', stroke: txLine, width: 1.5, spanGaps: false, points: { show: false } },
+          { label: kind === 'disk' ? '读取' : '下行', stroke: rxLine, fill: rxFill, width: 1.5, spanGaps: false, points: { show: false } },
+          { label: kind === 'disk' ? '写入' : '上行', stroke: txLine, width: 1.5, spanGaps: false, points: { show: false } },
         ]
   return {
     width,
@@ -135,7 +135,7 @@ export default function SystemChart({ kind, xs, ys, windowMs, height }: Props) {
             const rx = u.data[1][idx]
             const tx = u.data[2][idx]
             const fmt = (v: number | null | undefined) => (v === null || v === undefined ? '—' : formatInUnit(v, unit))
-            text = `↓ ${fmt(rx)}  ↑ ${fmt(tx)}`
+            text = kind === 'disk' ? `读 ${fmt(rx)}  写 ${fmt(tx)}` : `↓ ${fmt(rx)}  ↑ ${fmt(tx)}`
           }
           readout.textContent = `${hhmmss(x)} · ${text}`
           readout.hidden = false
