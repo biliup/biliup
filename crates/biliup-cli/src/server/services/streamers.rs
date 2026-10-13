@@ -151,10 +151,21 @@ mod tests {
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::reload;
 
-    /// 只认 `https://stuck.example/` 的平台；检测时把房间地址报给测试，然后一直不返回，
-    /// 房间停在「检测中」，状态不会被监控循环改动
+    /// 只认 `https://stuck.example/` 的平台；报告检测开始和取消，检测期间一直不返回。
     struct StuckPlatform {
         probed: mpsc::UnboundedSender<String>,
+        cancelled: mpsc::UnboundedSender<String>,
+    }
+
+    struct PendingProbe {
+        url: String,
+        cancelled: mpsc::UnboundedSender<String>,
+    }
+
+    impl Drop for PendingProbe {
+        fn drop(&mut self) {
+            let _ = self.cancelled.send(self.url.clone());
+        }
     }
 
     #[async_trait]
@@ -168,6 +179,10 @@ mod tests {
         }
 
         async fn check_stream(&self, request: LiveRequest) -> LiveResult<LiveStatus> {
+            let _probe = PendingProbe {
+                url: request.url.clone(),
+                cancelled: self.cancelled.clone(),
+            };
             let _ = self.probed.send(request.url);
             std::future::pending().await
         }
@@ -177,6 +192,7 @@ mod tests {
         _dir: tempfile::TempDir,
         services: ServiceRegister,
         probed: mpsc::UnboundedReceiver<String>,
+        cancelled: mpsc::UnboundedReceiver<String>,
     }
 
     /// 只装了 [`StuckPlatform`] 的服务，不会向任何真实平台发请求
@@ -189,8 +205,12 @@ mod tests {
         let config = Config::default();
         let managers = DownloadManager::new(config.pool1_size, config.pool2_size, pool.clone());
         let (probed_tx, probed) = mpsc::unbounded_channel();
+        let (cancelled_tx, cancelled) = mpsc::unbounded_channel();
         managers
-            .add_plugin(Arc::new(StuckPlatform { probed: probed_tx }))
+            .add_plugin(Arc::new(StuckPlatform {
+                probed: probed_tx,
+                cancelled: cancelled_tx,
+            }))
             .await;
         let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
         let config = Arc::new(RwLock::new(config));
@@ -225,7 +245,19 @@ mod tests {
             _dir: dir,
             services,
             probed,
+            cancelled,
         }
+    }
+
+    async fn expect_probe_event(
+        events: &mut mpsc::UnboundedReceiver<String>,
+        url: &str,
+        message: &str,
+    ) {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect(message);
+        assert_eq!(event.as_deref(), Some(url), "{message}");
     }
 
     fn insert(url: &str) -> InsertLiveStreamer {
@@ -309,11 +341,10 @@ mod tests {
         let added = add_streamer(&f.services, insert("https://stuck.example/1"))
             .await
             .unwrap();
-        tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
-            .await
-            .expect("新房间应很快轮到检测");
+        expect_probe_event(&mut f.probed, &added.url, "新房间应很快轮到检测").await;
         let managers = &f.services.managers;
         toggle_pause(managers, added.id).await;
+        expect_probe_event(&mut f.cancelled, &added.url, "暂停应取消正在进行的检测").await;
 
         let edited = LiveStreamer {
             remark: "新备注".to_string(),
@@ -329,9 +360,17 @@ mod tests {
             "重建后仍应暂停，实际是 {:?}",
             status()
         );
-        // 恢复照常可用
+        assert!(f.probed.try_recv().is_err(), "重建的暂停房间不应开始检测");
+        // 恢复会立即重新排队，Idle 只是进入下一次检测前的瞬态。
         toggle_pause(managers, added.id).await;
-        assert!(matches!(status(), WorkerStatus::Idle));
+        tokio::task::yield_now().await;
+        expect_probe_event(&mut f.probed, &added.url, "恢复应重新开始检测").await;
+        assert!(matches!(status(), WorkerStatus::Pending));
+
+        toggle_pause(managers, added.id).await;
+        expect_probe_event(&mut f.cancelled, &added.url, "重建后恢复的检测也应可暂停").await;
+        assert!(matches!(status(), WorkerStatus::Pause));
+        assert!(f.probed.try_recv().is_err(), "再次暂停后不应重新检测");
     }
 
     #[tokio::test]
@@ -357,28 +396,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn toggling_pause_alternates_between_paused_and_idle() {
+    async fn toggling_pause_cancels_checks_and_resume_restarts_monitoring() {
         let mut f = fixture().await;
         let added = add_streamer(&f.services, insert("https://stuck.example/1"))
             .await
             .unwrap();
-        // 等房间进入检测，之后监控循环卡在这次检测里，不会再改它的状态
-        tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
-            .await
-            .expect("新房间应很快轮到检测");
+        expect_probe_event(&mut f.probed, &added.url, "新房间应很快轮到检测").await;
         let managers = &f.services.managers;
         let room = managers.get_room_by_id(added.id).await.unwrap();
         let status = || room.downloader_status.read().unwrap().clone();
         assert!(matches!(status(), WorkerStatus::Pending));
 
-        toggle_pause(managers, added.id).await;
-        assert!(matches!(status(), WorkerStatus::Pause));
+        for _ in 0..8 {
+            toggle_pause(managers, added.id).await;
+            expect_probe_event(&mut f.cancelled, &added.url, "暂停应取消正在进行的检测").await;
+            assert!(matches!(status(), WorkerStatus::Pause));
+            assert!(f.probed.try_recv().is_err(), "暂停后不应重新检测");
+
+            toggle_pause(managers, added.id).await;
+            // 让监控有机会在 toggle_pause 返回后立即运行，验证实际检测状态。
+            tokio::task::yield_now().await;
+            expect_probe_event(&mut f.probed, &added.url, "恢复应重新开始检测").await;
+            assert!(matches!(status(), WorkerStatus::Pending));
+        }
 
         toggle_pause(managers, added.id).await;
-        assert!(matches!(status(), WorkerStatus::Idle));
-
-        toggle_pause(managers, added.id).await;
+        expect_probe_event(&mut f.cancelled, &added.url, "最后一次暂停也应取消检测").await;
         assert!(matches!(status(), WorkerStatus::Pause));
+        assert!(f.probed.try_recv().is_err(), "最后暂停后不应重新检测");
 
         // 不在监控里的主播什么也不做
         toggle_pause(managers, added.id + 1).await;
