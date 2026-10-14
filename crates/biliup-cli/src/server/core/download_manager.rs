@@ -62,6 +62,11 @@ impl DownloadManager {
         self.upload_slots.resize(pool2_size as usize);
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_probe_gate(&self, gate: Arc<tokio::sync::Semaphore>) {
+        self.rooms_handle.set_probe_gate(gate);
+    }
+
     /// 下载池当前容量
     pub fn download_pool_size(&self) -> usize {
         self.download_slots.capacity()
@@ -86,7 +91,9 @@ impl DownloadManager {
     pub(crate) fn upload_slots(&self) -> Arc<Slots> {
         self.upload_slots.clone()
     }
-    pub(crate) fn upload_observations(&self) -> Arc<UploadObservations> { self.observations.clone() }
+    pub(crate) fn upload_observations(&self) -> Arc<UploadObservations> {
+        self.observations.clone()
+    }
 
     pub async fn add_plugin(&self, plugin: Arc<dyn LivePlugin + Send + Sync>) {
         let name = plugin.name().to_string();

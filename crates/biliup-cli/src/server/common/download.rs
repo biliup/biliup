@@ -319,6 +319,8 @@ pub struct DownloadTask {
     /// 本任务余下的拉流不再追加，直接用原直链（stream-gears 有自己的首连兜底，不受影响）。
     ws_expire_rejected: AtomicBool,
     audio_processing_failed: Arc<AtomicBool>,
+    #[cfg(test)]
+    recorder_handle: std::sync::RwLock<Option<RecorderHandle>>,
 }
 
 /// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
@@ -345,7 +347,20 @@ impl DownloadTask {
             danmaku_tx,
             ws_expire_rejected: AtomicBool::new(false),
             audio_processing_failed: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            recorder_handle: Default::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn settle_recorder(&self) {
+        let handle = self
+            .recorder_handle
+            .read()
+            .unwrap()
+            .clone()
+            .expect("the recording should already have started its recorder");
+        handle.settled().await;
     }
 
     /// 当前正在录制的那条流的平台名与 CDN 直链。
@@ -412,7 +427,7 @@ impl DownloadTask {
     }
 
     pub(self) async fn execute(
-        &self,
+        self: &Arc<Self>,
         ctx: &Context,
         sender: Sender<UploaderMessage>,
         plugin: Arc<dyn LivePlugin + Send + Sync>,
@@ -451,6 +466,10 @@ impl DownloadTask {
             },
             live_index,
         );
+        #[cfg(test)]
+        {
+            *self.recorder_handle.write().unwrap() = Some(workbench.handle());
+        }
         let danmaku_client = danmaku_client(
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
@@ -665,7 +684,7 @@ impl DownloadTask {
         }
         // 清理资源
         // 确保状态更新和资源清理
-        rooms_handle.wake_worker(ctx.worker()).await;
+        rooms_handle.wake_download(ctx.worker(), self).await;
         info!("Download task completed: {:?}", result);
         self.done_notify.notify_one();
         Ok(())

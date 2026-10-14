@@ -1,4 +1,4 @@
-use crate::server::common::download::start_download_workflow;
+use crate::server::common::download::{DownloadTask, start_download_workflow};
 use crate::server::common::recording_policy;
 use crate::server::common::upload::UploaderMessage;
 use crate::server::core::live::{batch_check_request, live_request, streamer_info};
@@ -64,6 +64,8 @@ pub struct Monitor {
     monitors: RwLock<HashMap<String, MonitorTask>>,
     /// 各批量检测平台的开播缓存（platform_name -> 最近一次批量结果）。
     batch_live: RwLock<HashMap<String, BatchLiveCache>>,
+    #[cfg(test)]
+    probe_gate: RwLock<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 impl Drop for Monitor {
@@ -107,7 +109,14 @@ impl Monitor {
             download_slots,
             monitors: Default::default(),
             batch_live: Default::default(),
+            #[cfg(test)]
+            probe_gate: Default::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_probe_gate(&self, gate: Arc<tokio::sync::Semaphore>) {
+        *self.probe_gate.write().unwrap() = Some(gate);
     }
 
     /// 检测下一个房间，返回本轮之后应等待的间隔；空队列由后台任务等待显式唤醒。
@@ -117,6 +126,17 @@ impl Monitor {
         platform_name: &str,
         plugin: Arc<dyn LivePlugin + Send + Sync>,
     ) -> Option<Duration> {
+        #[cfg(test)]
+        {
+            let gate = self.probe_gate.read().unwrap().clone();
+            if let Some(gate) = gate {
+                // 状态断言完成前阻止测试中的后台检测取得房间；Actor 消息仍照常处理。
+                let Ok(permit) = gate.acquire().await else {
+                    return None;
+                };
+                permit.forget();
+            }
+        }
         let room = self.next(platform_name).await?;
         let mut monitor_changes = room.monitor_changes();
         // `next` 已经标为 Pending；暂停/删除可能发生在 Actor 回复与本任务恢复之间。
@@ -500,25 +520,37 @@ impl Monitor {
         self: &Arc<Self>,
         id: i64,
     ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
-        self.requeue(id, None, false).await
+        self.requeue(id, None, None, false).await
     }
 
-    /// 旧工作器的检测/下载结束时，只放回同一个实例，不能唤醒同 ID 的新配置。
+    /// 旧工作器的检测结束时，只放回同一个实例，不能唤醒同 ID 的新配置。
     pub(crate) async fn wake_worker(
         self: &Arc<Self>,
         worker: &Arc<Worker>,
     ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
-        self.requeue(worker.id(), Some(worker.clone()), false).await
+        self.requeue(worker.id(), Some(worker.clone()), None, false)
+            .await
+    }
+
+    /// 录制收尾只能放回它自己的任务，不能覆盖同一工作器恢复后启动的新检测或录制。
+    pub(crate) async fn wake_download(
+        self: &Arc<Self>,
+        worker: &Arc<Worker>,
+        task: &Arc<DownloadTask>,
+    ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
+        self.requeue(worker.id(), Some(worker.clone()), Some(task.clone()), false)
+            .await
     }
 
     pub async fn resume_room(self: &Arc<Self>, id: i64) {
-        self.requeue(id, None, true).await;
+        self.requeue(id, None, None, true).await;
     }
 
     async fn requeue(
         self: &Arc<Self>,
         id: i64,
         expected: Option<Arc<Worker>>,
+        expected_download: Option<Arc<DownloadTask>>,
         immediate: bool,
     ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
         let (send, recv) = oneshot::channel();
@@ -526,6 +558,7 @@ impl Monitor {
             respond_to: send,
             id,
             expected,
+            expected_download,
             immediate,
         };
 
@@ -677,6 +710,7 @@ enum ActorMessage {
         respond_to: oneshot::Sender<Option<Arc<dyn LivePlugin + Send + Sync>>>,
         id: i64,
         expected: Option<Arc<Worker>>,
+        expected_download: Option<Arc<DownloadTask>>,
         immediate: bool,
     },
     /// 移出工作队列
@@ -752,10 +786,16 @@ impl RoomsActor {
                     respond_to,
                     id,
                     expected,
+                    expected_download,
                     immediate,
                 } => {
                     // `let _ =` 忽略发送时的任何错误
-                    let _ = respond_to.send(self.push_back(id, expected.as_ref(), immediate));
+                    let _ = respond_to.send(self.push_back(
+                        id,
+                        expected.as_ref(),
+                        expected_download.as_ref(),
+                        immediate,
+                    ));
                 }
                 ActorMessage::Shutdown => {
                     return;
@@ -848,6 +888,7 @@ impl RoomsActor {
         &mut self,
         id: i64,
         expected: Option<&Arc<Worker>>,
+        expected_download: Option<&Arc<DownloadTask>>,
         immediate: bool,
     ) -> Option<Arc<dyn LivePlugin + Send + Sync>> {
         // 在总数组中找不到，说明该房间已被移除我们也不放回
@@ -872,6 +913,14 @@ impl RoomsActor {
         let queue = self.platforms.get_mut(plugin.name())?;
         let mut status = worker.downloader_status.write().unwrap();
         if matches!(*status, WorkerStatus::Pause) {
+            return None;
+        }
+        if let Some(expected_download) = expected_download
+            && !matches!(
+                &*status,
+                WorkerStatus::Working(task) if Arc::ptr_eq(task, expected_download)
+            )
+        {
             return None;
         }
         *status = WorkerStatus::Idle;
@@ -942,8 +991,10 @@ fn reuse_vec_arc<'a, T: 'a, U: Iterator<Item = &'a Arc<T>>>(v: &mut U) -> Vec<Ar
 
 #[cfg(test)]
 mod tests {
-    use super::Monitor;
+    use super::{DownloadTask, Monitor, RoomsActor};
     use crate::server::config::Config;
+    use crate::server::core::downloader::DownloaderRuntime;
+    use crate::server::core::downloader::mesio::Mesio;
     use crate::server::core::slots::Slots;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::infrastructure::context::Worker;
@@ -1031,6 +1082,136 @@ mod tests {
             Arc::new(RwLock::new(Config::default())),
             Default::default(),
         ))
+    }
+
+    fn recording_task() -> Arc<DownloadTask> {
+        let stream = serde_json::from_value(serde_json::json!({
+            "name": "a", "url": "https://a.example/1", "title": "t", "date": "2026-01-01T00:00:00Z",
+            "live_cover_url": "", "raw_stream_url": "http://127.0.0.1:9/x.flv", "platform": "a",
+            "stream_headers": {}, "suffix": "flv", "danmaku": null, "downloader_hint": "StreamGears",
+            "runtime_options": null,
+        }))
+        .unwrap();
+        Arc::new(DownloadTask::new(
+            DownloaderRuntime::Mesio(Mesio::new()),
+            &stream,
+        ))
+    }
+
+    fn rooms_actor() -> RoomsActor {
+        let (_, messages) = mpsc::channel(1);
+        let mut actor = RoomsActor::new(messages);
+        let (probed, _) = mpsc::unbounded_channel();
+        actor.add_plugin(Arc::new(OfflinePlatform { name: "a", probed }));
+        actor
+    }
+
+    #[tokio::test]
+    async fn finished_recordings_requeue_only_the_task_that_still_owns_the_worker() {
+        let mut actor = rooms_actor();
+        let room = worker(1, "https://a.example/1");
+        actor.add(room.clone()).unwrap();
+        actor.next("a").unwrap();
+        let old_task = recording_task();
+        assert!(room.start_download(old_task.clone(), &room.monitor_changes()));
+
+        // A paused recording must not be returned to monitoring by its cleanup.
+        *room.downloader_status.write().unwrap() = WorkerStatus::Pause;
+        assert!(
+            actor
+                .push_back(1, Some(&room), Some(&old_task), false)
+                .is_none()
+        );
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pause
+        ));
+        assert!(actor.platforms["a"].is_empty());
+
+        // Explicit resume may already have started a new check when old cleanup arrives.
+        *room.downloader_status.write().unwrap() = WorkerStatus::Idle;
+        actor.push_back(1, Some(&room), None, true).unwrap();
+        actor.next("a").unwrap();
+        assert!(
+            actor
+                .push_back(1, Some(&room), Some(&old_task), false)
+                .is_none()
+        );
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pending
+        ));
+        assert!(actor.platforms["a"].is_empty());
+
+        let resumed_task = recording_task();
+        assert!(room.start_download(resumed_task.clone(), &room.monitor_changes()));
+        assert!(
+            actor
+                .push_back(1, Some(&room), Some(&old_task), false)
+                .is_none()
+        );
+        assert!(matches!(
+            &*room.downloader_status.read().unwrap(),
+            WorkerStatus::Working(task) if Arc::ptr_eq(task, &resumed_task)
+        ));
+        assert!(actor.platforms["a"].is_empty());
+
+        // A normal completion still returns to Idle, once, then can be checked again.
+        actor
+            .push_back(1, Some(&room), Some(&resumed_task), false)
+            .unwrap();
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Idle
+        ));
+        assert_eq!(actor.platforms["a"].len(), 1);
+        assert!(
+            actor
+                .push_back(1, Some(&room), Some(&resumed_task), false)
+                .is_none()
+        );
+        assert_eq!(actor.platforms["a"].len(), 1);
+        actor.next("a").unwrap();
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pending
+        ));
+    }
+
+    #[tokio::test]
+    async fn finishing_a_recording_does_not_requeue_a_replaced_or_deleted_worker() {
+        let mut actor = rooms_actor();
+        let original = worker(1, "https://a.example/1");
+        actor.add(original.clone()).unwrap();
+        actor.next("a").unwrap();
+        let old_task = recording_task();
+        assert!(original.start_download(old_task.clone(), &original.monitor_changes()));
+        actor.del(1).await.unwrap();
+
+        let replacement = worker(1, "https://a.example/1");
+        actor.add(replacement.clone()).unwrap();
+        actor.next("a").unwrap();
+        let new_task = recording_task();
+        assert!(replacement.start_download(new_task.clone(), &replacement.monitor_changes()));
+        assert!(
+            actor
+                .push_back(1, Some(&original), Some(&old_task), false)
+                .is_none()
+        );
+        assert!(matches!(
+            &*replacement.downloader_status.read().unwrap(),
+            WorkerStatus::Working(task) if Arc::ptr_eq(task, &new_task)
+        ));
+        assert!(actor.platforms["a"].is_empty());
+
+        actor.del(1).await.unwrap();
+        assert!(
+            actor
+                .push_back(1, Some(&replacement), Some(&new_task), false)
+                .is_none()
+        );
+        assert!(actor.all_workers.is_empty());
+        assert!(actor.platforms["a"].is_empty());
     }
 
     /// 未开播的检测结束就归还下载池槽位，不带着它睡过检测间隔（默认 30 s）：
@@ -1182,5 +1363,210 @@ mod tests {
         .expect("房间应当开始检测");
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(probed(), 1, "建场次失败后应等一个检测间隔（30 s）再检测");
+    }
+
+    /// A pause can return after its stop timeout while the old task is still in a
+    /// platform recheck. Its eventual completion must not overwrite a new task.
+    #[tokio::test]
+    async fn finishing_a_stopped_recording_does_not_replace_its_resumed_task() {
+        use crate::server::core::download_manager::DownloadManager;
+        use crate::server::core::downloader::DownloaderType;
+        use crate::server::services::streamers::toggle_pause;
+        use axum::body::{Body, Bytes};
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use biliup::downloader::live::LiveStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::sync::Notify;
+
+        struct RecheckingPlatform {
+            first: LiveStream,
+            resumed: LiveStream,
+            calls: AtomicUsize,
+            rechecking: mpsc::UnboundedSender<()>,
+            release_old: Arc<Notify>,
+        }
+
+        #[async_trait]
+        impl LivePlugin for RecheckingPlatform {
+            fn name(&self) -> &'static str {
+                "resume-gated"
+            }
+            fn matches(&self, url: &str) -> bool {
+                url.starts_with("https://resume-gated.example/")
+            }
+            async fn check_stream(&self, _: LiveRequest) -> LiveResult<LiveStatus> {
+                match self.calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => Ok(LiveStatus::Live {
+                        stream: Box::new(self.first.clone()),
+                    }),
+                    1 => {
+                        self.rechecking.send(()).unwrap();
+                        self.release_old.notified().await;
+                        Ok(LiveStatus::Offline)
+                    }
+                    _ => Ok(LiveStatus::Live {
+                        stream: Box::new(self.resumed.clone()),
+                    }),
+                }
+            }
+        }
+
+        let _role = crate::server::fleet::ha::test_guard().await;
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let (resumed_tx, mut resumed_rx) = mpsc::unbounded_channel();
+        let release_resumed = Arc::new(Notify::new());
+        let finish_response = release_resumed.clone();
+        let app = axum::Router::new()
+            .route("/first.flv", get(|| async { StatusCode::NOT_FOUND }))
+            .route(
+                "/resumed.flv",
+                get(move || {
+                    resumed_tx.send(()).unwrap();
+                    let finish_response = finish_response.clone();
+                    async move {
+                        Body::from_stream(futures::stream::once(async move {
+                            finish_response.notified().await;
+                            Ok::<Bytes, std::io::Error>(Bytes::new())
+                        }))
+                    }
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let cdn = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let room_url = "https://resume-gated.example/1";
+        sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (1, ?, 'resume-gated')")
+            .bind(room_url)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let make_stream = |path: &str| -> LiveStream {
+            serde_json::from_value(serde_json::json!({
+                "name": "resume-gated", "url": room_url, "title": "t", "date": "2026-01-01T00:00:00Z",
+                "live_cover_url": "", "raw_stream_url": format!("http://{address}/{path}.flv"), "platform": "resume-gated",
+                "stream_headers": {}, "suffix": "flv", "danmaku": null, "downloader_hint": "StreamGears", "runtime_options": null
+            })).unwrap()
+        };
+        let (rechecking_tx, mut rechecking_rx) = mpsc::unbounded_channel();
+        let release_old = Arc::new(Notify::new());
+        let config = Config {
+            downloader: Some(DownloaderType::Mesio),
+            event_loop_interval: 3600,
+            ..Config::default()
+        };
+        let managers = Arc::new(DownloadManager::new(
+            config.pool1_size,
+            config.pool2_size,
+            pool,
+        ));
+        let plugin = Arc::new(RecheckingPlatform {
+            first: make_stream("first"),
+            resumed: make_stream("resumed"),
+            calls: AtomicUsize::new(0),
+            rechecking: rechecking_tx,
+            release_old: release_old.clone(),
+        });
+        managers.add_plugin(plugin.clone()).await;
+        let mut streamer = worker(1, room_url).live_streamer.clone();
+        streamer.filename_prefix = Some(
+            dir.path()
+                .join("resume-gated%Y-%m-%dT%H_%M_%S")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        managers
+            .add_room(Worker::new(
+                streamer,
+                None,
+                Arc::new(RwLock::new(config)),
+                Default::default(),
+            ))
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), rechecking_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let room = managers.get_room_by_id(1).await.unwrap();
+        let old_task = match &*room.downloader_status.read().unwrap() {
+            WorkerStatus::Working(task) => task.clone(),
+            other => panic!("old recording should be rechecking while Working, got {other:?}"),
+        };
+        // SQLite runs on background threads and does not follow Tokio's clock.
+        // Settle its initialization before advancing only the stop timeout.
+        tokio::time::timeout(Duration::from_secs(5), old_task.settle_recorder())
+            .await
+            .expect("old recorder initialization should finish before advancing time");
+
+        // Use the production pause API and its real stop timeout. Do not resume
+        // until that API has returned, matching sequential browser operations.
+        let pausing = tokio::spawn({
+            let managers = managers.clone();
+            async move { toggle_pause(&managers, 1).await }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !matches!(*room.downloader_status.read().unwrap(), WorkerStatus::Pause) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("pause API should publish Pause before waiting for stop");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(31)).await;
+        pausing.await.unwrap();
+        tokio::time::resume();
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pause
+        ));
+
+        toggle_pause(&managers, 1).await;
+        tokio::time::timeout(Duration::from_secs(10), resumed_rx.recv())
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "explicit resume should start its HTTP request: status={:?}, probes={}, occupied={}",
+                    *room.downloader_status.read().unwrap(),
+                    plugin.calls.load(Ordering::SeqCst),
+                    managers.download_pool_occupied(),
+                )
+            })
+            .expect("the resumed HTTP handler should report its request");
+        let resumed_task = match &*room.downloader_status.read().unwrap() {
+            WorkerStatus::Working(task) => task.clone(),
+            other => panic!("resumed recording should be Working, got {other:?}"),
+        };
+        assert!(!Arc::ptr_eq(&old_task, &resumed_task));
+        assert_eq!(
+            managers.download_pool_occupied(),
+            2,
+            "both workflows are still alive"
+        );
+
+        release_old.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), old_task.stop())
+            .await
+            .unwrap()
+            .unwrap();
+        let after_old_finished = room.downloader_status.read().unwrap().clone();
+        let kept_resumed_task = matches!(&after_old_finished, WorkerStatus::Working(task) if Arc::ptr_eq(task, &resumed_task));
+        let stopping_resumed = tokio::spawn(async move { resumed_task.stop().await });
+        tokio::task::yield_now().await;
+        release_resumed.notify_one();
+        tokio::time::timeout(Duration::from_secs(10), stopping_resumed)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        managers.del_room(1).await;
+        cdn.abort();
+        assert!(
+            kept_resumed_task,
+            "old workflow overwrote the resumed task: {after_old_finished:?}"
+        );
     }
 }
