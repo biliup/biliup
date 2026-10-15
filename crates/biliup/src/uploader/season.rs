@@ -235,8 +235,6 @@ impl SeasonApi<'_> {
             .query(&[
                 ("pn", pn.to_string()),
                 ("ps", ps.to_string()),
-                ("order", "mtime".into()),
-                ("sort", "desc".into()),
                 ("draft", "1".into()),
             ]);
         let data = call(request, TIMEOUT, "list seasons").await?;
@@ -519,8 +517,6 @@ mod tests {
         let expected: HashMap<String, String> = [
             ("pn", "2"),
             ("ps", "10"),
-            ("order", "mtime"),
-            ("sort", "desc"),
             ("draft", "1"),
         ]
         .into_iter()
