@@ -622,14 +622,21 @@ impl Standby {
 
     /// 投这一场：`append` 为空时作为完整稿件投，否则追加为这个稿件的后续分 P。占上传池的一个槽位
     async fn run(self: Arc<Self>, id: String, append: Option<String>) {
-        let slots = self.services.managers.upload_slots();
-        let _slot = slots.acquire().await;
         let Some(session) = self.core.lock().unwrap().session(&id).cloned() else {
             return;
         };
+        let (source, group) = upload_observation_source(append.is_some());
+        let title = session.unit.stream.as_ref().and_then(|stream| stream.get("title")).and_then(serde_json::Value::as_str).unwrap_or(&session.unit.remark);
+        let guard = self.services.upload_observations.register(crate::server::common::upload_observation::NewTask {
+            source, scheduler_group: group, title, streamer_name: Some(&session.unit.remark),
+            session_id: Some(session.unit.stream_session), template_name: None, fifo: false,
+        });
+        let slots = self.services.managers.upload_slots();
+        let _slot = slots.acquire().await;
         let ctx = match self.context(&session).await {
             Ok(ctx) => ctx,
             Err(reason) => {
+                guard.finish("failed", Some(&reason), None);
                 self.update(|core, now| core.upload_failed(now, &id, &reason));
                 return;
             }
@@ -641,6 +648,8 @@ impl Standby {
             "HA：备机开始投这一场"
         );
         self.update(|core, now| core.upload_started(now, &id));
+        let observation = guard.observation();
+        observation.template_name(ctx.upload_config().as_ref().map(|template| template.template_name.as_str()));
         let segments = session
             .unit
             .segments
@@ -655,9 +664,14 @@ impl Standby {
             })
             .collect();
         let result = match &append {
-            None => upload::run_standby(&self, &id, &ctx, segments).await,
-            Some(bvid) => upload::run_append(&self, &id, &ctx, segments, bvid).await,
+            None => observation.scope(upload::run_standby(&self, &id, &ctx, segments)).await,
+            Some(bvid) => observation.scope(upload::run_append(&self, &id, &ctx, segments, bvid)).await,
         };
+        match &result {
+            Ok(Submitted::Done { bvid, .. }) => guard.finish("succeeded", None, Some(bvid)),
+            Ok(Submitted::Fenced) => guard.finish("cancelled", None, None),
+            Err(error) => guard.finish_result(&Err::<(), _>(error.to_string())),
+        }
         match result {
             Ok(Submitted::Done { bvid, paths }) => {
                 match append {
@@ -675,6 +689,10 @@ impl Standby {
             }
         }
     }
+}
+
+fn upload_observation_source(append: bool) -> (&'static str, &'static str) {
+    if append { ("ha_append", "ha-pool") } else { ("ha", "ha-pool") }
 }
 
 /// 主机投成了：删掉备机这份录像（`delete_standby_copy`）
@@ -1180,6 +1198,12 @@ mod tests {
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use serde_json::json;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn standby_full_and_append_uploads_are_distinct_sources_without_fifo_claims() {
+        assert_eq!(upload_observation_source(false), ("ha", "ha-pool"));
+        assert_eq!(upload_observation_source(true), ("ha_append", "ha-pool"));
+    }
     use tracing_subscriber::{EnvFilter, reload};
 
     const URL: &str = "https://stuck.example/7";

@@ -174,6 +174,38 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/clips/{cid}/cover" | "/v1/sessions/{id}/thumb" | "/v1/publish-jobs" if get => FileView,
         "/v1/clips/{cid}/cover" if method == Method::PUT || method == Method::DELETE => ClipEdit,
+        "/v1/sessions/{id}/render-recipe"
+        | "/v1/sessions/{id}/render-settings"
+        | "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/renders"
+        | "/v1/render-gpus"
+        | "/v1/render-assets/{aid}"
+        | "/v1/renders/{jid}"
+        | "/v1/renders/{jid}/download"
+        | "/v1/render-fonts/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/sessions/{id}/render-recipe" | "/v1/sessions/{id}/render-settings"
+            if method == Method::PUT =>
+        {
+            ClipEdit
+        }
+        "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/renders/{jid}/cancel"
+        | "/v1/renders/{jid}/retry"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
+        "/v1/render-assets/{aid}" if method == Method::DELETE => ClipEdit,
+        "/v1/renders/{jid}" if method == Method::DELETE => ClipEdit,
+        // Preview converts a recipe snapshot but does not persist a change.
+        "/v1/sessions/{id}/render-preview" if method == Method::POST => FileView,
+        "/v1/render-tools" | "/v1/render-capabilities" if get => StreamerView,
         "/v1/clips/{cid}/publish"
         | "/v1/publish-jobs"
         | "/v1/publish-jobs/preview"
@@ -208,7 +240,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
             ClipEdit
         }
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
-        "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
+        "/v1/sessions/{id}" if method == Method::PATCH || method == Method::DELETE => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,
@@ -222,7 +254,24 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/login_by_qrcode" if method == Method::POST => AccountManage,
         "/bili/archive/pre" if get => UploadSubmit,
         "/v1/uploads" if method == Method::POST => UploadSubmit,
-        "/v1/videos" if get => FileView,
+        "/v1/videos"
+        | "/v1/activity-events"
+        | "/v1/files/location"
+        | "/v1/upload-queue"
+        | "/v1/upload-queue/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/files/reveal" if method == Method::POST => FileView,
+        "/v1/session-merge-candidates" if get => ClipEdit,
+        "/v1/session-groups"
+        | "/v1/session-merge-candidates/{id}/confirm"
+        | "/v1/session-merge-candidates/{id}/dismiss"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
         "/v1/status" if get => StreamerView,
         // 三个角色都有 StreamerView，等于登录即可
         "/v1/tools" if get => StreamerView,

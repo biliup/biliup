@@ -189,6 +189,9 @@ try {
     fs.mkdirSync(path.join(pkgDir, 'bin'))
     fs.copyFileSync(bin, path.join(pkgDir, 'bin', exe))
     fs.chmodSync(path.join(pkgDir, 'bin', exe), 0o755)
+    // DanmakuFactory 核心与 PCRE2 静态链接在二进制里，它们的许可证随包分发（早于此改动的 Release 里没有这个文件）
+    const notices = path.join(unpack, `biliupR-${tag}-${t.build}`, 'THIRD-PARTY-NOTICES.txt')
+    if (fs.existsSync(notices)) fs.copyFileSync(notices, path.join(pkgDir, 'THIRD-PARTY-NOTICES.txt'))
     const pj = readJson(path.join(pkgDir, 'package.json'))
     pj.version = version
     writeJson(path.join(pkgDir, 'package.json'), pj)

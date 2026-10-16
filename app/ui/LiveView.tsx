@@ -203,7 +203,7 @@ function LiveStage({ streamer, streamers }: { streamer: LiveStreamerEntity; stre
     </Button>
   )
 
-  const cover = live ? liveImageUrl(streamer.id, 'cover', streamer.live_cover_url) : null
+  const cover = liveImageUrl(streamer.id, 'cover', streamer.live_cover_url)
   const idleText = !live
     ? '这个直播间现在没有在录制，预览已断开'
     : (previewDisabledReason(streamer) ?? '暂不可预览')

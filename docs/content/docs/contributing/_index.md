@@ -7,4 +7,7 @@ template = "docs/section.html"
 sort_by = "weight"
 weight = 4
 draft = false
+
+[extra]
+language_code = "en-US"
 +++

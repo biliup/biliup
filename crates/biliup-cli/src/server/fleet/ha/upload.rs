@@ -55,6 +55,29 @@ pub enum Plan {
     Keep { reason: &'static str },
 }
 
+#[cfg(test)]
+mod upload_observation_tests {
+    use super::*;
+    use crate::server::common::upload_observation::{NewTask, UploadObservations};
+
+    #[tokio::test]
+    async fn no_submit_ha_branch_remains_skipped_after_successful_pipeline_return() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE activity_events(event_key TEXT PRIMARY KEY,kind TEXT,ts INTEGER,text TEXT,sub TEXT,session_id INTEGER)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE upload_observation_tasks(id TEXT PRIMARY KEY,source TEXT,scheduler_group TEXT,task_order INTEGER,state TEXT,created_at INTEGER,updated_at INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE upload_observation_files(id TEXT PRIMARY KEY,task_id TEXT,file_order INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
+        let observations = UploadObservations::new(pool);
+        observations.initialize().await.unwrap();
+        let guard = observations.register(NewTask { source: "ha", scheduler_group: "automatic-pool", title: "standby", streamer_name: None, session_id: Some(1), template_name: None, fifo: false });
+        let id = guard.observation().id().to_owned();
+        guard.scope(async { finish_unsubmitted("已交由备机处理，这里未执行投稿"); }).await;
+        guard.finish_result(&Ok::<(), String>(()));
+        let task = observations.detail(&id).await.unwrap().unwrap();
+        assert_eq!(task.task.state, "skipped");
+        assert_eq!(task.task.bvid, None);
+    }
+}
+
 impl Plan {
     pub async fn run<S>(self, rx: S, ctx: &Context, upload_config: &UploadStreamer) -> AppResult<()>
     where
@@ -66,6 +89,7 @@ impl Plan {
             }
             Plan::Collect { standby, id } => {
                 collect(&standby, &id, rx).await;
+                finish_unsubmitted("已交由备机收集，这里未执行投稿");
                 Ok(())
             }
             Plan::Keep { reason } => {
@@ -74,9 +98,16 @@ impl Plan {
                     url = ctx.live_streamer().url,
                     kept, reason, "HA：镜像房间的这一段不投，录像留在本地"
                 );
+                finish_unsubmitted("HA 镜像场次保留在本地，这里未执行投稿");
                 Ok(())
             }
         }
+    }
+}
+
+fn finish_unsubmitted(reason: &str) {
+    if let Some(task) = crate::server::common::upload_observation::TaskObservation::current() {
+        task.finish("skipped", Some(reason), None);
     }
 }
 
@@ -125,6 +156,7 @@ where
     if primary.upload_begin(key) == Begin::Skip {
         let kept = drain(rx).await;
         info!(key, kept, "HA：这一场由备机负责，主机不投，录像留在本地");
+        finish_unsubmitted("这一场由备机负责，主机未执行投稿");
         return Ok(());
     }
     info!(key, "HA：主机开始投这一场");
@@ -138,6 +170,7 @@ where
         }
         Ok(Submitted::Fenced) => {
             primary.upload_fenced(key);
+            finish_unsubmitted("提交前已由备机接手，主机未投稿");
             Ok(())
         }
         Err(e) => {
@@ -260,19 +293,33 @@ pub(crate) async fn run_resume(
     job: Resume,
     started: i64,
 ) {
+    let guard = services.upload_observations.register(crate::server::common::upload_observation::NewTask {
+        source: "ha_resume", scheduler_group: "ha-pool", title: "HA 补投", streamer_name: None,
+        session_id: job.session, template_name: None, fifo: false,
+    });
     let slots = services.managers.upload_slots();
     let _slot = slots.acquire().await;
     match resume_input(&primary, &services, &job, started).await {
         Ok(found) => {
             primary.resume_ended(&job.key, found.ended_at);
+            let observation = guard.observation();
+            observation.template_name(Some(&found.config.template_name));
             let segments = futures::stream::iter(found.segments);
-            let result = run_primary(&primary, &job.key, segments, &found.ctx, &found.config).await;
+            let result = observation.scope(run_primary(&primary, &job.key, segments, &found.ctx, &found.config)).await;
+            let telemetry_result = result.as_ref().map(|_| ()).map_err(|error| format!("{error:#}"));
+            guard.finish_result(&telemetry_result);
             if let Err(e) = result {
                 warn!(key = job.key, error = ?e, "HA：主机补投它那半没有做完");
             }
         }
-        Err(Missing::Skip(reason, detail)) => primary.resume_skipped(&job.key, reason, detail),
-        Err(Missing::Fail(reason)) => primary.upload_failed(&job.key, &reason),
+        Err(Missing::Skip(reason, detail)) => {
+            guard.finish("skipped", Some(detail), None);
+            primary.resume_skipped(&job.key, reason, detail)
+        }
+        Err(Missing::Fail(reason)) => {
+            guard.finish("failed", Some(&reason), None);
+            primary.upload_failed(&job.key, &reason)
+        }
     }
 }
 
@@ -301,6 +348,15 @@ async fn resume_input(
     let session = job
         .session
         .ok_or(Missing::Skip(SkipReason::NoFiles, GONE))?;
+    match workbench::store::session(&services.pool, session).await {
+        Ok(Some(row)) if row.kind == "source" => {}
+        Ok(Some(row)) if row.kind == "group" => {
+            return Err(Missing::Skip(SkipReason::NoFiles, "HA 补投不支持合并场次"));
+        }
+        Ok(None) => return Err(Missing::Skip(SkipReason::NoFiles, GONE)),
+        Ok(Some(_)) => return Err(Missing::Skip(SkipReason::NoFiles, GONE)),
+        Err(error) => return Err(Missing::Fail(format!("读取这一场类型失败：{error}"))),
+    }
     let info = match StreamerInfo::fetch_one(session, &services.pool).await {
         Ok(info) => info,
         Err(ormlite::Error::SqlxError(sqlx::Error::RowNotFound)) => {
@@ -329,7 +385,7 @@ async fn resume_input(
         .clone()
         .filter(|config| !config.is_noop_uploader())
         .ok_or_else(|| Missing::Fail("这个房间没有投稿模板".into()))?;
-    let rows = workbench::store::session_segments(&services.pool, session)
+    let rows = workbench::store::source_segments(&services.pool, session)
         .await
         .map_err(|e| Missing::Fail(format!("读不到这一场的分段：{e}")))?;
     let validator = FileValidator::new(ctx.config().filtering_threshold * 1000 * 1000, true);

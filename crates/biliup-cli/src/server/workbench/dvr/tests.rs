@@ -238,6 +238,147 @@ async fn segments_waiting_for_deletion_still_play() {
     assert_eq!(video, 200, "两段都回放");
 }
 
+#[tokio::test]
+async fn grouped_dvr_preserves_gap_and_uses_view_timestamps_for_source_media() {
+    let (dir, pool, first) = setup().await;
+    let origin = store::session(&pool, first)
+        .await
+        .unwrap()
+        .unwrap()
+        .started_at
+        .unwrap();
+    let flv = build_flv(0, 100, 25, None);
+    let first_path = write(&dir, "first.flv", &flv.bytes);
+    add_segment(&pool, first, &first_path, 0, 0, Some(3965)).await;
+    store::close_session(&pool, first, origin + 5000)
+        .await
+        .unwrap();
+    let info = StreamerInfo::new(
+        "a",
+        "https://a",
+        "continued",
+        DateTime::<Utc>::from_timestamp_millis(origin + 15000).unwrap(),
+        "",
+    );
+    let second = store::open_session(&pool, 1, &info, origin + 15000, 0)
+        .await
+        .unwrap()
+        .id;
+    store::set_started_at(&pool, second, origin + 15000)
+        .await
+        .unwrap();
+    let second_path = write(&dir, "second.flv", &flv.bytes);
+    add_segment(&pool, second, &second_path, 0, 0, Some(3965)).await;
+    store::close_session(&pool, second, origin + 20000)
+        .await
+        .unwrap();
+    let group = session_groups::create(&pool, &[first, second])
+        .await
+        .unwrap();
+    let offset = 13965;
+    let dvr = open(&pool, group, 0).await.unwrap();
+    let tags = flv_tags(&collect(dvr).await);
+    assert_eq!(
+        tags[2..].iter().filter(|tag| tag.0 == 9).count(),
+        100,
+        "playback ends at the real gap"
+    );
+    let dvr = open(&pool, group, offset + 1500).await.unwrap();
+    assert_eq!(dvr.start_ms, offset + 1000);
+    let tags = flv_tags(&collect(dvr).await);
+    assert_eq!(
+        tags[2..].iter().find(|tag| tag.0 == 9).unwrap().1,
+        (offset + 2000) as u32
+    );
+    assert_eq!(
+        store::source_segments(&pool, second).await.unwrap()[0].start_ms,
+        0
+    );
+    let keys = super::super::session_keyframes(&pool, group, offset, offset + 3000)
+        .await
+        .unwrap();
+    assert_eq!(
+        keys.iter().map(|key| key.t_ms).collect::<Vec<_>>(),
+        vec![offset, offset + 1000, offset + 2000, offset + 3000]
+    );
+}
+
+#[tokio::test]
+async fn grouped_dvr_follows_the_real_live_tail() {
+    let (dir, pool, first) = setup().await;
+    let origin = store::session(&pool, first)
+        .await
+        .unwrap()
+        .unwrap()
+        .started_at
+        .unwrap();
+    let flv = build_flv(0, 100, 25, None);
+    let first_path = write(&dir, "ended.flv", &flv.bytes);
+    add_segment(&pool, first, &first_path, 0, 0, Some(3965)).await;
+    store::close_session(&pool, first, origin + 5000)
+        .await
+        .unwrap();
+    let info = StreamerInfo::new(
+        "a",
+        "https://a",
+        "live tail",
+        DateTime::<Utc>::from_timestamp_millis(origin + 15000).unwrap(),
+        "",
+    );
+    let second = store::open_session(&pool, 1, &info, origin + 15000, 0)
+        .await
+        .unwrap()
+        .id;
+    store::set_started_at(&pool, second, origin + 15000)
+        .await
+        .unwrap();
+    let cut = flv.keyframes[2].1 as usize;
+    let path = write(&dir, "live-tail.flv", &flv.bytes[..cut]);
+    let segment = add_segment(&pool, second, &path, 0, 0, None).await;
+    let counter = ByteCounter::new();
+    let guard = live::register(second, 1, Some(counter.clone()));
+    let group = session_groups::create(&pool, &[first, second])
+        .await
+        .unwrap();
+    let mut stream = Box::pin(open(&pool, group, 13965).await.unwrap().into_stream());
+    let mut received = Vec::new();
+    while let Ok(Some(chunk)) = next_within(&mut stream, 100).await {
+        received.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(
+        flv_tags(&received)[2..]
+            .iter()
+            .filter(|tag| tag.0 == 9)
+            .count(),
+        50
+    );
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(&flv.bytes[cut..])
+        .unwrap();
+    finish(&pool, segment, &path.to_string_lossy(), 3965).await;
+    store::close_session(&pool, second, origin + 20000)
+        .await
+        .unwrap();
+    guard.changed();
+    drop(guard);
+    while let Some(chunk) = next_within(&mut stream, 1000)
+        .await
+        .expect("group live tail should close")
+    {
+        received.extend_from_slice(&chunk.unwrap());
+    }
+    assert_eq!(
+        flv_tags(&received)[2..]
+            .iter()
+            .filter(|tag| tag.0 == 9)
+            .count(),
+        100
+    );
+}
+
 async fn next_within<S: futures::Stream + Unpin>(
     stream: &mut S,
     ms: u64,

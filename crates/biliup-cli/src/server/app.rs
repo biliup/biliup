@@ -94,16 +94,19 @@ impl ApplicationController {
         let addr = listener.local_addr().change_context(AppError::Unknown)?;
         info!("routes initialized, listening on {}", addr);
 
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal(
-                deletion_task.abort_handle(),
-                service_register,
-                fleet,
-                shutdown,
-            ))
-            .await
-            .change_context(AppError::Unknown)
-            .attach("error while starting API server")?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(shutdown_signal(
+            deletion_task.abort_handle(),
+            service_register,
+            fleet,
+            shutdown,
+        ))
+        .await
+        .change_context(AppError::Unknown)
+        .attach("error while starting API server")?;
 
         // 等待会话清理任务完成
         match deletion_task.await {

@@ -4,6 +4,7 @@ use crate::server::api::redact;
 use crate::server::auto_clip::runner::streamer_opted_in;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
+use crate::server::common::upload_observation::{NewTask, UploadObservations};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
@@ -107,6 +108,13 @@ pub async fn get_streamers_endpoint(
             Some((rate, media, preview)) => (rate, media, Some(preview)),
             None => (None, Default::default(), None),
         };
+        let live_cover_url = match live_media.cover_url {
+            Some(url) => Some(url),
+            None => crate::server::common::live_image::cover_store()
+                .load(x.id)
+                .await
+                .map(|cover| cover.url),
+        };
 
         let auto_clip_after_live = show_after_live.then(|| streamer_opted_in(&x));
         if !show_hooks {
@@ -123,7 +131,7 @@ pub async fn get_streamers_endpoint(
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
             live_bytes_per_sec,
-            live_cover_url: live_media.cover_url,
+            live_cover_url,
             live_avatar_url: live_media.avatar_url,
             session_id,
             marker_count: None,
@@ -174,7 +182,10 @@ pub async fn post_streamers_endpoint(
     }
     validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
-        Ok(live_streamers) => Ok(Json(live_streamers)),
+        Ok(live_streamers) => {
+            refresh_cover_after_save(&service_register, &live_streamers);
+            Ok(Json(live_streamers))
+        }
         Err(AddStreamerError::UnsupportedUrl) => {
             Err((StatusCode::BAD_REQUEST, "Not supported url").into_response())
         }
@@ -208,10 +219,20 @@ pub async fn put_streamers_endpoint(
     let mut streamer = update_streamer(&service_register, payload)
         .await
         .map_err(report_to_response)?;
+    refresh_cover_after_save(&service_register, &streamer);
     if !caller.can_access(Field::StreamerHooks) {
         strip_hooks(&mut streamer);
     }
     Ok(Json(streamer))
+}
+
+fn refresh_cover_after_save(services: &ServiceRegister, streamer: &LiveStreamer) {
+    let pool = services.pool.clone();
+    let id = streamer.id;
+    let url = streamer.url.clone();
+    tokio::spawn(async move {
+        crate::server::common::room_metadata::refresh_room_cover(&pool, id, &url, None).await;
+    });
 }
 
 fn validate_streamer_mosaic(
@@ -316,6 +337,7 @@ pub async fn get_streamer_info(
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<StreamerInfoView>>, Response> {
     let streamer_infos = StreamerInfo::select()
+        .where_("kind = 'source'")
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
@@ -1094,6 +1116,7 @@ pub struct PostUploads {
 pub async fn post_uploads(
     State(config): State<Arc<RwLock<Config>>>,
     State(pool): State<ConnectionPool>,
+    State(observations): State<Arc<UploadObservations>>,
     Json(json_data): Json<PostUploads>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let upload_config = UploadStreamer::select()
@@ -1139,37 +1162,64 @@ pub async fn post_uploads(
         return Err((StatusCode::BAD_REQUEST, "至少选择一个媒体文件").into_response());
     }
     info!("通过页面开始上传");
+    let guard = observations.register(NewTask {
+        source: "manual",
+        scheduler_group: "manual",
+        title: upload_config
+            .title
+            .as_deref()
+            .unwrap_or(&upload_config.template_name),
+        streamer_name: None,
+        session_id: None,
+        template_name: Some(&upload_config.template_name),
+        fifo: false,
+    });
+    let task_id = guard.observation().id().to_owned();
+    let mut queued_files = Vec::with_capacity(files.len());
+    for file in &files {
+        queued_files.push((
+            file.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            fs::metadata(file).await.ok().map(|metadata| metadata.len()),
+        ));
+    }
+    guard.observation().prepare_files(queued_files);
     tokio::spawn(async move {
-        let result = async {
-            let (bilibili, videos) = upload(
-                upload_config
-                    .user_cookie
-                    .as_deref()
-                    .unwrap_or("cookies.json"),
-                None,
-                line,
-                &files,
-                limit as usize,
-            )
-            .await?;
-            if !videos.is_empty() {
-                let recorder = Recorder::new(
-                    upload_config.title.clone(),
-                    StreamerInfo::new(
-                        &upload_config.template_name,
-                        "stream_title",
-                        "",
-                        Utc::now(),
-                        "",
-                    ),
-                );
-                let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
-                submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
-                info!(template_id = upload_config.id, "通过页面上传成功");
-            }
-            Ok::<_, Report<AppError>>(())
-        }
-        .await;
+        let result = guard
+            .scope(async {
+                guard.observation().phase("initializing");
+                let (bilibili, videos) = upload(
+                    upload_config
+                        .user_cookie
+                        .as_deref()
+                        .unwrap_or("cookies.json"),
+                    None,
+                    line,
+                    &files,
+                    limit as usize,
+                )
+                .await?;
+                if !videos.is_empty() {
+                    let recorder = Recorder::new(
+                        upload_config.title.clone(),
+                        StreamerInfo::new(
+                            &upload_config.template_name,
+                            "stream_title",
+                            "",
+                            Utc::now(),
+                            "",
+                        ),
+                    );
+                    let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
+                    guard.observation().title(&studio.title);
+                    submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
+                    info!(template_id = upload_config.id, "通过页面上传成功");
+                }
+                Ok::<_, Report<AppError>>(())
+            })
+            .await;
+        guard.finish_result(&result);
         if result.is_err() {
             // Upload failures can wrap upstream response bodies containing
             // short-lived upload authorization. Keep persistent Web logs free
@@ -1178,7 +1228,7 @@ pub async fn post_uploads(
         }
     });
 
-    Ok(Json(serde_json::json!({})))
+    Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
 #[cfg(test)]
@@ -1188,6 +1238,74 @@ mod recording_policy_status_tests {
     use chrono::{Duration as ChronoDuration, SecondsFormat};
     use ormlite::Insert;
     use serde_json::Value;
+
+    #[tokio::test]
+    async fn manual_upload_registers_files_and_reports_initialization_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let template: InsertUploadStreamer = serde_json::from_value(json!({
+            "template_name": "手动模板",
+            "title": "手动任务",
+            "user_cookie": dir.path().join("missing-cookie.json"),
+            "tags": []
+        }))
+        .unwrap();
+        let template = ormlite::Insert::insert(template, &pool).await.unwrap();
+        let media = tempfile::Builder::new()
+            .prefix(".manual-upload-observation-")
+            .suffix(".flv")
+            .tempfile_in(std::env::current_dir().unwrap())
+            .unwrap();
+        std::fs::write(media.path(), b"test media").unwrap();
+        let file_name = media
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let observations = UploadObservations::new(pool.clone());
+        observations.initialize().await.unwrap();
+        let Json(response) = post_uploads(
+            State(Arc::new(RwLock::new(Config::default()))),
+            State(pool),
+            State(observations.clone()),
+            Json(PostUploads {
+                files: vec![file_name.clone()],
+                template_id: template.id,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = response["task_id"].as_str().unwrap();
+        let detail = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let detail = observations.detail(id).await.unwrap().unwrap();
+                if detail.task.state == "failed" {
+                    break detail;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(detail.task.source, "manual");
+        assert_eq!(detail.task.scheduler_group, "manual");
+        assert_eq!(detail.task.queue_position, None);
+        assert_eq!(detail.task.title, "手动任务");
+        assert_eq!(detail.task.bytes_confirmed, 0);
+        assert_eq!(detail.task.total_bytes, Some(10));
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].name, file_name);
+        assert!(
+            !detail
+                .task
+                .error
+                .unwrap()
+                .contains(dir.path().to_str().unwrap())
+        );
+    }
 
     /// 以当前时刻为基准造窗口，形态与前端 `Date.toISOString()` 写出的一致
     fn window(starts_in: i64, ends_in: i64) -> String {
@@ -1223,6 +1341,27 @@ mod recording_policy_status_tests {
             Arc::new(RwLock::new(Config::default())),
             Default::default(),
         )
+    }
+
+    #[tokio::test]
+    async fn recording_history_excludes_virtual_session_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        for (id, kind) in [(1, "source"), (2, "group")] {
+            sqlx::query("INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path,kind) VALUES(?, '主播', 'https://example.com/1', '直播', ?, '', ?)")
+                .bind(id)
+                .bind(Utc::now())
+                .bind(kind)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let Json(history) = get_streamer_info(State(pool)).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].info.id, 1);
     }
 
     /// 走完整的 数据库 -> /v1/streamers 处理函数 -> JSON 这条路

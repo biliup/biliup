@@ -51,8 +51,7 @@ export function formToHookStep(step: PostprocessorFormStep): unknown {
     case 'remux':
       return { remux: value }
     default:
-      // webhook 等后端暂不支持的形态:原样返回,不静默丢弃
-      return step
+      throw new Error(`不支持的后处理操作: ${String(cmd ?? '')}`)
   }
 }
 

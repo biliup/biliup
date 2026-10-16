@@ -1,4 +1,4 @@
-use crate::server::common::live_image::spawn_avatar_download;
+use crate::server::common::live_image::{spawn_avatar_download, spawn_cover_download};
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
 use crate::server::common::throughput::{RateMeter, Sampler};
@@ -13,7 +13,7 @@ use crate::server::core::live::{danmaku_client, downloader_runtime, live_request
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::ha::UnitOutput;
-use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage};
 use crate::server::infrastructure::models::hook_step::process;
 use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
@@ -176,7 +176,7 @@ impl SegmentEventProcessor {
                 // 发送到上传器
                 let res = self
                     .uploader
-                    .force_send(UploaderMessage::SegmentEvent(rx.clone(), self.ctx.clone()))
+                    .force_send(UploaderMessage::segment_event(rx.clone(), self.ctx.clone()))
                     .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
                 if let Some(prev) = res {
                     warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
@@ -319,6 +319,8 @@ pub struct DownloadTask {
     /// 本任务余下的拉流不再追加，直接用原直链（stream-gears 有自己的首连兜底，不受影响）。
     ws_expire_rejected: AtomicBool,
     audio_processing_failed: Arc<AtomicBool>,
+    #[cfg(test)]
+    recorder_handle: std::sync::RwLock<Option<RecorderHandle>>,
 }
 
 /// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
@@ -345,7 +347,20 @@ impl DownloadTask {
             danmaku_tx,
             ws_expire_rejected: AtomicBool::new(false),
             audio_processing_failed: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            recorder_handle: Default::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn settle_recorder(&self) {
+        let handle = self
+            .recorder_handle
+            .read()
+            .unwrap()
+            .clone()
+            .expect("the recording should already have started its recorder");
+        handle.settled().await;
     }
 
     /// 当前正在录制的那条流的平台名与 CDN 直链。
@@ -393,6 +408,7 @@ impl DownloadTask {
         *self.source.write().unwrap() = LiveSource::from_stream(stream);
         let media = LiveMedia::from_stream(stream);
         let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
+        let cover_changed = self.media.read().unwrap().cover_url != media.cover_url;
         if changed {
             spawn_avatar_download(
                 ctx.live_streamer().id,
@@ -400,11 +416,18 @@ impl DownloadTask {
                 ctx.live_streamer().url.clone(),
             );
         }
+        if cover_changed {
+            spawn_cover_download(
+                ctx.live_streamer().id,
+                media.cover_url.clone(),
+                ctx.live_streamer().url.clone(),
+            );
+        }
         *self.media.write().unwrap() = media;
     }
 
     pub(self) async fn execute(
-        &self,
+        self: &Arc<Self>,
         ctx: &Context,
         sender: Sender<UploaderMessage>,
         plugin: Arc<dyn LivePlugin + Send + Sync>,
@@ -443,6 +466,10 @@ impl DownloadTask {
             },
             live_index,
         );
+        #[cfg(test)]
+        {
+            *self.recorder_handle.write().unwrap() = Some(workbench.handle());
+        }
         let danmaku_client = danmaku_client(
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
@@ -657,7 +684,7 @@ impl DownloadTask {
         }
         // 清理资源
         // 确保状态更新和资源清理
-        rooms_handle.wake_waker(ctx.worker_id()).await;
+        rooms_handle.wake_download(ctx.worker(), self).await;
         info!("Download task completed: {:?}", result);
         self.done_notify.notify_one();
         Ok(())
@@ -894,6 +921,8 @@ pub async fn start_download_workflow(
     ctx: Context,
     sender: Sender<UploaderMessage>,
     rooms_handle: Arc<Monitor>,
+    monitor_changes: tokio::sync::watch::Receiver<()>,
+    resumed_session: bool,
 ) {
     let task = Arc::new(DownloadTask::new(
         downloader_runtime(
@@ -903,13 +932,29 @@ pub async fn start_download_workflow(
         ),
         ctx.live_stream(),
     ));
-    ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
-        .await;
+    if !ctx.worker().start_download(task.clone(), &monitor_changes) {
+        if !resumed_session
+            && let Err(e) = crate::server::workbench::store::close_session(
+                ctx.pool(),
+                ctx.id(),
+                crate::server::workbench::recorder::now_ms(),
+            )
+            .await
+        {
+            error!(e = ?e, "关闭取消启动的场次失败");
+        }
+        return;
+    }
 
     // 主播头像几乎不变：开播时下载一次存到 data/avatar/，地址没变就不再下载
     spawn_avatar_download(
         ctx.live_streamer().id,
         task.live_media().avatar_url,
+        ctx.live_streamer().url.clone(),
+    );
+    spawn_cover_download(
+        ctx.live_streamer().id,
+        task.live_media().cover_url,
         ctx.live_streamer().url.clone(),
     );
 
@@ -1080,7 +1125,7 @@ mod tests {
         }
         assert!(processor.finish_processing().await);
 
-        let UploaderMessage::SegmentEvent(segments, _) = uploads.try_recv().unwrap();
+        let (segments, _, _) = uploads.try_recv().unwrap().into_parts();
         let queued: Vec<PathBuf> = std::iter::from_fn(|| segments.try_recv().ok())
             .map(|segment| segment.prev_file_path)
             .collect();

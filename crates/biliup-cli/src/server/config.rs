@@ -37,6 +37,14 @@ pub struct Config {
     #[serde(default)]
     pub ffmpeg_path: Option<String>,
 
+    /// Legacy, ignored: XML to ASS conversion is built into biliup and no
+    /// longer runs a DanmakuFactory executable. Still read so that existing
+    /// configurations load; a non-empty value only logs a warning, and it is
+    /// not written back when unset.
+    #[patch(skip)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub danmaku_factory_path: Option<String>,
+
     /// 文件大小限制（字节）
     ///
     /// 主播覆写里这个字段的 `null` 是“显式清除、按主播关闭大小分段”，与其它字段不同。
@@ -752,6 +760,20 @@ mod tests {
         assert_eq!(config.file_size, default_file_size());
         assert_eq!(config.segment_time, None);
         assert!(config.validate_segment_limits().is_ok());
+    }
+
+    #[test]
+    fn legacy_danmaku_factory_path_still_loads_but_is_not_written_when_unset() {
+        let config: Config =
+            serde_json::from_str(r#"{"danmaku_factory_path": "/opt/DanmakuFactory"}"#).unwrap();
+        assert_eq!(
+            config.danmaku_factory_path.as_deref(),
+            Some("/opt/DanmakuFactory")
+        );
+        let config: Config = serde_yaml::from_str("danmaku_factory_path: null\n").unwrap();
+        assert_eq!(config.danmaku_factory_path, None);
+        let saved = serde_json::to_value(Config::default()).unwrap();
+        assert!(saved.get("danmaku_factory_path").is_none(), "{saved}");
     }
 
     #[test]

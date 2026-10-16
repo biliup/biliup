@@ -1,5 +1,6 @@
 use crate::UploadLine;
 use crate::server::common::util::Recorder;
+use crate::server::common::upload_observation::{FileObservation, NewTask, TaskGuard, TaskObservation};
 use crate::server::config::{Config, TemplateCredit};
 use crate::server::core::downloader::SegmentInfo;
 use crate::server::core::slots::Slots;
@@ -17,7 +18,7 @@ use biliup::bilibili::{BiliBili, Credit, ResponseData, Studio, Video};
 use biliup::client::StatelessClient;
 use biliup::credential::login_by_cookies;
 use biliup::error::Kind;
-use biliup::uploader::line::{Line, Probe, StreamParcel, UploadedStream};
+use biliup::uploader::line::{Line, Probe, StreamParcel, UploadedStream, UploadObserver};
 use biliup::uploader::util::SubmitOption;
 use biliup::uploader::{VideoFile, line};
 use bytes::Bytes;
@@ -59,11 +60,13 @@ where
 {
     info!(upload_config=?upload_config, "Starting process with upload");
     if let Some(plan) = crate::server::fleet::ha::upload_plan(ctx).await {
+        if let Some(task) = TaskObservation::current() { task.source("ha"); }
         return plan.run(rx, ctx, upload_config).await;
     }
     // 1. 初始化上传环境
     let upload_context =
         initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
+    if let Some(task) = TaskObservation::current() { task.phase("waiting_segment"); }
 
     // 2. 获取插件列表
     let plugins = get_all_plugins();
@@ -93,7 +96,10 @@ where
         )
         .await?;
         let submit_api = ctx.config().submit_api.clone();
+        if let Some(task) = TaskObservation::current() { task.title(&studio.title); }
         submit_to_bilibili(&upload_context.bilibili, &studio, submit_api.as_deref()).await?;
+    } else if TaskObservation::current().is_some() {
+        return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
 
     // 5. 执行后处理
@@ -275,6 +281,7 @@ where
     pin!(rx);
     // 流式处理后续事件
     'segments: while let Some(mut event) = rx.next().await {
+        if let Some(task) = TaskObservation::current() { task.phase("processing"); }
         if let Some(ready) = event.ready.take() {
             ready.0.await;
         }
@@ -452,6 +459,7 @@ where
                 );
             }
         }
+        if let Some(task) = TaskObservation::current() { task.phase("waiting_segment"); }
     }
 
     Ok(uploaded)
@@ -505,6 +513,7 @@ where
         match attempt().await {
             Err(e) if is_network_error(&e) => {
                 let delay = retry_delay(retry);
+                if let Some(task) = TaskObservation::current() { task.retry(delay, &format!("{e:#}")); }
                 warn!(
                     file = ?file,
                     "上传遇到网络错误，{}s 后整个文件重传（第 {}/{} 次）：{e:#}",
@@ -527,12 +536,40 @@ fn is_network_error(report: &Report<AppError>) -> bool {
         .any(Kind::is_transient)
 }
 
-/// 同 [`upload_single_file`]，每读出一块交给上传前用这块的字节数回调 `progress`；
+/// 同 [`upload_single_file`]，每一分块收到 UPOS 成功确认后回调 `progress`；
 /// 回调返回 `false` 时不再传后面的分块，上传以错误结束。
 pub(crate) async fn upload_single_file_with_progress(
     file_path: &Path,
     context: &UploadContext,
     progress: impl Fn(usize) -> bool + Send + Sync,
+) -> AppResult<Video> {
+    let name = file_path.file_name().unwrap_or_default().to_string_lossy();
+    let observation = TaskObservation::current().map(|task| task.file(&name, std::fs::metadata(file_path).ok().map(|metadata| metadata.len())));
+    let result = upload_file_inner(file_path, context, &progress, observation.as_ref()).await;
+    if let Some(observation) = observation { observation.finish(result.as_ref().err().map(|error| format!("{error:#}")).as_deref()); }
+    result
+}
+
+struct ConfirmedProgress<'a, F> { progress: &'a F, observation: Option<&'a FileObservation> }
+impl<F: Fn(usize) -> bool + Send + Sync> UploadObserver for ConfirmedProgress<'_, F> {
+    fn can_upload(&self) -> bool { (self.progress)(0) }
+    fn chunk_confirmed(&self, part_number: usize, bytes: usize) -> bool {
+        if let Some(observation) = self.observation { observation.confirmed(part_number, bytes); }
+        (self.progress)(bytes)
+    }
+    fn chunk_confirmed_range(&self, _part_number: usize, start: u64, bytes: usize) -> bool {
+        if let Some(observation) = self.observation { observation.confirmed_range(start, bytes); }
+        (self.progress)(bytes)
+    }
+    fn chunk_retry(&self, _part_number: usize) {
+        if let Some(observation) = self.observation { observation.retry(); }
+    }
+}
+async fn upload_file_inner(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: &(impl Fn(usize) -> bool + Send + Sync),
+    observation: Option<&FileObservation>,
 ) -> AppResult<Video> {
     if crate::server::plugins::mosaic::is_unmasked(file_path) {
         return Err(AppError::Custom("未遮挡录像禁止上传，请先完成画面遮挡".into()).into());
@@ -556,6 +593,7 @@ pub(crate) async fn upload_single_file_with_progress(
     info!("线路选择：{line:?}");
     let video_file = VideoFile::new(video_path).change_context(AppError::Unknown)?;
     let total_size = video_file.total_size;
+    if let Some(observation) = observation { observation.total_bytes(total_size); }
     let file_name = video_file.file_name.clone();
     let uploader = line
         .pre_upload(bilibili, video_file)
@@ -565,16 +603,13 @@ pub(crate) async fn upload_single_file_with_progress(
     let instant = Instant::now();
 
     let video = uploader
-        .upload(client.clone(), *limit, |vs| {
+        .upload_with_observer(client.clone(), *limit, |vs| {
             vs.map(|vs| {
                 let chunk = vs?;
                 let len = chunk.len();
-                if !progress(len) {
-                    return Err(Kind::Custom("上传已取消".into()));
-                }
                 Ok((chunk, len))
             })
-        })
+        }, Some(&ConfirmedProgress { progress, observation }))
         .await
         .change_context(AppError::Unknown)?;
     let t = instant.elapsed().as_millis();
@@ -591,6 +626,7 @@ pub async fn submit_to_bilibili(
     studio: &Studio,
     submit_api: Option<&str>,
 ) -> AppResult<ResponseData> {
+    if let Some(task) = TaskObservation::current() { task.submitting().await; }
     // let submit = match worker.config.read().unwrap().submit_api {
     //     Some(submit) => SubmitOption::from_str(&submit).unwrap_or(SubmitOption::App),
     //     _ => SubmitOption::App,
@@ -624,6 +660,10 @@ pub async fn submit_to_bilibili(
             .change_context(AppError::Unknown)?,
     };
     info!("Submit successful");
+    if let Some(task) = TaskObservation::current() {
+        if let Some(bvid) = result.data.as_ref().and_then(|data| data.get("bvid")).and_then(serde_json::Value::as_str) { task.bvid(bvid); }
+        task.phase("processing");
+    }
     Ok(result)
 }
 
@@ -632,6 +672,7 @@ pub async fn edit_to_bilibili(
     studio: &Studio,
     submit_api: Option<&str>,
 ) -> AppResult<serde_json::Value> {
+    if let Some(task) = TaskObservation::current() { task.submitting().await; }
     let submit_option = match submit_api {
         Some(submit) => SubmitOption::from_str(submit).unwrap_or(SubmitOption::Web),
         _ => SubmitOption::Web,
@@ -648,6 +689,7 @@ pub async fn edit_to_bilibili(
             .change_context(AppError::Unknown)?,
     };
     info!("Edit successful");
+    if let Some(task) = TaskObservation::current() { task.phase("processing"); }
     Ok(result)
 }
 
@@ -664,6 +706,7 @@ pub(crate) async fn upload_byte_stream_parts<S>(
     context: &UploadContext,
     parcel: StreamParcel,
     stream: S,
+    observation: Option<FileObservation>,
 ) -> AppResult<UploadedStream>
 where
     S: Stream<Item = biliup::error::Result<(Bytes, usize)>>,
@@ -673,10 +716,13 @@ where
     info!("开始流式上传：{file_name} ({total_size} bytes)");
     info!("线路选择：{:?}", context.line);
     let instant = Instant::now();
+    let progress = |_| true;
     let uploaded = parcel
-        .upload_parts(context.client.clone(), 3, stream)
+        .upload_parts_with_observer(context.client.clone(), 3, stream, Some(&ConfirmedProgress { progress: &progress, observation: observation.as_ref() }))
         .await
-        .change_context(AppError::Unknown)?;
+        .change_context(AppError::Unknown);
+    if let Some(observation) = &observation { if let Ok(uploaded) = &uploaded { observation.total_bytes(uploaded.uploaded_size()); } }
+    let uploaded = uploaded?;
     let t = instant.elapsed().as_millis().max(1);
     info!(
         "Stream parts uploaded: {file_name} => cost {:.2}s, {:.2} MB/s.",
@@ -686,8 +732,12 @@ where
     Ok(uploaded)
 }
 
-pub(crate) async fn complete_byte_stream(uploaded: UploadedStream) -> AppResult<Video> {
-    uploaded.complete().await.change_context(AppError::Unknown)
+pub(crate) async fn complete_byte_stream(uploaded: UploadedStream, observation: Option<&FileObservation>) -> AppResult<Video> {
+    let result = uploaded.complete().await.change_context(AppError::Unknown);
+    if let Some(observation) = observation {
+        observation.finish(result.as_ref().err().map(|error| format!("{error:#}")).as_deref());
+    }
+    result
 }
 
 // 解析投稿的「转载来源」(source) 字段。
@@ -949,44 +999,8 @@ pub async fn upload(
             }
         },
     };
-    for video_path in video_paths {
-        prepare_upload_audio(video_path).await?;
-        println!(
-            "{:?}",
-            video_path
-                .canonicalize()
-                .change_context_lazy(|| AppError::Unknown)?
-                .to_str()
-        );
-        info!("{line:?}");
-        let video_file = VideoFile::new(video_path).change_context_lazy(|| AppError::Unknown)?;
-        let total_size = video_file.total_size;
-        let file_name = video_file.file_name.clone();
-        let uploader = line
-            .pre_upload(&bilibili, video_file)
-            .await
-            .change_context_lazy(|| AppError::Unknown)?;
-
-        let instant = Instant::now();
-
-        let video = uploader
-            .upload(client.clone(), limit, |vs| {
-                vs.map(|vs| {
-                    let chunk = vs?;
-                    let len = chunk.len();
-                    Ok((chunk, len))
-                })
-            })
-            .await
-            .change_context_lazy(|| AppError::Unknown)?;
-        let t = instant.elapsed().as_millis();
-        info!(
-            "Upload completed: {file_name} => cost {:.2}s, {:.2} MB/s.",
-            t as f64 / 1000.,
-            total_size as f64 / 1000. / t as f64
-        );
-        videos.push(video);
-    }
+    let context = UploadContext { bilibili: bilibili.clone(), line, threads: limit, client };
+    for video_path in video_paths { videos.push(upload_single_file(video_path, &context).await?); }
 
     Ok((bilibili, videos))
 }
@@ -994,6 +1008,31 @@ pub async fn upload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn observed_test_context(observations: Arc<crate::server::common::upload_observation::UploadObservations>) -> Context {
+        use crate::server::infrastructure::context::Worker;
+        use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+        use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
+        let streamer: LiveStreamer = serde_json::from_value(serde_json::json!({
+            "id": 1, "url": "https://www.douyu.com/1", "remark": "test"
+        })).unwrap();
+        let template = UploadStreamer {
+            id: 1, template_name: "test template".into(), title: Some("title".into()), tid: Some(1), tid_v2: None,
+            copyright: Some(1), copyright_source: None, cover_path: None, description: None, dynamic: None,
+            dtime: None, dolby: None, hires: None, charging_pay: None, no_reprint: None, is_only_self: None,
+            uploader: None, user_cookie: Some("cookies.json".into()), tags: vec![], credits: None,
+            up_selection_reply: None, up_close_reply: None, up_close_danmu: None, extra_fields: None,
+        };
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let worker = Arc::new(Worker::new(streamer, Some(template), Arc::new(std::sync::RwLock::new(Config::default())), Default::default())
+            .with_upload_observations(observations));
+        let live: biliup::downloader::live::LiveStream = serde_json::from_value(serde_json::json!({
+            "name": "test", "url": "https://www.douyu.com/1", "title": "test", "date": chrono::Utc::now(),
+            "live_cover_url": "", "raw_stream_url": "", "platform": "douyu", "stream_headers": {}, "suffix": "flv",
+            "danmaku": null, "downloader_hint": "StreamGears", "runtime_options": null,
+        })).unwrap();
+        Context::new(1, worker, pool, live)
+    }
 
     fn test_context(config: Config) -> Context {
         use crate::server::infrastructure::context::Worker;
@@ -1022,6 +1061,21 @@ mod tests {
             sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap(),
             live,
         )
+    }
+
+    #[tokio::test]
+    async fn automatic_and_sync_entry_helpers_register_real_scheduler_sources() {
+        use crate::server::common::upload_observation::UploadObservations;
+        let pool = sqlx::SqlitePool::connect_lazy("sqlite::memory:").unwrap();
+        let observations = UploadObservations::new(pool);
+        let ctx = observed_test_context(observations.clone());
+        for (source, scheduler_group) in [("automatic", "automatic-pool"), ("sync", "sync")] {
+            let guard = observe_context(&ctx, source, scheduler_group, source == "automatic").unwrap();
+            let detail = observations.detail_cached(guard.observation().id()).unwrap();
+            assert_eq!(detail.task.source, source);
+            assert_eq!(detail.task.scheduler_group, scheduler_group);
+            guard.finish("cancelled", None, None);
+        }
     }
 
     #[tokio::test]
@@ -1236,7 +1290,7 @@ mod tests {
             processor
                 .process(SegmentInfo::new(raw.clone(), None, None, 0), async {})
                 .unwrap();
-            let UploaderMessage::SegmentEvent(segments, _) = messages.try_recv().unwrap();
+            let (segments, _, _) = messages.try_recv().unwrap().into_parts();
             drop(processor);
             let upload_calls = std::sync::atomic::AtomicUsize::new(0);
             let result = pipeline_upload_videos(segments, &[], &get_all_plugins(), &ctx, |_| {
@@ -1581,8 +1635,14 @@ impl UActor {
     ///
     /// 同时处理的消息数不超过上传池容量，容量调整后立即生效。
     pub(crate) async fn run(self) {
+        let _drain = QueuedUploadDrain(self.receiver.clone());
         run_in_slots(self.receiver, self.slots, handle_message).await
     }
+}
+
+struct QueuedUploadDrain(Receiver<UploaderMessage>);
+impl Drop for QueuedUploadDrain {
+    fn drop(&mut self) { while let Ok(message) = self.0.try_recv() { drop(message); } }
 }
 
 /// 按到达顺序取出消息，占到一个槽位后交给 `handle` 在独立任务里处理，处理完归还槽位。
@@ -1623,8 +1683,10 @@ fn report_task_exit(result: Result<(), JoinError>) {
 /// # 参数
 /// * `msg` - 要处理的上传消息
 async fn handle_message(msg: UploaderMessage) {
-    match msg {
-        UploaderMessage::SegmentEvent(rx, ctx) => {
+    let (rx, ctx, guard) = msg.into_parts();
+    let observation = guard.as_ref().map(TaskGuard::observation);
+    let handle = async {
+            if let Some(task) = &observation { task.phase("initializing"); }
             ctx.change_status(Stage::Upload, WorkerStatus::Pending)
                 .await;
             let inspect = rx.inspect(|f| {
@@ -1666,8 +1728,10 @@ async fn handle_message(msg: UploaderMessage) {
                 info!(url=ctx.live_streamer().url, result=?result, "后处理执行完毕：Finished processing segment event");
             }
             ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
-        }
-    }
+            result
+    };
+    let result = match &observation { Some(task) => task.scope(handle).await, None => handle.await };
+    if let Some(guard) = guard { guard.finish_result(&result); }
 }
 
 /// 上传消息枚举
@@ -1676,6 +1740,27 @@ async fn handle_message(msg: UploaderMessage) {
 pub enum UploaderMessage {
     /// 分段事件消息，包含事件、接收器和工作器
     SegmentEvent(Receiver<SegmentInfo>, Context),
+    ObservedSegmentEvent(Receiver<SegmentInfo>, Context, TaskGuard),
+}
+
+impl UploaderMessage {
+    pub(crate) fn segment_event(rx: Receiver<SegmentInfo>, ctx: Context) -> Self {
+        match observe_context(&ctx, "automatic", "automatic-pool", true) {
+            Some(guard) => Self::ObservedSegmentEvent(rx, ctx, guard),
+            None => Self::SegmentEvent(rx, ctx),
+        }
+    }
+    pub(crate) fn into_parts(self) -> (Receiver<SegmentInfo>, Context, Option<TaskGuard>) {
+        match self { Self::SegmentEvent(rx,ctx) => (rx,ctx,None), Self::ObservedSegmentEvent(rx,ctx,guard) => (rx,ctx,Some(guard)) }
+    }
+}
+pub(crate) fn observe_context(ctx: &Context, source: &str, group: &str, fifo: bool) -> Option<TaskGuard> {
+    let template = ctx.upload_config().as_ref().filter(|template| !template.is_noop_uploader())?;
+    ctx.upload_observations().map(|registry| registry.register(NewTask {
+        source, scheduler_group: group, title: &ctx.streamer_info().title,
+        streamer_name: Some(&ctx.live_streamer().remark), session_id: Some(ctx.id()),
+        template_name: Some(&template.template_name), fifo,
+    }))
 }
 
 #[cfg(test)]

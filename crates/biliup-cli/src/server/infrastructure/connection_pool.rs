@@ -367,6 +367,8 @@ fn hex_lower(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{ConnectionManager, ConnectionPool, crlf_checksum, hex_lower};
+    use sqlx::migrate::Migrator;
+    use std::borrow::Cow;
 
     #[cfg(unix)]
     #[tokio::test]
@@ -509,6 +511,38 @@ mod tests {
                 16,
                 "fca49cb3ddd283c376835c11fe3b3c57628d042eafaca6caceb5c7068a885aa6da8f7fcdc90d17452d28aff5364d651c",
             ),
+            (
+                17,
+                "6de2e261e50f004a43bae845875d540879e09576a7ee2a5c2b221161bd0b8334a80887dc7d2cad980a58e85ac0328e9e",
+            ),
+            (
+                18,
+                "6268fc6d7b0391aaf477e1170b7945903a2bd65703bb8749bf12833fcab8ec024044b64c56962594192c4ff4bc95797f",
+            ),
+            (
+                19,
+                "27b2981cd7fd93888ba7486463abe83c15e3efb8952d96ef9a2657c5f4cabf8e79c69cdd5b4ab3f9cbacb6904c388ce3",
+            ),
+            (
+                20,
+                "5d8d911381b19daed2042c3d83444b07e91fe9a60bc33f3c9f0e17363a83ecc8b3069f67641225d70d89ba6d19587d39",
+            ),
+            (
+                21,
+                "ff62a160c58d0611278de6d1aa89fbba993848b7d0196b0053e297d651205ac2fcf83de231d5745b1259a38ee0e35925",
+            ),
+            (
+                22,
+                "769e47ba93f09a912a7adb07caad161cbc5e85dfc689ea04b4d03deb5f054b8c974ce1814a6117bb507c56825638d0b2",
+            ),
+            (
+                23,
+                "edb74d9399b0b816a06e769cf2b7933b4e8d908110147ad03bb181bf329b5c594a4389e78f467734a8f42a1db5efaede",
+            ),
+            (
+                24,
+                "aed4cc34c40b0f63b393e3296d27cea1465bb03ae5be1e8b69f089bf904398dc536a8dd6b2f1cca141d6a9d73274c555",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -575,7 +609,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            (1..=16).collect::<Vec<_>>(),
+            (1..=24).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
         let embedded = sqlx::migrate!();
@@ -606,6 +640,176 @@ mod tests {
             .fetch_all(&pool)
             .await
             .expect("迁移 5 必须已应用");
+    }
+
+    /// Migration 20 must upgrade a real version-19 database and clear fabricated
+    /// finish times only for cancelled jobs that have no recorded start time.
+    #[tokio::test]
+    async fn upgrade_from_migration_19_clears_only_unstarted_cancelled_timestamps() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::connect(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let embedded = sqlx::migrate!();
+        let through_19 = Migrator {
+            migrations: Cow::Owned(
+                embedded
+                    .iter()
+                    .filter(|migration| migration.version <= 19)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        through_19.run(&pool).await.unwrap();
+
+        let session_id: i64 = sqlx::query_scalar(
+            "INSERT INTO stream_sessions(name,url,title,date,live_cover_path) \
+             VALUES('migration-test','https://example.test','test','2026-10-11','') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        for (state, started_at, updated_at) in [
+            ("cancelled", None, 1000),
+            ("cancelled", Some(1500_i64), 2000),
+            ("ready", None, 3000),
+            ("failed", None, 4000),
+        ] {
+            sqlx::query(
+                "INSERT INTO render_jobs(session_id,state,phase,spec_json,created_at,updated_at,started_at,finished_at) \
+                 VALUES(?, ?, ?, '{}', ?, ?, ?, ?)",
+            )
+            .bind(session_id)
+            .bind(state)
+            .bind(state)
+            .bind(updated_at)
+            .bind(updated_at)
+            .bind(started_at)
+            .bind(updated_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("a version-19 database must upgrade without checksum mismatch");
+        let timestamps: Vec<(String, Option<i64>)> =
+            sqlx::query_as("SELECT state, finished_at FROM render_jobs ORDER BY id")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            timestamps,
+            vec![
+                ("cancelled".into(), None),
+                ("cancelled".into(), Some(2000)),
+                ("ready".into(), Some(3000)),
+                ("failed".into(), Some(4000)),
+            ]
+        );
+        let applied: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM _sqlx_migrations WHERE version = 20 AND success = TRUE",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(applied, 1);
+    }
+
+    #[tokio::test]
+    async fn upgrade_from_migration_20_seeds_monotonic_session_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::connect(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let embedded = sqlx::migrate!();
+        let through_20 = Migrator {
+            migrations: Cow::Owned(
+                embedded
+                    .iter()
+                    .filter(|migration| migration.version <= 20)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        };
+        through_20.run(&pool).await.unwrap();
+        for id in [12_i64, 95] {
+            sqlx::query(
+                "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+                 VALUES(?, 'legacy', 'https://example.test', 'legacy', '2026-10-11', '')",
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        pool.close().await;
+
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .expect("a version-20 database must apply migration 21");
+        let applied: Vec<i64> =
+            sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        assert_eq!(applied, (1..=24).collect::<Vec<_>>());
+        let seeded: Vec<i64> = sqlx::query_scalar("SELECT id FROM stream_session_ids ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(seeded, vec![12, 95]);
+        let after_seed: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(after_seed, 96);
+
+        // Legacy writers that still insert into stream_sessions must advance the durable
+        // reservation sequence before the next open_session-style allocation.
+        sqlx::query(
+            "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+             VALUES(120, 'legacy', 'https://example.test', 'legacy', '2026-10-11', '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let reserved: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(reserved, 121);
+        sqlx::query(
+            "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
+             VALUES(?, 'new', 'https://example.test', 'new', '2026-10-11', '')",
+        )
+        .bind(reserved)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM stream_sessions WHERE id = ?")
+            .bind(reserved)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let after_delete: i64 =
+            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            after_delete, 122,
+            "deleting the largest session must not reuse its ID"
+        );
     }
 
     /// v1.2.5 起的 Windows 发布包（以及 Windows 本地构建）建立的库：内容与当前完全一致，
@@ -807,7 +1011,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=16).collect::<Vec<_>>());
+        assert_eq!(versions, (1..=24).collect::<Vec<_>>());
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",

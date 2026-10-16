@@ -1,6 +1,9 @@
 # 版本控制与 CI
 .git
-.github
+.github/*
+!.github/scripts
+.github/scripts/*
+!.github/scripts/build-render-tools.sh
 
 # 构建产物（镜像内会重新构建）
 target
@@ -16,6 +19,11 @@ data
 *.sqlite3
 *.sqlite3-*
 cookies.json
+*.flv
+*.mp4
+*.part
+*.unmasked
+*.xml
 *.log
 .env.local
 .env.*.local

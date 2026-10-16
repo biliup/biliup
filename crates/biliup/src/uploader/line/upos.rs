@@ -13,7 +13,12 @@ use std::time::Duration;
 
 use crate::client::StatelessClient;
 use crate::uploader::bilibili::Video;
+use crate::uploader::line::UploadObserver;
 use crate::{retry, retry_with_config};
+
+#[cfg(test)]
+#[path = "upos_observation_tests.rs"]
+mod observation_tests;
 
 pub struct Upos {
     client: StatelessClient,
@@ -103,6 +108,20 @@ impl Upos {
         F: Stream<Item = Result<(B, usize)>> + 'a,
         B: Into<Body> + Clone,
     {
+        self.upload_stream_with_observer(stream, total_size, limit, None).await
+    }
+
+    pub(crate) async fn upload_stream_with_observer<'a, F, B>(
+        &'a self,
+        stream: F,
+        total_size: u64,
+        limit: usize,
+        observer: Option<&'a dyn UploadObserver>,
+    ) -> Result<impl Stream<Item = Result<(UposPart, usize)>> + 'a>
+    where
+        F: Stream<Item = Result<(B, usize)>> + 'a,
+        B: Into<Body> + Clone,
+    {
         // let mut parts = Vec::new();
 
         // let total_size = file.metadata()?.len();
@@ -120,6 +139,9 @@ impl Upos {
             .enumerate()
             .map(move |(i, chunk)| async move {
                 let (chunk, len) = chunk?;
+                if observer.is_some_and(|observer| !observer.can_upload()) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
                 // let len = chunk.len();
                 // println!("{}", len);
                 let params = Protocol {
@@ -132,23 +154,34 @@ impl Upos {
                     start: i as u64 * chunk_size as u64,
                     end: i as u64 * chunk_size as u64 + len as u64,
                 };
-                retry(|| async {
-                    let response = client
-                        .put(url)
-                        .header(
-                            "X-Upos-Auth",
-                            header::HeaderValue::from_str(&self.bucket.auth)?,
-                        )
-                        .query(&params)
-                        .timeout(Duration::from_secs(240))
-                        .header(CONTENT_LENGTH, len)
-                        .body(chunk.clone())
-                        .send()
-                        .await?;
-                    response.error_for_status()?;
-                    Ok::<_, Kind>(())
+                let mut attempts = 0;
+                retry(|| {
+                    if attempts > 0 {
+                        if let Some(observer) = observer { observer.chunk_retry(i + 1); }
+                    }
+                    attempts += 1;
+                    async {
+                        let response = client
+                            .put(url)
+                            .header(
+                                "X-Upos-Auth",
+                                header::HeaderValue::from_str(&self.bucket.auth)?,
+                            )
+                            .query(&params)
+                            .timeout(Duration::from_secs(240))
+                            .header(CONTENT_LENGTH, len)
+                            .body(chunk.clone())
+                            .send()
+                            .await?;
+                        response.error_for_status()?;
+                        Ok::<_, Kind>(())
+                    }
                 })
                 .await?;
+
+                if observer.is_some_and(|observer| !observer.chunk_confirmed_range(i + 1, params.start, len)) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
 
                 Ok::<_, Kind>((
                     UposPart {

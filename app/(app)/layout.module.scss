@@ -313,6 +313,12 @@
   cursor: pointer;
 }
 
+.burgerOpen {
+  left: auto;
+  right: 12px;
+  z-index: 1001;
+}
+
 .burger svg {
   width: 18px;
   height: 18px;

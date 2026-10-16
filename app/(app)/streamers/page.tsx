@@ -120,11 +120,11 @@ export default function StreamersPage() {
   }
 
   const handleOk = async (values: any) => {
-    // 提交:表单 {cmd, value} → 后端 HookStep
-    if (values?.postprocessor) {
-      values.postprocessor = formListToHookStep(values.postprocessor)
-    }
     try {
+      // 提交:表单 {cmd, value} → 后端 HookStep
+      if (values?.postprocessor) {
+        values.postprocessor = formListToHookStep(values.postprocessor)
+      }
       await trigger(values)
     } catch (e: any) {
       Notification.error({
@@ -140,10 +140,10 @@ export default function StreamersPage() {
     delete values.status
     delete values.statusTag
     delete values.upload_status
-    if (values?.postprocessor) {
-      values.postprocessor = formListToHookStep(values.postprocessor)
-    }
     try {
+      if (values?.postprocessor) {
+        values.postprocessor = formListToHookStep(values.postprocessor)
+      }
       await updateStreamers(values)
     } catch (e: any) {
       Notification.error({

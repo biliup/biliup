@@ -1,5 +1,6 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+import { mutate } from 'swr'
 import { Button, Checkbox, Empty, Popconfirm, Radio, RadioGroup, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconBulb, IconClose, IconScissors, IconTick } from '@douyinfe/semi-icons'
 import {
@@ -13,6 +14,8 @@ import {
   jobHints,
   type Suggestion,
   type SuggestionState,
+  useSessionAutoClip,
+  suggestionsUrl,
 } from '@/app/lib/auto-clip'
 import { formatSessionTime, ReportedError } from '@/app/lib/markers'
 import { formatPrecise, formatSpan } from '@/app/lib/sessions'
@@ -190,6 +193,7 @@ function SuggestionRow({
           {formatPrecise(range.in)} → {formatPrecise(range.out)} · {formatSpan(range.out - range.in)}
           {edited ? '（按当前选段）' : ''}
         </span>
+        {s.view_session_id != null && s.view_session_id !== s.session_id ? <span className={styles.rowMeta}>来源场次 #{s.session_id}</span> : null}
         {s.reason ? <span className={styles.sgReason}>{s.reason}</span> : null}
         <Evidence s={s} />
         <StateLine state={state} s={s} nowMs={nowMs} onOpenClip={onOpenClip} />
@@ -293,6 +297,25 @@ function JobArea({
   )
 }
 
+function SourceJobArea({ source, viewSessionId, availability, canEdit }: {
+  source: { session_id: number; recording: boolean }
+  viewSessionId: number
+  availability: AutoClipAvailability
+  canEdit: boolean
+}) {
+  const { data } = useSessionAutoClip(source.session_id)
+  const wasActive = useRef(false)
+  const active = isActive(data?.job ?? null)
+  useEffect(() => {
+    if (wasActive.current && !active) void mutate(suggestionsUrl(viewSessionId))
+    wasActive.current = active
+  }, [active, viewSessionId])
+  return <div>
+    <div className={styles.groupJobTitle}>来源场次 #{source.session_id}</div>
+    <JobArea sessionId={source.session_id} job={data?.job ?? null} availability={availability} recording={source.recording} canEdit={canEdit} />
+  </div>
+}
+
 export function SuggestionsPanel({
   sessionId,
   suggestions,
@@ -301,6 +324,7 @@ export function SuggestionsPanel({
   job,
   availability,
   recording,
+  sources,
   activeSuggestion,
   selection,
   canEdit,
@@ -318,6 +342,7 @@ export function SuggestionsPanel({
   job: AutoClipJob | null
   availability: AutoClipAvailability
   recording: boolean
+  sources?: { session_id: number; recording: boolean }[]
   activeSuggestion: number | null
   selection: Selection
   canEdit: boolean
@@ -351,12 +376,15 @@ export function SuggestionsPanel({
         ? '正在生成，做完后候选会列在这里'
         : suggestions.length > 0
           ? `待处理的候选都处理完了（已处理 ${handled} 个）`
+          : sources
+            ? '候选按上方来源场次生成，完成后统一显示在这里'
           : job?.state === 'done'
             ? '这次没有挑出候选。可以换个模型、补上热词后重新生成'
             : '还没有候选。「生成候选」会让模型从这一场的语音、弹幕和截图里挑出值得剪的片段'
   return (
     <>
-      <JobArea sessionId={sessionId} job={job} availability={availability} recording={recording} canEdit={canEdit} />
+      {sources ? <div className={styles.groupJobs}>{sources.map(source => <SourceJobArea key={source.session_id} source={source} viewSessionId={sessionId} availability={availability} canEdit={canEdit} />)}</div>
+        : <JobArea sessionId={sessionId} job={job} availability={availability} recording={recording} canEdit={canEdit} />}
       {suggestions.length > 0 ? (
         <div className={styles.sgBar} role="toolbar" aria-label="候选筛选">
           <span className={styles.rowMeta}>

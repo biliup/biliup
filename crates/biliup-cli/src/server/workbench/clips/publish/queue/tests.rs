@@ -110,10 +110,15 @@ struct Env {
     exports: Arc<ClipExports>,
     fake: Arc<Fake>,
     publisher: Arc<ClipPublisher>,
+    observations: Option<Arc<UploadObservations>>,
 }
 
 /// 录完的一场（三段 FLV），主播绑定了一个选了「自制」的模板。
 async fn env() -> Env {
+    env_with_upload_observations(false, true).await
+}
+
+async fn env_with_upload_observations(observe: bool, spawn: bool) -> Env {
     let (dir, pool, session, _) = flv_session().await;
     let template: i64 = sqlx::query_scalar(
         r#"INSERT INTO uploadstreamers (template_name, title, tid, copyright, tags, user_cookie, extra_fields)
@@ -142,12 +147,19 @@ async fn env() -> Env {
         delay: Duration::from_millis(30),
         ..Default::default()
     });
-    let publisher = Arc::new(ClipPublisher::new(
+    let observations = if observe {
+        let observations = UploadObservations::new(pool.clone());
+        observations.initialize().await.unwrap();
+        Some(observations)
+    } else { None };
+    let mut publisher = ClipPublisher::new(
         pool.clone(),
         exports.clone(),
         Arc::new(fake.clone()),
-    ));
-    publisher.spawn();
+    );
+    if let Some(observations) = &observations { publisher = publisher.with_observations(observations.clone()); }
+    let publisher = Arc::new(publisher);
+    if spawn { publisher.spawn(); }
     Env {
         _dir: dir,
         pool,
@@ -155,6 +167,7 @@ async fn env() -> Env {
         exports,
         fake,
         publisher,
+        observations,
     }
 }
 
@@ -729,4 +742,24 @@ async fn bookkeeping_failures_are_shown_and_block_publishing_again() {
         .unwrap_err();
     assert!(matches!(refused, EnqueueError::Conflict(ref m) if m.contains(UNKNOWN_HINT)));
     assert_eq!(lock(&env.fake.submitted).len(), 1);
+}
+
+#[tokio::test]
+async fn clip_task_is_registered_when_enqueued_with_real_queue_order() {
+    let env = env_with_upload_observations(true, false).await;
+    let clip = env.clip(1_000, 2_000, "first").await;
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    let id = lock(&env.publisher.queue).jobs.iter().find(|queued| queued.view.id == job.id)
+        .and_then(|queued| queued.observation.as_ref()).unwrap().observation().id().to_owned();
+    let task = env.observations.as_ref().unwrap().detail(&id).await.unwrap().unwrap();
+    assert_eq!(task.task.source, "clip");
+    assert_eq!(task.task.scheduler_group, "clip-publish");
+    assert_eq!(task.task.state, "queued");
+    assert_eq!(task.task.queue_position, Some(1));
+    lock(&env.publisher.queue).jobs.iter_mut().find(|queued| queued.view.id == job.id).unwrap().view.state = JobState::Failed;
+    env.publisher.retry(job.id).unwrap();
+    let retried = env.observations.as_ref().unwrap().detail(&id).await.unwrap().unwrap();
+    assert_eq!(retried.task.id, id);
+    assert!(retried.task.order > task.task.order);
+    assert_eq!(retried.task.state, "queued");
 }

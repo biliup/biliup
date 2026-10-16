@@ -959,7 +959,33 @@ mod tests {
         assert!(!current_path.exists());
         assert!(new_path.exists());
         let content = std::fs::read_to_string(&new_path).unwrap();
-        assert!(content.contains("<i>"));
+        // The recording origin is stored on the root element. Check the XML
+        // structure rather than the old literal spelling of its opening tag.
+        let mut reader = quick_xml::Reader::from_str(&content);
+        let mut root_seen = false;
+        let mut root_closed = false;
+        loop {
+            match reader.read_event().unwrap() {
+                quick_xml::events::Event::Start(root) => {
+                    assert_eq!(root.name().as_ref(), b"i");
+                    assert!(!root_seen, "an empty segment must contain only its root");
+                    let origin = root
+                        .attributes()
+                        .map(|attr| attr.unwrap())
+                        .find(|attr| attr.key.as_ref() == b"recording_start_time_ms")
+                        .expect("rolling preserves the XML clock origin");
+                    assert!(origin.unescape_value().unwrap().parse::<i64>().unwrap() > 0);
+                    root_seen = true;
+                }
+                quick_xml::events::Event::End(root) => {
+                    assert_eq!(root.name().as_ref(), b"i");
+                    root_closed = true;
+                }
+                quick_xml::events::Event::Eof => break,
+                _ => {}
+            }
+        }
+        assert!(root_seen && root_closed, "rolling finalizes the empty XML");
         let _ = std::fs::remove_dir_all(dir);
     }
 

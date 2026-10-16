@@ -6,6 +6,7 @@ import { IconCustomerSupport, IconRefresh, IconClear, IconSave } from '@douyinfe
 import PageHeader from '../components/PageHeader'
 import dc from '@/app/ui/data-card.module.scss'
 import { revalidateMe } from '@/app/lib/api-streamer'
+import { appendLogMessage } from '@/app/lib/log-buffer'
 
 // 日志内容组件
 interface LogContentProps {
@@ -113,7 +114,7 @@ export default function LogViewer() {
     }
 
     ws.onmessage = (event) => {
-      setLogs((prev) => [...prev, event.data])
+      setLogs((prev) => appendLogMessage(prev, event.data))
     }
 
     ws.onerror = () => {

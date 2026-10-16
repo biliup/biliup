@@ -1,5 +1,5 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { LiveStreamerEntity, StreamerInfo } from '@/app/lib/api-streamer'
 import { streamerStatusMeta, uploadStatusTag, platformName } from '@/app/lib/status'
@@ -47,9 +47,8 @@ function platTint(color: string): string {
 }
 
 /**
- * 录制中的直播间封面缩略图(16:9,懒加载)。
- * 加载失败就整块消失,卡片回到没有封面时的样式;加载中显示占位底色。
- * 调用方用 key={src} 挂载,封面地址变化时状态自然重置。
+ * 直播间封面缩略图(16:9,懒加载)，离线时读取最近有效封面。
+ * 更新失败时保留已经显示的图片；没有历史图片时保留占位，每分钟重试。
  * 传入 onPreview 时封面可点击,中央显示播放标记,点击进入直播预览页。
  */
 export function LiveCover({
@@ -64,12 +63,20 @@ export function LiveCover({
   onPreview?: (e: React.MouseEvent | React.KeyboardEvent) => void
   /** 叠在封面底部的一层（码率 sparkline）；点击会冒泡到封面本身的 onClick */
   overlay?: React.ReactNode
-  /** 加载结果回调：父组件据此决定 overlay 放不放得下（加载失败整块消失） */
+  /** 加载结果回调：父组件据此决定是否叠加码率曲线 */
   onStateChange?: (state: 'ok' | 'error') => void
 }) {
-  const [state, setState] = useState<'loading' | 'ok' | 'error'>('loading')
-  if (state === 'error') return null
-  const clickable = !!onPreview && state === 'ok'
+  const [retryAt, setRetryAt] = useState(0)
+  const requestSrc = retryAt ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryAt}` : src
+  const [result, setResult] = useState<{ src: string; state: 'ok' | 'error' } | null>(null)
+  const [lastGood, setLastGood] = useState<string | null>(null)
+  const state = result?.src === requestSrc ? result.state : 'loading'
+  useEffect(() => {
+    if (state === 'loading') return
+    const timer = setTimeout(() => setRetryAt(Date.now()), state === 'error' ? 60_000 : 300_000)
+    return () => clearTimeout(timer)
+  }, [state, requestSrc])
+  const clickable = !!onPreview
   return (
     <figure
       className={`${styles.cover} ${clickable ? styles.coverClickable : ''}`}
@@ -89,21 +96,28 @@ export function LiveCover({
           : undefined
       }
     >
+      {lastGood && lastGood !== requestSrc ? (
+        <Image src={lastGood} alt={alt} fill sizes="(max-width: 600px) 100vw, 400px" style={{ opacity: 1 }} />
+      ) : null}
       <Image
-        src={src}
+        key={requestSrc}
+        src={requestSrc}
         alt={alt}
         fill
         sizes="(max-width: 600px) 100vw, 400px"
         loading="lazy"
+        style={{ opacity: state === 'ok' ? 1 : 0 }}
         onLoad={() => {
-          setState('ok')
+          setResult({ src: requestSrc, state: 'ok' })
+          setLastGood(requestSrc)
           onStateChange?.('ok')
         }}
         onError={() => {
-          setState('error')
-          onStateChange?.('error')
+          setResult({ src: requestSrc, state: 'error' })
+          onStateChange?.(lastGood ? 'ok' : 'error')
         }}
       />
+      {!lastGood && state === 'error' ? <span className={styles.coverPlaceholder}>暂无可用封面</span> : null}
       {clickable ? (
         <span className={styles.coverPlay} aria-hidden="true">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
@@ -166,8 +180,8 @@ export default function StreamerCard({
 
   const lastRec = info?.date && !live ? timeAgo(info.date) : null
 
-  // 录制中才有封面 / 头像 / 速率;图片走同源代理,避开图片 CDN 的 Referer 校验
-  const coverSrc = live ? liveImageUrl(streamer.id, 'cover', streamer.live_cover_url) : null
+  // 封面使用最近一次有效的本地缓存，主播离线时仍可展示；头像与实时速率只在录制时显示
+  const coverSrc = liveImageUrl(streamer.id, 'cover', streamer.live_cover_url)
   const avatarSrc = live ? liveImageUrl(streamer.id, 'avatar', streamer.live_avatar_url) : null
   const rate = live ? formatRate(streamer.live_bytes_per_sec) : null
 
@@ -232,7 +246,6 @@ export default function StreamerCard({
       {/* 录制中:直播间封面(可预览时点击即打开播放器) */}
       {coverSrc ? (
         <LiveCover
-          key={coverSrc}
           src={coverSrc}
           alt={`${name} 的直播间封面`}
           onPreview={previewable ? (e) => openLivePage(streamer.id, e) : undefined}

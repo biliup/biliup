@@ -113,6 +113,118 @@ fn retention(pool: &ConnectionPool, keep_for_ms: i64) -> Retention {
     }
 }
 
+async fn group(pool: &ConnectionPool, members: &[(i64, i64)]) -> i64 {
+    let group: i64 = sqlx::query_scalar(
+        "INSERT INTO stream_sessions(name, url, title, date, live_cover_path, kind)
+         VALUES ('a', 'https://a', 'merged', '2026-09-24 00:00:00', '', 'group') RETURNING id",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for (ordinal, (source, offset)) in members.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO session_group_members(group_session_id, source_session_id, ordinal, offset_ms)
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(group)
+        .bind(source)
+        .bind(ordinal as i64)
+        .bind(offset)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    group
+}
+
+#[tokio::test]
+async fn group_pins_protect_cross_source_ranges_and_skip_the_gap() {
+    let (dir, pool) = setup().await;
+    let a = session(&pool, 1_000_000).await;
+    let b = session(&pool, 1_002_000).await;
+    segment(&pool, dir.path(), a, "a.flv", 0, Some(1000), 10).await;
+    let (tail, tail_path) = segment(&pool, dir.path(), b, "b.flv", 0, None, 10).await;
+    let group = group(&pool, &[(a, 0), (b, 2000)]).await;
+    let mut conn = pool.acquire().await.unwrap();
+    pin(&mut conn, "clip:group", group, 900, 2100)
+        .await
+        .unwrap();
+    assert_eq!(pins(&pool, a).await, [1]);
+    assert_eq!(pins(&pool, b).await, [1]);
+    let stored: (i64, i64, i64) = sqlx::query_as(
+        "SELECT session_id, from_ms, to_ms FROM segment_pins WHERE owner = 'clip:group'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (group, 900, 2100), "引用保留合并场次坐标");
+
+    pin(&mut conn, "clip:group", group, 1500, 1600)
+        .await
+        .unwrap();
+    assert_eq!(pins(&pool, a).await, [0]);
+    assert_eq!(pins(&pool, b).await, [0]);
+    pin(&mut conn, "clip:group", group, 2000, 4000)
+        .await
+        .unwrap();
+    finish(&pool, tail, &tail_path, 1000, SegmentState::Finished).await;
+    segment(&pool, dir.path(), b, "b-next.flv", 1000, None, 10).await;
+    assert_eq!(pins(&pool, b).await, [1, 1], "来源的新分段也应用组引用");
+    assert!(unpin(&mut conn, "clip:group").await.unwrap());
+    assert_eq!(pins(&pool, b).await, [0, 0]);
+}
+
+#[tokio::test]
+async fn group_and_source_retention_each_protect_the_real_files() {
+    let (dir, pool) = setup().await;
+    let now = now_ms();
+    let a = session(&pool, now - 10_000).await;
+    let b = session(&pool, now - 5_000).await;
+    let (id, path) = segment(&pool, dir.path(), a, "kept.flv", 0, Some(1000), 10).await;
+    let group = group(&pool, &[(a, 0), (b, 5000)]).await;
+    set_session_retention(&pool, group, Some(now + HOUR))
+        .await
+        .unwrap();
+    assert_eq!(
+        remove(&retention(&pool, 0), &[&path]).await.unwrap(),
+        [Disposal::Deferred]
+    );
+    assert_eq!(sweep_pending(&pool, now).await.unwrap(), 0);
+    set_session_retention(&pool, a, Some(now + 2 * HOUR))
+        .await
+        .unwrap();
+    set_session_retention(&pool, group, None).await.unwrap();
+    assert_eq!(sweep_pending(&pool, now + HOUR).await.unwrap(), 0);
+    assert!(path.exists(), "取消组保留不取消来源保留");
+    assert_eq!(sweep_pending(&pool, now + 2 * HOUR).await.unwrap(), 1);
+    assert_eq!(state(&pool, id).await, "deleted");
+    assert!(gone(&path));
+}
+
+#[tokio::test]
+async fn low_disk_orders_group_retention_with_other_references() {
+    let (dir, pool) = setup().await;
+    let a = session(&pool, 1_000_000).await;
+    let b = session(&pool, 2_000_000).await;
+    let c = session(&pool, 3_000_000).await;
+    let (_, kept) = segment(&pool, dir.path(), a, "kept.flv", 0, Some(1000), 1000).await;
+    let (_, unreferenced) = segment(&pool, dir.path(), c, "later.flv", 0, Some(1000), 1000).await;
+    let group = group(&pool, &[(a, 0), (b, 2000)]).await;
+    set_session_retention(&pool, group, Some(i64::MAX))
+        .await
+        .unwrap();
+    // Synthetic free-space probe requires exactly one deletion.
+    let mut probes = 0;
+    let deleted = enforce_free_space(&pool, 1, now_ms(), |_| {
+        probes += 1;
+        Ok(if probes == 1 { 0 } else { 1 })
+    })
+    .await
+    .unwrap();
+    assert_eq!(deleted, 1);
+    assert!(kept.exists() && gone(&unreferenced));
+}
+
 #[tokio::test]
 async fn deletion_keeps_files_when_the_retention_database_is_unavailable() {
     let (dir, pool) = setup().await;
@@ -915,4 +1027,38 @@ async fn default_config_sweep_touches_nothing() {
 #[test]
 fn available_space_reports_the_current_disk() {
     assert!(available_space(Path::new(".")).unwrap() > 0);
+}
+
+#[tokio::test]
+async fn render_sources_survive_low_disk_and_remove_until_worker_finishes() {
+    let (dir, pool) = setup().await;
+    let s = session(&pool, 1_000_000).await;
+    let (id, path) = segment(&pool, dir.path(), s, "render.flv", 0, Some(1000), 1000).await;
+    let jid: i64 = sqlx::query_scalar("INSERT INTO render_jobs(session_id,state,phase,spec_json,created_at,updated_at) VALUES(?,'running','encoding','{}',0,0) RETURNING id")
+        .bind(s).fetch_one(&pool).await.unwrap();
+    sqlx::query("INSERT INTO render_sources(job_id,segment_id) VALUES(?,?)")
+        .bind(jid)
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        enforce_free_space(&pool, 10_000, now_ms(), |_| Ok(0))
+            .await
+            .unwrap(),
+        0
+    );
+    assert!(path.exists());
+    let result = remove(&Retention::without_delay(pool.clone()), &[path.as_path()])
+        .await
+        .unwrap();
+    assert_eq!(result, vec![Disposal::Deferred]);
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 0);
+    sqlx::query("UPDATE render_jobs SET state='failed' WHERE id=?")
+        .bind(jid)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
+    assert!(!path.exists());
 }

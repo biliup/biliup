@@ -77,6 +77,10 @@ jobs:
         EOF
         ls -l "$dest"
         rm ffmpeg.zip
+    # 字体与第三方声明；弹幕转换已静态链接进桌面程序，不再打包 DanmakuFactory.exe
+    - name: Prepare render tools
+      shell: bash
+      run: bash .github/scripts/build-render-tools.sh tauri-app/src-tauri/render-tools
     - name: Render download notes
       shell: bash
       run: |

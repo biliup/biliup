@@ -57,7 +57,7 @@ email = "aaranxu@outlook.com"
 is_netlify = false
 
 # Set HTML file language
-language_code = "en-US"
+language_code = "zh-CN"
 
 # Set theme-color meta tag for Chrome browser
 theme_color = "#fff"

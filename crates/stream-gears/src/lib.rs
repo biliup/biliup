@@ -546,6 +546,17 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
         .map(|x| x.extract::<String>())
         .collect::<PyResult<Vec<_>>>()?;
 
+    // A danmaku conversion started by the server (see `danmaku_launcher`):
+    // nothing else runs in that process.
+    if let Some(code) = py.detach(|| biliup_cli::danmaku_worker::run_if_requested(&args)) {
+        return if code == 0 {
+            Ok(())
+        } else {
+            Err(PySystemExit::new_err(code))
+        };
+    }
+    biliup_cli::danmaku_worker::set_launcher(danmaku_launcher(py));
+
     let cli = match biliup_cli::entry::parse(args) {
         Ok(cli) => cli,
         Err(e) => {
@@ -563,6 +574,28 @@ pub fn main_loop(py: Python<'_>) -> PyResult<()> {
     };
 
     py.detach(|| server::run(cli).map_err(|e| PyRuntimeError::new_err(format!("{e:?}"))))
+}
+
+/// Here `current_exe()` is the Python interpreter, so the danmaku worker is
+/// `sys.executable` loading this extension module's own file.
+fn danmaku_launcher(py: Python<'_>) -> biliup_cli::danmaku_worker::Launcher {
+    let executable = py
+        .import("sys")
+        .and_then(|sys| sys.getattr("executable"))
+        .and_then(|value| value.extract::<Option<PathBuf>>())
+        .ok()
+        .flatten();
+    // The mixed layout installs this module as `stream_gears.stream_gears`;
+    // a bare build is the top-level `stream_gears`. Only a native file will do.
+    let module = ["stream_gears.stream_gears", "stream_gears"]
+        .into_iter()
+        .filter_map(|name| py.import(name).ok())
+        .filter_map(|module| module.getattr("__file__").ok()?.extract::<PathBuf>().ok())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "so" || extension == "pyd")
+        });
+    biliup_cli::danmaku_worker::Launcher::python(executable, module)
 }
 
 /// A Python module implemented in Rust.

@@ -30,9 +30,15 @@ use crate::server::api::live_preview::{
 };
 use crate::server::api::live_rates::{get_live_rates, ws_live_rates};
 use crate::server::api::markers::{create_marker, delete_marker, list_markers, update_marker};
+use crate::server::api::renders::{
+    cancel_render, create_render, delete_render_asset, download_render, get_render,
+    get_render_asset, get_render_font, get_render_recipe, list_all_renders, list_renders,
+    preview_render, put_render_recipe, render_assets_route, render_gpus, render_tools,
+    retry_render,
+};
 use crate::server::api::session_retention::patch_session;
 use crate::server::api::sessions::{
-    get_session, get_session_keyframes, get_session_media, list_sessions,
+    delete_session, get_session, get_session_keyframes, get_session_media, list_sessions,
 };
 use crate::server::api::system_stats::get_system_stats;
 use crate::server::infrastructure::service_register::ServiceRegister;
@@ -50,6 +56,39 @@ pub(crate) const ALLOWED_LOG_FILES: &[&str] = &["ds_update.log", "download.log",
 /// 创建应用程序路由
 pub fn router(service_register: ServiceRegister) -> Router<()> {
     Router::new()
+        .route(
+            "/v1/activity-events",
+            get(crate::server::api::activity_events::list),
+        )
+        .route(
+            "/v1/files/location",
+            get(crate::server::api::files::location),
+        )
+        .route("/v1/files/reveal", post(crate::server::api::files::reveal))
+        .route(
+            "/v1/upload-queue",
+            get(crate::server::api::upload_queue::list),
+        )
+        .route(
+            "/v1/upload-queue/{id}",
+            get(crate::server::api::upload_queue::detail),
+        )
+        .route(
+            "/v1/session-merge-candidates",
+            get(crate::server::api::session_groups::list_candidates),
+        )
+        .route(
+            "/v1/session-merge-candidates/{id}/confirm",
+            post(crate::server::api::session_groups::confirm_candidate),
+        )
+        .route(
+            "/v1/session-merge-candidates/{id}/dismiss",
+            post(crate::server::api::session_groups::dismiss_candidate),
+        )
+        .route(
+            "/v1/session-groups",
+            post(crate::server::api::session_groups::create_group),
+        )
         // 主播管理相关路由
         .route(
             "/v1/streamers",
@@ -85,8 +124,11 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/live-rates", get(get_live_rates))
         // 切片工作台：场次、可落刀位置、DVR 回看（只按场次 id 寻址，不接受路径）
         .route("/v1/sessions", get(list_sessions))
-        // PATCH 是「保留这场」：改场次的 retain_until
-        .route("/v1/sessions/{id}", get(get_session).patch(patch_session))
+        // PATCH 是「保留这场」：改场次的 retain_until；DELETE 清除已结束场次的历史记录。
+        .route(
+            "/v1/sessions/{id}",
+            get(get_session).patch(patch_session).delete(delete_session),
+        )
         .route("/v1/sessions/{id}/keyframes", get(get_session_keyframes))
         .route("/v1/sessions/{id}/media", get(get_session_media))
         // 切片工作台：看直播时打的标记（只按场次 id、标记 id 寻址）
@@ -109,6 +151,34 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
         .route("/v1/clips/{cid}", get(get_clip))
         .route("/v1/clips/{cid}/export", post(export_clip))
         .route("/v1/clips/{cid}/download", get(download_clip))
+        // 录后编辑与合成：保存场次配置、按 ID 上传图片、创建不可变合成任务。
+        .route(
+            "/v1/sessions/{id}/render-recipe",
+            get(get_render_recipe).put(put_render_recipe),
+        )
+        .route(
+            "/v1/sessions/{id}/render-settings",
+            get(get_render_recipe).put(put_render_recipe),
+        )
+        .route("/v1/sessions/{id}/render-assets", render_assets_route())
+        .route(
+            "/v1/render-assets/{aid}",
+            get(get_render_asset).delete(delete_render_asset),
+        )
+        .route(
+            "/v1/sessions/{id}/renders",
+            get(list_renders).post(create_render),
+        )
+        .route("/v1/renders", get(list_all_renders))
+        .route("/v1/render-gpus", get(render_gpus))
+        .route("/v1/renders/{jid}", get(get_render).delete(cancel_render))
+        .route("/v1/renders/{jid}/cancel", post(cancel_render))
+        .route("/v1/renders/{jid}/retry", post(retry_render))
+        .route("/v1/renders/{jid}/download", get(download_render))
+        .route("/v1/sessions/{id}/render-preview", post(preview_render))
+        .route("/v1/render-tools", get(render_tools))
+        .route("/v1/render-capabilities", get(render_tools))
+        .route("/v1/render-fonts/{id}", get(get_render_font))
         // 切片工作台：发布（导出 → 上传 → 投稿；一律转载，来源默认直播间地址）
         .route("/v1/clips/{cid}/publish", post(publish_clip))
         .route("/v1/clips/{cid}/cover", cover_route())

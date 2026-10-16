@@ -215,6 +215,14 @@ impl Writer {
     }
 
     async fn run(mut self, mut rx: UnboundedReceiver<Event>) {
+        if matches!(store::session(&self.pool,self.target.session_id).await,Ok(Some(session)) if session.kind != "source")
+        {
+            warn!(
+                session = self.target.session_id,
+                "虚拟合并场次不能作为录制目标"
+            );
+            return;
+        }
         match store::begin_recording(&self.pool, self.target.session_id).await {
             Ok(start) => {
                 if start.resumed_after.is_some() {
@@ -430,6 +438,13 @@ impl Writer {
             gap,
         )
         .await?;
+        // File-open time is an estimate, not a source-site presentation clock.
+        // Preserve it separately from the gap-compressed session timeline.
+        sqlx::query("UPDATE segments SET recorded_at_ms = ? WHERE id = ?")
+            .bind(opened_at)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         self.register_live();
         if let Some(live) = &mut self.live {
             live.anchor(start_ms, opened_at);

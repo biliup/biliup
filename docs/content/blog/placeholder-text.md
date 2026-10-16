@@ -6,6 +6,9 @@ updated = 2021-04-10T09:19:42+00:00
 draft = false
 template = "blog/page.html"
 
+[extra]
+language_code = "en-US"
+
 [taxonomies]
 authors = ["Public"]
 

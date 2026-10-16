@@ -74,30 +74,20 @@ pub async fn update_streamer(
 
     let upload_config = get_upload_config(&services.pool, id).await?;
 
+    let worker = services.worker(streamer.clone(), upload_config);
+    if paused {
+        worker
+            .change_status(Stage::Download, WorkerStatus::Pause)
+            .await;
+    }
     services
         .managers
-        .add_room(services.worker(streamer.clone(), upload_config))
+        .add_room(worker)
         .await
         .ok_or(AppError::Unknown)?;
-    if paused {
-        keep_paused(&services.managers, id).await;
-    }
 
     info!(id = id, paused, "successfully update live streamers");
     Ok(streamer)
-}
-
-/// 把刚重建的房间恢复成暂停。先移出检测队列、再标暂停：监控循环从队列取房间时会把状态改成
-/// `Pending`，反过来做的话中间被取走就白标了；先移出的话，已被取走、正在检测的房间检测完看到
-/// 暂停既不开录也不放回队列（与 [`toggle_pause`] 一样）。
-async fn keep_paused(managers: &DownloadManager, id: i64) {
-    let Some(worker) = managers.get_room_by_id(id).await else {
-        return;
-    };
-    managers.make_waker(id).await;
-    worker
-        .change_status(Stage::Download, WorkerStatus::Pause)
-        .await;
 }
 
 /// 停止监控并删除主播，返回删掉的主播
@@ -127,7 +117,7 @@ pub async fn toggle_pause(managers: &DownloadManager, id: i64) {
             }
             WorkerStatus::Pause => {
                 w.change_status(Stage::Download, WorkerStatus::Idle).await;
-                managers.wake_waker(id).await;
+                managers.resume_room(id).await;
                 info!(url=?&w.live_streamer.url, "successfully start live streamers");
             }
             WorkerStatus::Pending => {
@@ -147,7 +137,6 @@ pub async fn toggle_pause(managers: &DownloadManager, id: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::api::live_media::ImageProxy;
     use crate::server::common::system_stats::SystemMonitor;
     use crate::server::config::Config;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
@@ -158,7 +147,7 @@ mod tests {
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use std::sync::{Arc, RwLock};
     use std::time::Duration;
-    use tokio::sync::mpsc;
+    use tokio::sync::{Semaphore, mpsc};
     use tracing_subscriber::EnvFilter;
     use tracing_subscriber::reload;
 
@@ -188,10 +177,23 @@ mod tests {
         _dir: tempfile::TempDir,
         services: ServiceRegister,
         probed: mpsc::UnboundedReceiver<String>,
+        probe_gate: Option<Arc<Semaphore>>,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            if let Some(gate) = &self.probe_gate {
+                gate.close();
+            }
+        }
     }
 
     /// 只装了 [`StuckPlatform`] 的服务，不会向任何真实平台发请求
     async fn fixture() -> Fixture {
+        fixture_with_probe_gate(None).await
+    }
+
+    async fn fixture_with_probe_gate(probe_gate: Option<Arc<Semaphore>>) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let db = dir.path().join("data.sqlite3");
         let pool = ConnectionManager::new_pool(db.to_str().unwrap())
@@ -199,6 +201,9 @@ mod tests {
             .unwrap();
         let config = Config::default();
         let managers = DownloadManager::new(config.pool1_size, config.pool2_size, pool.clone());
+        if let Some(gate) = &probe_gate {
+            managers.set_probe_gate(gate.clone());
+        }
         let (probed_tx, probed) = mpsc::unbounded_channel();
         managers
             .add_plugin(Arc::new(StuckPlatform { probed: probed_tx }))
@@ -213,6 +218,12 @@ mod tests {
             Arc::new(BiliBackend::new(config.clone(), client.clone())),
         ));
         let services = ServiceRegister {
+            upload_observations: managers.upload_observations(),
+            room_cover_refresh: None,
+            renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
+                pool.clone(),
+                dir.path().join("renders"),
+            )),
             douyu_keeper: crate::server::services::douyu_keeper::DouyuCookieKeeper::new(
                 pool.clone(),
                 config.clone(),
@@ -224,13 +235,13 @@ mod tests {
             config,
             client,
             log_handle,
-            image_proxy: Arc::new(ImageProxy::new()),
             system: SystemMonitor::spawn(),
         };
         Fixture {
             _dir: dir,
             services,
             probed,
+            probe_gate,
         }
     }
 
@@ -311,10 +322,12 @@ mod tests {
     /// 暂停只在内存里：保存设置会重建监控，暂停必须带过去，不能改个备注就又开始检测、开录
     #[tokio::test]
     async fn updating_a_paused_streamer_keeps_it_paused() {
-        let mut f = fixture().await;
+        let probe_gate = Arc::new(Semaphore::new(0));
+        let mut f = fixture_with_probe_gate(Some(probe_gate.clone())).await;
         let added = add_streamer(&f.services, insert("https://stuck.example/1"))
             .await
             .unwrap();
+        probe_gate.add_permits(1);
         tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
             .await
             .expect("新房间应很快轮到检测");
@@ -338,6 +351,12 @@ mod tests {
         // 恢复照常可用
         toggle_pause(managers, added.id).await;
         assert!(matches!(status(), WorkerStatus::Idle));
+        probe_gate.add_permits(1);
+        let restarted = tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
+            .await
+            .expect("恢复应重新开始检测");
+        assert_eq!(restarted.as_deref(), Some(added.url.as_str()));
+        assert!(matches!(status(), WorkerStatus::Pending));
     }
 
     #[tokio::test]
@@ -364,11 +383,13 @@ mod tests {
 
     #[tokio::test]
     async fn toggling_pause_alternates_between_paused_and_idle() {
-        let mut f = fixture().await;
+        let probe_gate = Arc::new(Semaphore::new(0));
+        let mut f = fixture_with_probe_gate(Some(probe_gate.clone())).await;
         let added = add_streamer(&f.services, insert("https://stuck.example/1"))
             .await
             .unwrap();
-        // 等房间进入检测，之后监控循环卡在这次检测里，不会再改它的状态
+        probe_gate.add_permits(1);
+        // 只放行首次检测；下一轮检测在 Idle 断言后才由测试放行。
         tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
             .await
             .expect("新房间应很快轮到检测");
@@ -382,6 +403,12 @@ mod tests {
 
         toggle_pause(managers, added.id).await;
         assert!(matches!(status(), WorkerStatus::Idle));
+        probe_gate.add_permits(1);
+        let restarted = tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
+            .await
+            .expect("恢复应重新开始检测");
+        assert_eq!(restarted.as_deref(), Some(added.url.as_str()));
+        assert!(matches!(status(), WorkerStatus::Pending));
 
         toggle_pause(managers, added.id).await;
         assert!(matches!(status(), WorkerStatus::Pause));

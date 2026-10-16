@@ -15,7 +15,7 @@ use crate::server::errors::{AppError, AppResult};
 use biliup::downloader::preview::{self, ChunkKind, PreviewFormat, PreviewSink};
 use biliup::downloader::util::ByteCounter;
 use error_stack::Report;
-use flv::{CodecKind, FlvData};
+use flv::FlvData;
 use flv_fix::{
     ContinuityMode, FlvPipeline, FlvPipelineConfig, FlvWriter, FlvWriterConfig, ScriptFillerConfig,
 };
@@ -478,8 +478,8 @@ where
 /// 把一个 mesio FLV 条目旁路给直播预览，重新编成与 FLV 文件一致的字节排列。
 ///
 /// 类型判定沿用 `flv` crate 对 tag 的分类；修复管线的控制项（`Split` / `EndOfSequence`）
-/// 不是媒体字节，跳过。视频序列头是 HEVC 时把 hub 标为不可预览（Chrome 的 MSE 放不了），
-/// 录制本身不受影响。
+/// 不是媒体字节，跳过。AVC、HEVC（legacy / E-RTMP）和 AV1 均保留完整序列头与 GOP，
+/// 浏览器与播放器依据实际编码能力决定是否可以解码。
 fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
     match item {
         FlvData::Header(header) => {
@@ -494,11 +494,6 @@ fn tee_flv(sink: &mut PreviewSink, item: &FlvData) {
             } else if tag.is_audio_sequence_header() {
                 ChunkKind::SequenceHeader(preview::flv::TAG_AUDIO)
             } else if tag.is_video_sequence_header() {
-                if class.codec == Some(CodecKind::Hevc) {
-                    sink.mark_browser_unavailable(
-                        "视频为 HEVC 编码，浏览器内的播放器无法解码，录制不受影响",
-                    );
-                }
                 ChunkKind::SequenceHeader(preview::flv::TAG_VIDEO)
             } else if tag.is_video_tag() && class.keyframe_media {
                 ChunkKind::Keyframe
@@ -853,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn tee_flv_marks_hevc_streams_as_not_previewable() {
+    fn tee_flv_keeps_hevc_available_for_capable_browsers() {
         use biliup::downloader::preview::{PreviewFormat, PreviewHub};
         use flv::{FlvTag, FlvTagType};
 
@@ -869,8 +864,8 @@ mod tests {
         ));
         tee_flv(&mut sink, &hevc);
         let status = hub.status();
-        assert!(!status.available);
-        assert!(status.reason.unwrap().contains("HEVC"));
+        assert!(status.available);
+        assert_eq!(status.reason, None);
     }
 
     #[tokio::test]

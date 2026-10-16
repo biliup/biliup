@@ -47,7 +47,7 @@
 .time {
   font-size: 12px;
   color: var(--semi-color-text-2);
-  width: 46px;
+  min-width: 150px;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -67,6 +67,21 @@
   color: var(--semi-color-text-2);
   white-space: nowrap;
   flex-shrink: 0;
+}
+
+.link {
+  flex-shrink: 0;
+  color: var(--semi-color-primary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.link:hover { text-decoration: underline; }
+
+@media (max-width: 680px) {
+  .item { align-items: flex-start; flex-wrap: wrap; gap: 5px 10px; }
+  .time { width: auto; min-width: 100%; }
+  .tag { margin-left: 0; }
 }
 
 .empty {
