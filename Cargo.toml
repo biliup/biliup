@@ -6,6 +6,7 @@ members = [
     "crates/danmaku",
     "crates/danmaku-factory-sys",
     "crates/danmaku-factory",
+    "crates/pcre2-rust",
 ]
 resolver = "3"
 
@@ -54,8 +55,15 @@ codegen-units = 1
 strip = true
 incremental = false
 
+# The former native PCRE2 library was optimized in every build profile.
+[profile.dev.package.pcre2-rust]
+opt-level = 2
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [profile.minimal]
 inherits = "release"
 opt-level = 's'
 panic = 'abort'
+
+[profile.minimal.package.pcre2-rust]
+opt-level = 2

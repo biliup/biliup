@@ -1,32 +1,32 @@
 /*
- * The only interface between Rust and the vendored DanmakuFactory core: one
+ * Compatibility C interface to the Rust DanmakuFactory implementation: one
  * XML file in, one ASS file out, the configuration passed explicitly.
  *
  * Ownership
  *   - Every pointer argument is borrowed for the duration of the call only.
  *     Strings are NUL-terminated UTF-8.
  *   - Nothing allocated here is returned: results are written into the
- *     caller's df_result, and the danmaku list never leaves this file. The
+ *     caller's df_result, and the Rust-owned list never leaves the call. The
  *     caller frees nothing.
  *   - df_ffi_version() returns a static string.
  *
  * Global state
  *   - No configuration file is read or written, the working directory and
  *     the locale are not changed, and nothing is printed.
- *   - Numbers are formatted and parsed with printf/atof, so LC_NUMERIC must
- *     use '.' as the decimal point; otherwise DF_ERR_LOCALE is returned and
- *     nothing is written.
- *   - See df_ffi.c for the audit of static data in the core. Callers still
- *     serialise calls; biliup runs each conversion in its own process.
+ *   - The historical LC_NUMERIC contract is preserved: it must use '.' or
+ *     DF_ERR_LOCALE is returned before writing. Rust itself parses and
+ *     formats independently of locale. Callers synchronize locale changes.
+ *   - Calls own their state and can run concurrently. biliup retains its
+ *     worker process for cancellation and timeout handling.
  *
  * Input
  *   Danmaku times are converted to int milliseconds by the core: times above
- *   about 2,000,000 s (555 hours) overflow and must be filtered by the
- *   caller. Message boxes (gift/SC/guard) are not drawn (see df_ffi.c).
+ *   about 2,000,000 s (555 hours) are rejected if they overflow. Message
+ *   boxes (gift/SC/guard) are not enabled through this compatibility ABI.
  *
  * Paths
- *   On Windows paths are converted from UTF-8 to UTF-16 (_wfopen). Elsewhere
- *   they are passed to fopen() unchanged. The output file is created or
+ *   Windows paths are decoded from UTF-8; Unix paths preserve their bytes.
+ *   Files use Rust's filesystem APIs. The output file is created or
  *   truncated; after a failure it may be left incomplete and must be removed
  *   by the caller.
  */

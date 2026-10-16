@@ -1,30 +1,32 @@
 # danmaku-factory-sys
 
-DanmakuFactory's XML → ASS conversion core and PCRE2, compiled from vendored
-sources and statically linked into biliup, behind a small C interface
-(`csrc/df_ffi.h`). Use it through the safe `danmaku-factory` crate; biliup runs
+Rust ports of DanmakuFactory's XML/ASS core and PCRE2 are statically linked
+into biliup. The compatibility C interface is declared in `csrc/df_ffi.h`.
+Use the safe `danmaku-factory` crate; biliup runs
 every conversion in an internal worker process (`biliup-cli/src/danmaku_worker.rs`).
 
 ## Pinned sources
 
 | | Version | Files |
 | --- | --- | --- |
-| [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) | commit `3813e93b13b087e95901d1822baf9c3540e3f3f6` + `patches/` | `XmlFile.c`, `AssFile/`, `List/`, `String/`, `FileUtil/` and the headers they include (`vendor/DanmakuFactory/`) |
-| [PCRE2](https://github.com/PCRE2Project/pcre2) | `pcre2-10.49` (commit `6f9d7c13…`), unmodified | the 8-bit library without JIT (`vendor/pcre2/`) |
+| [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) | commit `3813e93b13b087e95901d1822baf9c3540e3f3f6` + `patches/` | Rust XML, ASS, filtering, strings, statistics and message-box modules in `src/` |
+| [PCRE2](https://github.com/PCRE2Project/pcre2) | `pcre2-10.49` (commit `6f9d7c13…`) | 8/16/32-bit algorithms, POSIX and JIT in `../pcre2-rust/` |
 
 Not used: DanmakuFactory's `main.c` (the CLI), `Config.c` (config files),
-`JsonFile.c`, `TemplateFile/`; PCRE2's JIT, POSIX wrapper and tools.
+`JsonFile.c`, `TemplateFile/`. PCRE2's command-line tools are independent
+test clients rather than shipped conversion programs.
 Licences: `vendor/*/LICENSE*`, collected in `THIRD-PARTY-NOTICES.txt`, which
 is shipped next to every biliup executable.
 
-`scripts/vendor.sh` recreates `vendor/` from the pins and `patches/` (it needs
-network access; Cargo builds never download anything).
+`vendor/` retains attribution, licences and exact upstream pins. Original C
+algorithm sources are not part of production builds. CI builds an external
+pinned C reference to verify compatibility without changing golden fixtures.
 
 ## Patches
 
 Fixes for bugs found while auditing the core. They are recorded with
-reproducers in a separate tree meant for upstream; here only the files that
-are compiled are patched.
+reproducers in a separate tree meant for upstream. These patches now describe
+the C reference behavior preserved by the Rust implementation.
 
 | Patch | Bug | Reachable from biliup before |
 | --- | --- | --- |
@@ -49,55 +51,53 @@ checks that on the whole corpus.
 configuration file, prints nothing, never waits for input and does not change
 the working directory or the locale. Every pointer is borrowed for the call;
 nothing is returned that needs freeing: status, counts and a message are
-written into the caller's `df_result`. The danmaku list is allocated, cleaned
-up on failure and freed inside the wrapper. `df_ffi_layout` lets the Rust
-tests check the hand-written bindings against the C layout.
+written into the caller's `df_result`. Rust owns and frees the list.
+`df_ffi_layout` and the independent C client verify the original structure layout.
 
 Deliberate limits:
 
-- message boxes (gift/SC/guard), statistics, user names and block lists are
-  off: the message-box code has undefined behaviour (`getMsgBoxHeight` has no
-  `return`) and biliup's XML only contains `<d>` danmaku;
-- `LC_NUMERIC` must use `.`; otherwise `DF_ERR_LOCALE` (the core formats with
-  `printf("%f")` and parses with `atof`);
-- danmaku times above about 2,000,000 s overflow the core's `int`
-  milliseconds; biliup drops comments more than 250 hours from the segment;
+- the legacy C interface keeps message boxes, statistics, user names and
+  blacklists disabled; the complete owned `Config` and `convert_full` expose
+  these capabilities to Rust callers;
+- the legacy interface preserves its `LC_NUMERIC` requirement and
+  `DF_ERR_LOCALE`; the complete owned interface parses and formats numbers
+  independently of process locale;
+- times use signed 32-bit milliseconds; overflow is rejected before writing.
+  biliup also drops comments more than 250 hours from the segment;
 - the core cuts a comment after 1023 bytes, possibly inside a UTF-8
   character; biliup drops the broken bytes when it reads the ASS.
 
 ### Thread safety
 
-The audit (see `csrc/df_ffi.c`) found no mutable static data on the
-conversion path, but upstream does not promise it, so the safe crate
-serialises calls with a mutex. biliup does not rely on either: each
-conversion runs in its own worker process, which can be killed on cancel or
-timeout and cannot take the server down when C code crashes.
+Conversions own their state and may run concurrently. Callers must synchronize
+changes to process-global locale while using the compatibility interface.
+biliup retains its worker process for cancellation, timeouts and isolation.
 
 ## Building
 
-`build.rs` uses the `cc` crate: no libclang/bindgen, no system PCRE2. Flags
-that keep the output identical across targets:
-
-- MSVC: `/utf-8` (the sources contain UTF-8 string literals) and `/std:c11`;
-- GCC/Clang: `-fsigned-char` (ARM's `char` is unsigned; the baseline is x86),
-  `-ffp-contract=off` (no fused multiply-add in the float layout maths),
-  `-fvisibility=hidden` (the copies here never interpose a system PCRE2);
-- the core's global names are prefixed (`csrc/df_namespace.h`, force-included).
+Cargo builds Rust sources without a C compiler, bindgen or system PCRE2.
+The compatibility header remains available to C clients. `pcre2-rust` provides
+all 8/16/32-bit PCRE2 and POSIX exports, including real JIT backends for the
+project's supported CPU families. Development and minimal profiles retain
+the old native engine's optimization level.
 
 ## Tests
 
 - `cargo test -p danmaku-factory-sys -p danmaku-factory`: layout, defaults,
   the golden corpus byte for byte, every error path, Chinese/space paths,
   concurrent callers, descriptor leaks, the locale check;
-- `tests/c/check.sh` (clang): the C interface under AddressSanitizer,
-  UndefinedBehaviorSanitizer and LeakSanitizer, success and failure paths,
-  and a check that no unprefixed global symbol is exported;
+- `tests/c/check.sh` (nightly Rust and clang): AddressSanitizer/LeakSanitizer
+  instrument the Rust implementation; the unchanged C ABI client preserves
+  its assertions and uses UBSan. The full Rust regex interface is exercised too;
+- `pcre2-rust/tests/upstream_suite.rs`: the unmodified upstream syntax/JIT/POSIX
+  clients and serialization interoperability against an independent C reference;
 - `../danmaku-factory/tests/golden/generate.py`: regenerates the corpus with
   the pinned CLI built with and without the patches (CI runs it).
 
 ## Updating DanmakuFactory or PCRE2
 
-1. Change the pins in `scripts/vendor.sh`, rebase or drop `patches/`, run it.
-2. Check `csrc/df_ffi.c` against the new `main()` and the audit notes above.
-3. Rebuild both CLIs, run `generate.py` and review every changed ASS.
-4. Run `tests/c/check.sh`; add new global names to `csrc/df_namespace.h`.
+1. Review the pins in `vendor/*/UPSTREAM` and reconcile the Rust algorithms.
+2. Build external pinned C references; preserve their original expected fixtures.
+3. Run the golden, full-interface and independent differential tests.
+4. Run the sanitizer and performance comparisons; regenerate the aggregate
+   licence file with `scripts/notices.sh` when attribution changes.

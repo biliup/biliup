@@ -1,18 +1,19 @@
 Third-party software linked into biliup
 =======================================
 
-biliup converts recorded danmaku (XML) to ASS subtitles with the conversion
-core of DanmakuFactory and the PCRE2 library. Both are compiled from source
-and statically linked into the biliup executable, the desktop app and the
-Python module; no separate DanmakuFactory program is shipped.
+biliup uses Rust ports of the DanmakuFactory conversion core and PCRE2,
+including its SLJIT-based JIT compiler. The algorithms are compiled from Rust
+sources and statically linked into the executable, desktop app and Python
+module. No original C engine or separate DanmakuFactory program is shipped.
 
 
 DanmakuFactory
 --------------
 
 https://github.com/hihkm/DanmakuFactory.git, commit 3813e93b13b087e95901d1822baf9c3540e3f3f6
-Only the XML/ASS conversion files are used, with the fixes in
-crates/danmaku-factory-sys/patches of the biliup source.
+The XML/ASS core was ported to Rust. The fixes in
+crates/danmaku-factory-sys/patches document the independent C compatibility
+reference used to verify the port.
 License: MIT
 
 MIT License
@@ -42,8 +43,10 @@ PCRE2
 -----
 
 https://github.com/PCRE2Project/pcre2.git, pcre2-10.49 (commit 6f9d7c1373262c541324a16a358785b33ef116cf)
-The 8-bit library, unmodified, without the JIT compiler.
-License: BSD-3-Clause WITH PCRE2-exception
+The complete 8-, 16- and 32-bit interfaces, POSIX facade and JIT compiler
+were ported to Rust in crates/pcre2-rust. The algorithms and original
+copyright notices are retained in the Rust source.
+License: BSD-3-Clause WITH PCRE2-exception AND BSD-2-Clause (SLJIT)
 
 PCRE2 Licence
 =============
@@ -149,3 +152,33 @@ not apply all the way down a chain of software. If binary package A includes
 PCRE2, it must respect the condition, but if package B is software that
 includes package A, the condition is not imposed on package B unless it uses
 PCRE2 independently.
+
+
+SLJIT
+-----
+
+/*
+ *    Stack-less Just-In-Time compiler
+ *
+ *    Copyright Zoltan Herczeg (hzmester@freemail.hu). All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without modification, are
+ * permitted provided that the following conditions are met:
+ *
+ *   1. Redistributions of source code must retain the above copyright notice, this list of
+ *      conditions and the following disclaimer.
+ *
+ *   2. Redistributions in binary form must reproduce the above copyright notice, this list
+ *      of conditions and the following disclaimer in the documentation and/or other materials
+ *      provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDER(S) AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT
+ * SHALL THE COPYRIGHT HOLDER(S) OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+ * TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+ * BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */

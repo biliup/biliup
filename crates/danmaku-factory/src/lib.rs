@@ -1,19 +1,14 @@
-//! XML -> ASS danmaku conversion with DanmakuFactory's core, compiled into
-//! this program (see `danmaku-factory-sys`) instead of run as an external
-//! DanmakuFactory executable.
+//! XML -> ASS danmaku conversion implemented in Rust with DanmakuFactory's
+//! formatting and layout semantics.
 //!
-//! [`convert_xml_to_ass`] runs the C core on the calling thread and returns
-//! when it is done: it cannot be cancelled or timed out, and a crash in C
-//! ends the whole process. Callers that need cancellation, a timeout or crash
-//! isolation run it in a separate process; biliup does that with its internal
-//! danmaku worker mode.
+//! [`convert_xml_to_ass`] runs on the calling thread and returns when done.
+//! Callers that need cancellation or a timeout run it in a separate process;
+//! biliup does that with its internal danmaku worker mode.
 
 use danmaku_factory_sys as sys;
 use serde::{Deserialize, Serialize};
-use std::ffi::{CStr, CString};
 use std::fmt;
-use std::path::Path;
-use std::sync::{Mutex, PoisonError};
+use std::path::{Path, PathBuf};
 
 /// Bits of [`ConvertOptions::block_mode`] (the CLI's `--blockmode`).
 pub mod block {
@@ -124,7 +119,7 @@ pub struct ConvertStats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {
-    /// An option is out of range, or a path or string cannot be passed to C.
+    /// An option is out of range, or a path or string is unusable.
     InvalidArgument,
     /// The process's LC_NUMERIC does not use '.' as the decimal point.
     Locale,
@@ -225,18 +220,10 @@ fn os_error_text(errno: i32) -> String {
     }
 }
 
-/// The pinned DanmakuFactory commit, patch level and PCRE2 version.
+/// The Rust converter and the DanmakuFactory compatibility baseline.
 pub fn version() -> &'static str {
-    // SAFETY: a static NUL-terminated ASCII string.
-    unsafe { CStr::from_ptr(sys::df_ffi_version()) }
-        .to_str()
-        .unwrap_or("DanmakuFactory")
+    sys::VERSION
 }
-
-/// Calls into the core are serialised. The audit in csrc/df_ffi.c found no
-/// shared mutable state on the conversion path, but nothing upstream
-/// promises that, so the guarantee does not depend on it.
-static CORE: Mutex<()> = Mutex::new(());
 
 /// Converts the XML at `input` to a new ASS file at `output`, like
 /// `DanmakuFactory -i input.xml -o output.ass` with `options`.
@@ -248,13 +235,16 @@ pub fn convert_xml_to_ass(
     output: &Path,
     options: &ConvertOptions,
 ) -> Result<ConvertStats, ConvertError> {
-    let font_name = CString::new(options.font_name.as_str())
-        .map_err(|_| ConvertError::new(ErrorKind::InvalidArgument, "invalid font_name"))?;
-    let input_path = c_path(input)?;
-    let output_path = c_path(output)?;
+    if options.font_name.contains('\0') {
+        return Err(ConvertError::new(
+            ErrorKind::InvalidArgument,
+            "invalid font_name",
+        ));
+    }
+    let input_path = conversion_path(input)?;
+    let output_path = conversion_path(output)?;
     let to_i32 = |n: u32| i32::try_from(n).unwrap_or(i32::MAX);
-    let raw = sys::df_options {
-        struct_size: size_of::<sys::df_options>() as u32,
+    let config = sys::model::Config {
         resolution_x: to_i32(options.width),
         resolution_y: to_i32(options.height),
         display_area: options.display_area,
@@ -266,56 +256,45 @@ pub fn convert_xml_to_ass(
         top_margin: options.top_margin,
         bottom_margin: options.bottom_margin,
         font_size: options.font_size,
-        font_size_strict: options.font_size_strict.into(),
-        font_size_norm: options.font_size_norm.into(),
-        font_name: font_name.as_ptr(),
+        font_size_strict: options.font_size_strict,
+        font_size_norm: options.font_size_norm,
+        font_name: options.font_name.clone(),
         opacity: options.opacity.into(),
         outline: options.outline,
         outline_blur: options.outline_blur,
         outline_opacity: options.outline_opacity.into(),
         shadow: options.shadow,
-        bold: options.bold.into(),
-        save_blocked: options.save_blocked.into(),
+        bold: options.bold,
+        save_blocked: options.save_blocked,
         block_mode: to_i32(options.block_mode),
+        ..sys::model::Config::default()
     };
-    let mut result = sys::df_result::new();
-    let status = {
-        let _core = CORE.lock().unwrap_or_else(PoisonError::into_inner);
-        // Claim the path first, atomically: an existing file, a symlink or
-        // another caller's output is never replaced, and on failure the only
-        // file removed below is the one created here. The core then opens
-        // this empty file for writing.
-        claim(output)?;
-        // SAFETY: every pointer is valid and NUL-terminated for the whole
-        // call, `raw` and `result` carry their own sizes, and the core keeps
-        // no pointer after returning.
-        unsafe {
-            sys::df_convert_xml_to_ass(
-                input_path.as_ptr(),
-                output_path.as_ptr(),
-                &raw,
-                &mut result,
-            )
+    // Claim first, atomically. Only the conversion that created this path can
+    // subsequently remove its partial output.
+    claim(&output_path)?;
+    let result = std::panic::catch_unwind(|| sys::convert(&input_path, &output_path, &config));
+    match result {
+        Ok(Ok(stats)) => Ok(ConvertStats {
+            danmaku_count: stats.danmaku_count.max(0) as u32,
+            blocked_count: stats.blocked_count.max(0) as u32,
+        }),
+        Ok(Err(error)) => {
+            let _ = std::fs::remove_file(&output_path);
+            Err(ConvertError {
+                kind: ErrorKind::from_status(error.status),
+                upstream_code: error.upstream_code,
+                os_error: (error.os_error != 0).then_some(error.os_error),
+                detail: error.detail,
+            })
         }
-    };
-    if status == sys::DF_OK {
-        return Ok(ConvertStats {
-            danmaku_count: result.danmaku_count.max(0) as u32,
-            blocked_count: result.blocked_count.max(0) as u32,
-        });
+        Err(_) => {
+            let _ = std::fs::remove_file(&output_path);
+            Err(ConvertError::new(
+                ErrorKind::Internal,
+                "conversion panicked",
+            ))
+        }
     }
-    // Created by claim() above, so it is this conversion's incomplete output.
-    let _ = std::fs::remove_file(output);
-    // SAFETY: the core always NUL-terminates the message buffer.
-    let detail = unsafe { CStr::from_ptr(result.message.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    Err(ConvertError {
-        kind: ErrorKind::from_status(status),
-        upstream_code: result.upstream_code,
-        os_error: (result.os_error != 0).then_some(result.os_error),
-        detail,
-    })
 }
 
 /// Creates `output`, failing if anything exists there.
@@ -334,17 +313,24 @@ fn claim(output: &Path) -> Result<(), ConvertError> {
             kind: ErrorKind::OutputCreate,
             upstream_code: 0,
             // errno on Unix; Windows reports Win32 codes, kept in the text.
-            os_error: if cfg!(unix) { error.raw_os_error() } else { None },
+            os_error: if cfg!(unix) {
+                error.raw_os_error()
+            } else {
+                None
+            },
             detail: format!("{}: {error}", output.display()),
         }),
     }
 }
 
-/// fopen() takes the path bytes on Unix. On Windows the core converts UTF-8
-/// to UTF-16 for _wfopen, so the path must be Unicode; long absolute paths
-/// get the `\\?\` prefix, which _wfopen needs beyond MAX_PATH.
-fn c_path(path: &Path) -> Result<CString, ConvertError> {
-    let invalid = || ConvertError::new(ErrorKind::InvalidArgument, format!("unusable path {path:?}"));
+/// Preserve Unix path bytes and the original Unicode Windows path contract.
+fn conversion_path(path: &Path) -> Result<PathBuf, ConvertError> {
+    let invalid = || {
+        ConvertError::new(
+            ErrorKind::InvalidArgument,
+            format!("unusable path {path:?}"),
+        )
+    };
     #[cfg(unix)]
     let bytes = {
         use std::os::unix::ffi::OsStrExt;
@@ -354,10 +340,20 @@ fn c_path(path: &Path) -> Result<CString, ConvertError> {
     let bytes = windows_path(path).ok_or_else(invalid)?.into_bytes();
     #[cfg(not(any(unix, windows)))]
     let bytes = path.to_str().ok_or_else(invalid)?.as_bytes().to_vec();
-    if bytes.is_empty() {
+    if bytes.is_empty() || bytes.contains(&0) {
         return Err(invalid());
     }
-    CString::new(bytes).map_err(|_| invalid())
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Ok(PathBuf::from(std::ffi::OsString::from_vec(bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(PathBuf::from(
+            String::from_utf8(bytes).map_err(|_| invalid())?,
+        ))
+    }
 }
 
 #[cfg(windows)]
@@ -388,6 +384,7 @@ fn windows_path(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CStr;
 
     #[test]
     fn defaults_match_the_core() {

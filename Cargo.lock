@@ -1412,7 +1412,7 @@ dependencies = [
 name = "danmaku-factory-sys"
 version = "1.2.11"
 dependencies = [
- "cc",
+ "pcre2-rust",
 ]
 
 [[package]]
@@ -4240,6 +4240,13 @@ name = "pastey"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35fb2e5f958ec131621fdd531e9fc186ed768cbe395337403ae56c17a74c68ec"
+
+[[package]]
+name = "pcre2-rust"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "pem"

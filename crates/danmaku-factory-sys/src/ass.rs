@@ -1,0 +1,817 @@
+//! ASS output and pixel-row collision scheduling, ported from DanmakuFactory.
+//!
+//! The byte-level format intentionally preserves the upstream converter's
+//! behavior, including comment events for filtered ordinary danmaku.
+
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::Path;
+
+use crate::advanced::{MessageQueue, merge_simultaneous_gifts};
+use crate::model::{
+    BOTTOM, Config, CoreError, Danmaku, EPS, L2R, R2L, TOP, ass_milliseconds, rounded_milliseconds,
+};
+use crate::string::{
+    ass_escape, general_float, get_str_hei, get_str_len, to_hex_color, to_hex_opacity,
+};
+use crate::{DF_ERR_OUT_OF_MEMORY, DF_ERR_OUTPUT_CREATE, DF_ERR_OUTPUT_WRITE};
+
+const BLOCK_REPEAT: i32 = 64;
+
+pub fn write_ass(path: &Path, danmaku: &mut [Danmaku], config: &Config) -> Result<(), CoreError> {
+    crate::validate_config(config)?;
+    crate::validate_danmaku(danmaku, config)?;
+    let file = File::create(path).map_err(|error| {
+        CoreError::io(
+            DF_ERR_OUTPUT_CREATE,
+            100,
+            &error,
+            "cannot create the output file",
+        )
+    })?;
+    let mut output = TextOutput(BufWriter::new(file));
+    #[cfg(windows)]
+    output
+        .write_all(b"\xEF\xBB\xBF")
+        .map_err(|error| write_error(200, &error))?;
+    write_header(&mut output, config).map_err(|error| write_error(200, &error))?;
+    let active = write_danmaku(&mut output, danmaku, config)?;
+    if config.stat_mode != 0 {
+        let pool: Vec<_> = match active {
+            Some(indices) => indices.into_iter().map(|index| &danmaku[index]).collect(),
+            None => danmaku.iter().collect(),
+        };
+        // Preserve writeAss's historical seconds-to-integer call behavior;
+        // the direct statistics API accepts real millisecond durations.
+        crate::statistics::write_ass_stat_refs(
+            &mut output,
+            &pool,
+            config.stat_mode,
+            config.scroll_time as i32,
+            config.fix_time as i32,
+            config.density,
+            config.block_mode,
+        )
+        .map_err(|error| write_error(200, &error))?;
+    }
+    finish_file(output).map_err(|error| write_error(200, &error))
+}
+
+/// Rust's File destructor discards close errors. The original conversion ABI
+/// reports them, so consume and close the descriptor explicitly after flushing.
+pub(crate) fn finish_file(mut output: TextOutput<BufWriter<File>>) -> io::Result<()> {
+    output.flush()?;
+    let file = output.0.into_inner().map_err(|error| error.into_error())?;
+    #[cfg(unix)]
+    {
+        use std::os::fd::IntoRawFd;
+        unsafe extern "C" {
+            fn close(fd: i32) -> i32;
+        }
+        // SAFETY: ownership of a live descriptor is transferred exactly once.
+        // Do not retry EINTR: the descriptor may already have been released.
+        if unsafe { close(file.into_raw_fd()) } == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::IntoRawHandle;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+        }
+        // SAFETY: this handle came from File and no Rust owner remains.
+        if unsafe { CloseHandle(file.into_raw_handle()) } != 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+/// Writes only the danmaku events, matching the core's event-part interface.
+pub fn write_ass_danmaku_part(
+    output: &mut impl Write,
+    danmaku: &mut [Danmaku],
+    config: &Config,
+) -> Result<(), CoreError> {
+    crate::validate_config(config)?;
+    crate::validate_danmaku(danmaku, config)?;
+    write_danmaku(output, danmaku, config).map(|_| ())
+}
+
+fn write_error(code: i32, error: &io::Error) -> CoreError {
+    CoreError::io(
+        DF_ERR_OUTPUT_WRITE,
+        code,
+        error,
+        "cannot write the output file",
+    )
+}
+
+/// C opens the ASS file in text mode; Windows consequently uses CRLF.
+pub(crate) struct TextOutput<W>(pub(crate) W);
+
+impl<W: Write> Write for TextOutput<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        #[cfg(windows)]
+        {
+            let mut start = 0;
+            for (index, &byte) in bytes.iter().enumerate() {
+                if byte == b'\n' {
+                    self.0.write_all(&bytes[start..index])?;
+                    self.0.write_all(b"\r\n")?;
+                    start = index + 1;
+                }
+            }
+            self.0.write_all(&bytes[start..])?;
+            Ok(bytes.len())
+        }
+        #[cfg(not(windows))]
+        self.0.write(bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
+fn write_header(output: &mut impl Write, config: &Config) -> io::Result<()> {
+    write!(
+        output,
+        "[Script Info]\n\
+         ; Script generated by DanmakuFactory v1.70\n\
+         ; https://github.com/hihkm/DanmakuFactory/\n\
+         ScriptType: v4.00+\n\
+         Collisions: Normal\n\
+         PlayResX: {}\n\
+         PlayResY: {}\n\
+         Timer: 100.0000\n\
+         WrapStyle: 2\n\
+         ScaledBorderAndShadow: yes\n\n\
+         [V4+ Styles]\n\
+         Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, \
+         OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, \
+         ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, \
+         MarginL, MarginR, MarginV, Encoding\n",
+        config.resolution_x, config.resolution_y,
+    )?;
+    let primary = format!("&H{}FFFFFF", to_hex_opacity(255 - config.opacity));
+    let outline = format!("&H{}000000", to_hex_opacity(255 - config.outline_opacity));
+    for (name, font_size, color, width, shadow, alignment) in [
+        (
+            "R2L",
+            config.font_size,
+            primary.as_str(),
+            config.outline,
+            config.shadow,
+            8,
+        ),
+        (
+            "L2R",
+            config.font_size,
+            primary.as_str(),
+            config.outline,
+            config.shadow,
+            8,
+        ),
+        (
+            "TOP",
+            config.font_size,
+            primary.as_str(),
+            config.outline,
+            config.shadow,
+            8,
+        ),
+        (
+            "BTM",
+            config.font_size,
+            primary.as_str(),
+            config.outline,
+            config.shadow,
+            8,
+        ),
+        (
+            "SP",
+            config.font_size,
+            "&H00FFFFFF",
+            config.outline,
+            config.shadow,
+            7,
+        ),
+        (
+            "MSG",
+            config.msgbox_font_size,
+            "&H00FFFFFF",
+            config.outline * config.msgbox_font_size as f32 / config.font_size as f32,
+            config.shadow * config.msgbox_font_size as f32 / config.font_size as f32,
+            7,
+        ),
+    ] {
+        write!(
+            output,
+            "\nStyle: {name},{},{font_size},{color},&H00FFFFFF,{outline},&H1E6A5149,{},0,0,0,100.00,100.00,0.00,0.00,1,{width:.1},{shadow:.1},{alignment},0,0,0,1",
+            config.font_name,
+            i32::from(config.bold),
+        )?;
+    }
+    if config.stat_mode != 0 {
+        write!(
+            output,
+            "\nStyle: danmakuFactory_stat,{},{},&H35FFFFFF,&H35FFFFFF,&H35000000,&H356A5149,0,0,0,0,100.00,100.00,0.00,0.00,0,0.0,0.0,5,0,0,0,1",
+            config.font_name, config.font_size
+        )?;
+    }
+    output.write_all(b"\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text")
+}
+
+fn occupancy(size: usize, upstream_code: i32) -> Result<Vec<i32>, CoreError> {
+    let mut rows = Vec::new();
+    rows.try_reserve_exact(size).map_err(|_| {
+        CoreError::new(
+            DF_ERR_OUT_OF_MEMORY,
+            upstream_code,
+            0,
+            "out of memory while writing",
+        )
+    })?;
+    rows.resize(size, 0);
+    Ok(rows)
+}
+
+fn display_rows(config: &Config) -> (usize, usize) {
+    let height = config.resolution_y;
+    let area = f64::from(config.display_area);
+    let mut hold = if area > EPS && area < 1.0 - EPS {
+        (height as f32 * config.display_area) as i32
+    } else {
+        height
+    };
+    let mut roll = hold;
+    // The original fabs() sees a float subtraction promoted to double.
+    if f64::from((config.scroll_area - 1.0).abs()) > EPS {
+        let limited = height as f32 * config.scroll_area;
+        if limited < roll as f32 {
+            roll = limited as i32;
+        }
+    }
+    roll = roll.max(1);
+    hold = hold.max(1);
+    (roll as usize, hold as usize)
+}
+
+pub(crate) fn end_time(danmaku: &Danmaku, roll: i32, hold: i32) -> i32 {
+    let duration = if danmaku.is_type(R2L) || danmaku.is_type(L2R) {
+        roll
+    } else if danmaku.is_type(TOP) || danmaku.is_type(BOTTOM) {
+        hold
+    } else if danmaku.is_special() {
+        danmaku
+            .special
+            .as_ref()
+            .map_or(0, |special| special.exist_time)
+    } else {
+        return 0;
+    };
+    danmaku.time.wrapping_add(duration)
+}
+
+fn write_danmaku(
+    output: &mut impl Write,
+    danmaku: &mut [Danmaku],
+    config: &Config,
+) -> Result<Option<Vec<usize>>, CoreError> {
+    let (roll_rows, hold_rows) = display_rows(config);
+    let mut r2l_right = occupancy(roll_rows, 30)?;
+    let mut r2l_left = occupancy(roll_rows, 40)?;
+    let mut l2r_right = occupancy(roll_rows, 50)?;
+    let mut l2r_left = occupancy(roll_rows, 60)?;
+    let mut fixed = occupancy(hold_rows, 70)?;
+    let roll_time = ass_milliseconds(config.scroll_time);
+    let hold_time = ass_milliseconds(config.fix_time);
+    for item in danmaku.iter_mut() {
+        item.time = rounded_milliseconds(item.time);
+    }
+    let active = config
+        .show_msg_box
+        .then(|| merge_simultaneous_gifts(danmaku));
+    let mut messages = config.show_msg_box.then(|| MessageQueue::new(config));
+
+    let mut first_visible = 0;
+    for ordinal in 0..active.as_ref().map_or(danmaku.len(), Vec::len) {
+        let index = active.as_ref().map_or(ordinal, |indices| indices[ordinal]);
+        if (config.density > 0 || config.block_mode & BLOCK_REPEAT != 0)
+            && danmaku[index].is_normal()
+        {
+            let time = danmaku[index].time;
+            while first_visible < index
+                && end_time(&danmaku[first_visible], roll_time, hold_time) < time
+            {
+                first_visible += 1;
+            }
+            let mut visible_count = 0;
+            let mut skip = false;
+            for previous in first_visible..index {
+                let scan = &danmaku[previous];
+                if scan.type_ > 0 && end_time(scan, roll_time, hold_time) > time {
+                    if scan.is_normal()
+                        && danmaku[index].type_ > 0
+                        && config.block_mode & BLOCK_REPEAT != 0
+                        && scan.text == danmaku[index].text
+                    {
+                        danmaku[index].block();
+                        if !config.save_blocked {
+                            skip = true;
+                            break;
+                        }
+                    } else if scan.is_normal() || scan.is_special() {
+                        visible_count += 1;
+                    }
+                }
+            }
+            if skip {
+                continue;
+            }
+            if danmaku[index].type_ > 0 && config.density > 0 && config.density <= visible_count {
+                danmaku[index].block();
+                if !config.save_blocked {
+                    continue;
+                }
+            }
+        }
+
+        let item = &mut danmaku[index];
+        let result = if item.is_normal() {
+            let width = get_str_len(&item.text, config.font_size, item.font_size)
+                + if config.show_user_names {
+                    item.user.as_ref().map_or(0, |user| {
+                        get_str_len(&user.name, config.font_size, item.font_size)
+                    })
+                } else {
+                    0
+                };
+            let height = get_str_hei(&item.text, config.font_size, item.font_size);
+            let rolling_height = height
+                .saturating_add(config.line_spacing)
+                .clamp(1, roll_rows as i32) as usize;
+            let fixed_height = height
+                .saturating_add(config.line_spacing)
+                .clamp(1, hold_rows as i32) as usize;
+            let escaped = ass_escape(&item.text);
+            if item.is_type(R2L) || item.is_type(L2R) {
+                let r2l = item.is_type(R2L);
+                let (right, left) = if r2l {
+                    (&mut r2l_right, &mut r2l_left)
+                } else {
+                    (&mut l2r_right, &mut l2r_left)
+                };
+                let crossing = ass_milliseconds(
+                    roll_time as f32 / 1000.0 * config.resolution_x as f32
+                        / config.resolution_x.wrapping_add(width) as f32,
+                );
+                let mut y = find_forward(right, rolling_height, item.time, Some((left, crossing)));
+                if y > roll_rows - rolling_height {
+                    if config.density == -1 {
+                        item.type_ = if r2l { -R2L } else { -L2R };
+                        if !config.save_blocked {
+                            continue;
+                        }
+                    }
+                    y = find_min(right, roll_rows - rolling_height, false);
+                }
+                if item.type_ > 0 {
+                    let departure = ass_milliseconds(
+                        roll_time as f32 / 1000.0 * width as f32
+                            / config.resolution_x.wrapping_add(width) as f32,
+                    );
+                    right[y..y + rolling_height].fill(item.time.wrapping_add(departure));
+                    left[y..y + rolling_height].fill(item.time.wrapping_add(roll_time));
+                }
+                write_rolling(
+                    output, item, config, roll_time, y as i32, width, height, &escaped, r2l,
+                )
+            } else {
+                let bottom = item.is_type(BOTTOM);
+                let mut y = if bottom {
+                    find_backward(&fixed, fixed_height, item.time)
+                } else {
+                    find_forward(&fixed, fixed_height, item.time, None)
+                };
+                let full = if bottom {
+                    y < fixed_height
+                } else {
+                    y > hold_rows - fixed_height
+                };
+                if full {
+                    if config.density == -1 {
+                        item.type_ = if bottom { -BOTTOM } else { -TOP };
+                        if !config.save_blocked {
+                            continue;
+                        }
+                    }
+                    y = find_min(
+                        &mut fixed,
+                        if bottom {
+                            fixed_height
+                        } else {
+                            hold_rows - fixed_height
+                        },
+                        bottom,
+                    );
+                }
+                if item.type_ > 0 {
+                    let range = if bottom {
+                        y - fixed_height..y
+                    } else {
+                        y..y + fixed_height
+                    };
+                    fixed[range].fill(item.time.wrapping_add(hold_time));
+                }
+                let position = if bottom {
+                    (y as i32)
+                        .wrapping_sub(fixed_height as i32)
+                        .wrapping_sub(config.bottom_margin)
+                } else {
+                    (y as i32).wrapping_add(config.top_margin)
+                };
+                write_fixed(
+                    output, item, config, hold_time, position, height, &escaped, bottom,
+                )
+            }
+        } else if item.is_special() {
+            // This is deliberately unconditional, matching the C API.
+            if !config.save_blocked {
+                continue;
+            }
+            write_special(output, item, config)
+        } else if item.type_ == 8 {
+            write!(
+                output,
+                "\nComment: NO.{}(Code danmaku):Unable to read this type.",
+                ordinal + 1
+            )
+        } else if item.is_message() && config.show_msg_box {
+            messages
+                .as_mut()
+                .unwrap()
+                .push(output, danmaku, index, config)
+        } else if item.type_ > 0 {
+            // Message boxes are disabled on the exposed conversion path.
+            write!(output, "\nComment: NO.{}:unknow type", ordinal + 1)
+        } else {
+            Ok(())
+        };
+        result.map_err(|error| write_error(290, &error))?;
+    }
+    if let Some(messages) = &mut messages {
+        messages
+            .finish(output, danmaku, config)
+            .map_err(|error| write_error(290, &error))?;
+    }
+    Ok(active)
+}
+
+fn find_forward(rows: &[i32], height: usize, time: i32, crossing: Option<(&[i32], i32)>) -> usize {
+    let mut y = 0;
+    while y <= rows.len() - height {
+        let collision = (0..height).find(|&offset| {
+            time < rows[y + offset]
+                || crossing
+                    .is_some_and(|(left, travel)| time.wrapping_add(travel) < left[y + offset])
+        });
+        match collision {
+            Some(offset) => y += offset + 1,
+            None => break,
+        }
+    }
+    y
+}
+
+fn find_backward(rows: &[i32], height: usize, time: i32) -> usize {
+    let mut y = rows.len();
+    while y >= height {
+        let collision = (0..height).find(|&offset| time < rows[y - offset - 1]);
+        match collision {
+            Some(offset) => y -= offset + 1,
+            None => break,
+        }
+    }
+    y
+}
+
+/// Preserve the upstream tie clearing and its intentionally exclusive upper
+/// search boundary. Bottom placements use a one-past-the-row position.
+fn find_min(rows: &mut [i32], stop: usize, bottom: bool) -> usize {
+    if bottom {
+        if stop >= rows.len() {
+            return rows.len();
+        }
+        let mut minimum = rows.len() - 1;
+        for index in (stop..minimum).rev() {
+            if rows[index] < rows[minimum] {
+                minimum = index;
+            }
+        }
+        if minimum == rows.len() - 1 && rows[minimum] == rows[stop] {
+            let value = rows[minimum];
+            for row in &mut rows[stop..] {
+                if *row == value {
+                    *row = 0;
+                }
+            }
+        }
+        minimum
+    } else {
+        if stop == 0 {
+            return 0;
+        }
+        let mut minimum = 0;
+        for index in 1..stop {
+            if rows[index] < rows[minimum] {
+                minimum = index;
+            }
+        }
+        if minimum == 0 && rows[minimum] == rows[stop - 1] {
+            let value = rows[minimum];
+            for row in &mut rows[..stop] {
+                if *row == value {
+                    *row = 0;
+                }
+            }
+        }
+        minimum
+    }
+}
+
+pub(crate) fn write_time(output: &mut impl Write, milliseconds: i32) -> io::Result<()> {
+    let time = milliseconds.max(0);
+    write!(
+        output,
+        "{}:{:02}:{:02}.{:02},",
+        time / 3_600_000,
+        time / 60_000 % 60,
+        time / 1000 % 60,
+        time % 1000 / 10
+    )
+}
+
+fn write_event_prefix(
+    output: &mut impl Write,
+    item: &Danmaku,
+    duration: i32,
+    fixed: bool,
+) -> io::Result<()> {
+    if item.type_ > 0 {
+        write!(output, "\nDialogue: {},", i32::from(fixed))?;
+    } else {
+        output.write_all(b"\nComment: 0,")?;
+    }
+    write_time(output, item.time)?;
+    write_time(output, item.time.wrapping_add(duration))
+}
+
+fn write_color_text(
+    output: &mut impl Write,
+    item: &Danmaku,
+    config: &Config,
+    escaped: &[u8],
+    r2l: bool,
+) -> io::Result<()> {
+    if config.show_user_names {
+        if let Some(user) = &item.user {
+            output.write_all(b"{\\c&HBCACF7}")?;
+            output.write_all(&user.name)?;
+            output.write_all(if r2l { b":\\h" } else { b":" })?;
+        }
+    }
+    if item.color != 0xFFFFFF || config.show_user_names {
+        write!(output, "{{\\c&H{}}}", to_hex_color(item.color))?;
+    }
+    output.write_all(escaped)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_rolling(
+    output: &mut impl Write,
+    item: &Danmaku,
+    config: &Config,
+    duration: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    escaped: &[u8],
+    r2l: bool,
+) -> io::Result<()> {
+    write_event_prefix(output, item, duration, false)?;
+    let right = config.resolution_x.wrapping_add(width / 2);
+    let left = width.wrapping_neg() / 2;
+    let (start, end, style) = if r2l {
+        (right, left, "R2L")
+    } else {
+        (left, right, "L2R")
+    };
+    let y = y.wrapping_add(config.top_margin);
+    write!(
+        output,
+        "{style},,0000,0000,0000,,{{\\move({start},{y},{end},{y})"
+    )?;
+    if height != config.font_size {
+        write!(output, "\\fs{height}")?;
+    }
+    if r2l && config.outline > 0.0 && config.outline_blur > 0.0 {
+        write!(
+            output,
+            "\\blur{}",
+            general_float(f64::from(config.outline_blur))
+        )?;
+    }
+    output.write_all(b"}")?;
+    write_color_text(output, item, config, escaped, r2l)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_fixed(
+    output: &mut impl Write,
+    item: &Danmaku,
+    config: &Config,
+    duration: i32,
+    y: i32,
+    height: i32,
+    escaped: &[u8],
+    bottom: bool,
+) -> io::Result<()> {
+    write_event_prefix(output, item, duration, true)?;
+    let style = if bottom { "BTM" } else { "TOP" };
+    write!(
+        output,
+        "{style},,0000,0000,0000,,{{\\pos({},{y})",
+        config.resolution_x / 2
+    )?;
+    if height != config.font_size {
+        write!(output, "\\fs{height}")?;
+    }
+    output.write_all(b"}")?;
+    write_color_text(output, item, config, escaped, false)
+}
+
+fn write_special(output: &mut impl Write, item: &Danmaku, config: &Config) -> io::Result<()> {
+    let special = item
+        .special
+        .as_ref()
+        .expect("special data validated before ASS output");
+    let duration = rounded_milliseconds(special.exist_time);
+    write_event_prefix(output, item, duration, false)?;
+    output.write_all(b"SP,,0000,0000,0000,,{")?;
+    let (mut start_x, mut start_y, mut end_x, mut end_y) = (
+        special.start_x,
+        special.start_y,
+        special.end_x,
+        special.end_y,
+    );
+    if [start_x, start_y, end_x, end_y]
+        .into_iter()
+        .all(|value| f64::from(value) < 1.0 + EPS)
+    {
+        start_x *= config.resolution_x as f32;
+        end_x *= config.resolution_x as f32;
+        start_y *= config.resolution_y as f32;
+        end_y *= config.resolution_y as f32;
+    }
+    if start_x == end_x && start_y == end_y {
+        write!(output, "\\pos({},{})", start_x as i32, start_y as i32)?;
+    } else {
+        write!(
+            output,
+            "\\move({},{},{},{}",
+            start_x as i32, start_y as i32, end_x as i32, end_y as i32
+        )?;
+        match (special.pause_time, special.move_time) {
+            (0, 0) => output.write_all(b")")?,
+            (0, movement) => write!(output, ",0,{movement})")?,
+            (pause, movement) => write!(output, ",{pause},{})", pause.wrapping_add(movement))?,
+        }
+    }
+    if item.font_size != 25 {
+        write!(output, "\\fs{}", item.font_size)?;
+    }
+    if item.color != 0xFFFFFF {
+        write!(output, "\\c&H{}", to_hex_color(item.color))?;
+    }
+    if special.fr_y != 0 {
+        write!(output, "\\fry{}", special.fr_y)?;
+    }
+    if special.fr_z != 0 {
+        write!(output, "\\frz{}", special.fr_z)?;
+    }
+    if special.fade_start != 0 || special.fade_end != 0 {
+        write!(
+            output,
+            "\\fade({},{},{},0,0,{},{duration})",
+            special.fade_start, special.fade_start, special.fade_end, special.pause_time
+        )?;
+    } else {
+        output.write_all(b"\\alpha&H00")?;
+    }
+    if !special.font_name.is_empty() {
+        output.write_all(b"\\fn")?;
+        output.write_all(&special.font_name)?;
+    }
+    output.write_all(b"}")?;
+    output.write_all(&item.text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{SPECIAL, SpecialPart};
+
+    fn item(kind: i16, time: i32, text: &[u8]) -> Danmaku {
+        Danmaku {
+            time,
+            type_: kind,
+            font_size: 25,
+            color: 0xFFFFFF,
+            text: text.to_vec(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn full_height_bottom_fallback_stays_in_bounds() {
+        let config = Config {
+            resolution_y: 1,
+            font_size: 38,
+            density: 0,
+            ..Default::default()
+        };
+        let mut items = [item(BOTTOM, 1000, b"a"), item(BOTTOM, 1000, b"b")];
+        let mut output = Vec::new();
+        write_danmaku(&mut output, &mut items, &config).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        assert_eq!(output.matches("\\pos(960,0)").count(), 2);
+    }
+
+    #[test]
+    fn repeat_filter_does_not_block_special_but_special_counts_toward_density() {
+        let mut special = item(SPECIAL, 1000, b"same");
+        special.special = Some(Box::new(SpecialPart {
+            exist_time: 5000,
+            ..Default::default()
+        }));
+        let mut items = [special, item(R2L, 1000, b"same")];
+        let config = Config {
+            density: 1,
+            block_mode: BLOCK_REPEAT,
+            save_blocked: false,
+            ..Default::default()
+        };
+        let mut output = Vec::new();
+        write_danmaku(&mut output, &mut items, &config).unwrap();
+        assert_eq!(items[0].type_, SPECIAL);
+        assert_eq!(items[1].type_, -R2L);
+        assert!(output.is_empty());
+    }
+
+    #[test]
+    fn filtered_ordinary_events_remain_comments_when_save_blocked_is_off() {
+        let mut items = [item(-R2L, 1000, b"hello")];
+        let config = Config {
+            save_blocked: false,
+            ..Default::default()
+        };
+        let mut output = Vec::new();
+        write_danmaku(&mut output, &mut items, &config).unwrap();
+        assert!(output.starts_with(b"\nComment: 0,"));
+        assert!(output.ends_with(b"hello"));
+    }
+
+    #[test]
+    fn special_motion_rotation_and_fade_are_preserved() {
+        let mut special = item(SPECIAL, 1000, b"{raw}");
+        special.font_size = 30;
+        special.color = 0x123456;
+        special.special = Some(Box::new(SpecialPart {
+            exist_time: 2000,
+            move_time: 500,
+            pause_time: 100,
+            start_x: 0.25,
+            start_y: 0.5,
+            end_x: 0.75,
+            end_y: 0.5,
+            fade_start: 16,
+            fade_end: 32,
+            fr_y: 45,
+            fr_z: 90,
+            font_name: b"Special Font".to_vec(),
+        }));
+        let mut output = Vec::new();
+        write_danmaku(&mut output, &mut [special], &Config::default()).unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            "\nDialogue: 0,0:00:01.00,0:00:03.00,SP,,0000,0000,0000,,{\\move(480,540,1440,540,100,600)\\fs30\\c&H563412\\fry45\\frz90\\fade(16,16,32,0,0,100,2000)\\fnSpecial Font}{raw}"
+        );
+    }
+}

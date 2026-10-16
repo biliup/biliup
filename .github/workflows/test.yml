@@ -46,22 +46,61 @@ jobs:
       - name: Install media test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg locales
+          sudo apt-get install -y ffmpeg locales cmake libreadline-dev
           sudo locale-gen de_DE.UTF-8
+          sudo localedef -i fr_FR -f ISO-8859-1 fr_FR
           bash .github/scripts/build-render-tools.sh "$RUNNER_TEMP/render-tools"
           echo "BILIUP_RENDER_TOOLS_DIR=$RUNNER_TEMP/render-tools" >> "$GITHUB_ENV"
           echo "BILIUP_REQUIRE_RENDER_TESTS=1" >> "$GITHUB_ENV"
       - name: Run tests
         run: cargo test --locked --workspace
+      - name: Build the pinned independent PCRE2 reference
+        run: |
+          source="$RUNNER_TEMP/pcre2-source"
+          reference="$RUNNER_TEMP/pcre2-reference"
+          commit=$(sed -n 's/^Commit: //p' crates/danmaku-factory-sys/vendor/pcre2/UPSTREAM)
+          test -n "$commit"
+          git clone --quiet https://github.com/PCRE2Project/pcre2.git "$source"
+          git -C "$source" checkout --quiet "$commit"
+          git -C "$source" submodule update --init --depth 1
+          cmake -S "$source" -B "$reference" -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF -DBUILD_STATIC_LIBS=ON \
+            -DPCRE2_BUILD_PCRE2_8=ON -DPCRE2_BUILD_PCRE2_16=ON -DPCRE2_BUILD_PCRE2_32=ON \
+            -DPCRE2_SUPPORT_UNICODE=ON -DPCRE2_SUPPORT_JIT=ON
+          cmake --build "$reference" --parallel 2
+          ctest --test-dir "$reference" --output-on-failure
+          echo "PCRE2_UPSTREAM_SOURCE=$source" >> "$GITHUB_ENV"
+          echo "PCRE2_ORACLE_BUILD=$reference" >> "$GITHUB_ENV"
+          echo "PCRE2_RUST_STATICLIB=$GITHUB_WORKSPACE/target/release/libpcre2_rust.a" >> "$GITHUB_ENV"
+      - name: Full PCRE2 syntax, ABI, JIT, POSIX and serialization compatibility
+        run: |
+          cargo build --locked --release -p pcre2-rust --lib
+          cargo test --locked -p pcre2-rust --test upstream_suite -- --ignored
 
-  # 内置 DanmakuFactory 核心与 C 包装层：ASan/UBSan/LSan 覆盖成功与失败清理路径，并检查导出符号都带前缀
+  # 检查实际 Rust 核心和正则引擎；C 仅作为独立 ABI 测试客户端。
   danmaku-factory-sanitizers:
-    name: DanmakuFactory core under sanitizers
+    name: Rust native cores under sanitizers
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Run sanitizer checks
+        # The production crates continue to build with stable Rust.
         run: CC=clang crates/danmaku-factory-sys/tests/c/check.sh
+
+  pcre2-platforms:
+    name: Rust conversion and PCRE2 API (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Conversion, complete 8/16/32-bit API and real JIT regression
+        run: cargo test --locked -p danmaku-factory-sys -p danmaku-factory -p pcre2-rust
 
   # golden 语料必须能由固定提交的 DanmakuFactory CLI 重新生成：补丁版 CLI 写出期望结果，
   # 原版 CLI 除标记的上游缺陷用例外必须逐字节相同
@@ -74,7 +113,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libpcre2-dev pkg-config
-          commit=$(sed -n 's/^DANMAKU_FACTORY_COMMIT="\(.*\)"$/\1/p' crates/danmaku-factory-sys/scripts/vendor.sh)
+          commit=$(sed -n 's/^Commit: //p' crates/danmaku-factory-sys/vendor/DanmakuFactory/UPSTREAM)
+          test -n "$commit"
           git clone --quiet https://github.com/hihkm/DanmakuFactory.git "$RUNNER_TEMP/df"
           build() {
             mkdir -p "$RUNNER_TEMP/$1"

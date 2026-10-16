@@ -1,0 +1,12 @@
+[package]
+name = "pcre2-rust"
+version = "0.1.0"
+edition = "2021"
+description = "PCRE2 10.49 algorithms and C-compatible interfaces implemented in Rust"
+license = "(BSD-3-Clause WITH PCRE2-exception) AND BSD-2-Clause"
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+libc = "0.2"
