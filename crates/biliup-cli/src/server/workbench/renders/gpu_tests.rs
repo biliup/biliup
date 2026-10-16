@@ -307,7 +307,11 @@ async fn oversized_stderr_is_rejected_before_waiting_for_stdout_eof() {
     let result = bounded_command_output(command, Duration::from_secs(2)).await;
     let error = result.expect_err("oversized stderr must reject the probe");
     assert!(error.contains("超过 64 KiB"), "actual probe error: {error}");
-    assert!(started.elapsed() < Duration::from_secs(1), "rejection took {:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "rejection took {:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]

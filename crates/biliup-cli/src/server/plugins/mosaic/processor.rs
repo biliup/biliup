@@ -219,9 +219,11 @@ impl MosaicPlugin {
 
     async fn process_file(&self, input: &Path, regions: &[MosaicRegion]) -> AppResult<PathBuf> {
         info!(file = %input.display(), regions = regions.len(), "录像已进入画面遮挡队列");
-        let _slot = crate::server::workbench::transcode::acquire(&tokio_util::sync::CancellationToken::new())
-            .await
-            .map_err(AppError::Custom)?;
+        let _slot = crate::server::workbench::transcode::acquire(
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .map_err(AppError::Custom)?;
         let started = std::time::Instant::now();
         let destination = masked_path(input);
         // Files from new downloads are already quarantined. Protect legacy/HA

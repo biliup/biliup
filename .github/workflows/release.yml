@@ -213,8 +213,8 @@ jobs:
               mkdir tmp/$pkgname
               # cp LICENSE README.md tmp/$pkgname
               mv bins-$platform/$BIN_NAME$exe tmp/$pkgname
-              # DanmakuFactory 核心与 PCRE2 静态链接在二进制里，随包附上它们的许可证
-              cp crates/danmaku-factory-sys/THIRD-PARTY-NOTICES.txt tmp/$pkgname/
+              # Rust 弹幕排版派生自 DanmakuFactory，随包保留 MIT 来源声明
+              cp crates/danmaku-factory/THIRD-PARTY-NOTICES.txt tmp/$pkgname/
               {
                 printf '\n\nNoto Sans CJK SC Regular, embedded in the biliup binary. SIL Open Font License 1.1:\n\n'
                 cat crates/biliup-cli/assets/NotoSansCJK-OFL.txt

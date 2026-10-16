@@ -471,8 +471,13 @@ impl ClipPublisher {
         };
         let observation = self.observations.as_ref().map(|observations| {
             let mut observation = observations.register(NewTask {
-                source: "clip", scheduler_group: "clip-publish", title: "切片投稿", streamer_name: None,
-                session_id: Some(session_id), template_name: None, fifo: true,
+                source: "clip",
+                scheduler_group: "clip-publish",
+                title: "切片投稿",
+                streamer_name: None,
+                session_id: Some(session_id),
+                template_name: None,
+                fifo: true,
             });
             observation.pin();
             observation
@@ -757,7 +762,10 @@ impl ClipPublisher {
         if self.snapshot(id).is_none() {
             return Outcome::Failed("任务不见了".into());
         }
-        let observation = lock(&self.queue).jobs.iter().find(|job| job.view.id == id)
+        let observation = lock(&self.queue)
+            .jobs
+            .iter()
+            .find(|job| job.view.id == id)
             .and_then(|job| job.observation.as_ref().map(|guard| guard.observation()));
         let outcome = if let Some(observation) = &observation {
             observation.scope(self.run_inner(id)).await

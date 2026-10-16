@@ -18,6 +18,9 @@ on:
 permissions:
   contents: read
 
+env:
+  IMAGE_NAME: ${{ github.repository == 'biliup/biliup' && 'ghcr.io/biliup/caution' || format('ghcr.io/{0}', github.repository) }}
+
 jobs:
   # Run tests.
   # See also https://docs.docker.com/docker-hub/builds/automated-testing/
@@ -92,14 +95,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Resolve repository image
+      - name: Generate artifact name
+        id: artifact-name
         shell: bash
         run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [ "$GITHUB_REPOSITORY" = "biliup/biliup" ]; then
-            image="ghcr.io/biliup/caution"
-          fi
-          echo "IMAGE_NAME=$image" >> "$GITHUB_ENV"
+          echo "IMAGE_NAME=${IMAGE_NAME,,}" >> "$GITHUB_ENV"
+          SAFE_PLATFORM="${{ matrix.platform }}"
+          SAFE_PLATFORM="${SAFE_PLATFORM//\//-}"
+          echo "name=digests-${SAFE_PLATFORM}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -136,14 +139,6 @@ jobs:
           digest="${{ steps.build-and-push.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
-      - name: Generate artifact name
-        id: artifact-name
-        run: |
-          # Use bash parameter expansion to replace '/' with '-' in platform name
-          SAFE_PLATFORM="${{ matrix.platform }}"
-          SAFE_PLATFORM="${SAFE_PLATFORM//\//-}"
-          echo "name=digests-${SAFE_PLATFORM}" >> $GITHUB_OUTPUT
-
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
@@ -161,15 +156,6 @@ jobs:
       packages: write
 
     steps:
-      - name: Resolve repository image
-        shell: bash
-        run: |
-          image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          if [ "$GITHUB_REPOSITORY" = "biliup/biliup" ]; then
-            image="ghcr.io/biliup/caution"
-          fi
-          echo "IMAGE_NAME=$image" >> "$GITHUB_ENV"
-
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
@@ -196,8 +182,10 @@ jobs:
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
+          IMAGE_NAME="${IMAGE_NAME,,}"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.IMAGE_NAME }}@sha256:%s ' *)
+            $(printf "$IMAGE_NAME@sha256:%s " *)
 
       - name: Inspect image
         run: |

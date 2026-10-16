@@ -108,7 +108,8 @@ impl Upos {
         F: Stream<Item = Result<(B, usize)>> + 'a,
         B: Into<Body> + Clone,
     {
-        self.upload_stream_with_observer(stream, total_size, limit, None).await
+        self.upload_stream_with_observer(stream, total_size, limit, None)
+            .await
     }
 
     pub(crate) async fn upload_stream_with_observer<'a, F, B>(
@@ -157,7 +158,9 @@ impl Upos {
                 let mut attempts = 0;
                 retry(|| {
                     if attempts > 0 {
-                        if let Some(observer) = observer { observer.chunk_retry(i + 1); }
+                        if let Some(observer) = observer {
+                            observer.chunk_retry(i + 1);
+                        }
                     }
                     attempts += 1;
                     async {
@@ -179,7 +182,9 @@ impl Upos {
                 })
                 .await?;
 
-                if observer.is_some_and(|observer| !observer.chunk_confirmed_range(i + 1, params.start, len)) {
+                if observer.is_some_and(|observer| {
+                    !observer.chunk_confirmed_range(i + 1, params.start, len)
+                }) {
                     return Err(Kind::Custom("上传已取消".into()));
                 }
 

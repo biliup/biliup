@@ -1,5 +1,4 @@
-//! Converts one file with the statically linked core, for comparing against a
-//! DanmakuFactory CLI build by hand:
+//! Converts one XML file with the native Rust converter:
 //!
 //!     cargo run -p danmaku-factory --example convert -- in.xml out.ass '{"width":1280,"height":720}'
 //!

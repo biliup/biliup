@@ -10,20 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  npm-launcher:
-    name: npm launcher tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: node --test npm/tests/*.test.cjs
-      - name: Frontend render and workbench logic tests
-        run: |
-          npm ci --no-audit --no-fund
-          node --test app/lib/*.test.cjs
-
   rust:
     name: Rust tests
     runs-on: ubuntu-latest
@@ -36,13 +22,15 @@ jobs:
       - name: Build frontend
         run: |
           npm install
+          node --test npm/tests/*.test.cjs
+          node --test app/lib/*.test.cjs
           npm run build
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；弹幕 XML -> ASS 已静态链接进 biliup，
+      # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；XML -> ASS 使用内置 Rust 转换器，
       # 不再安装外部转换器。BILIUP_REQUIRE_RENDER_TESTS 让缺少字体时测试失败而不是跳过。
-      # de_DE 让“逗号小数点 locale 被拒绝”的测试真正运行。
+      # de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
       - name: Install media test tools
         run: |
           sudo apt-get update
@@ -53,44 +41,6 @@ jobs:
           echo "BILIUP_REQUIRE_RENDER_TESTS=1" >> "$GITHUB_ENV"
       - name: Run tests
         run: cargo test --locked --workspace
-
-  # 内置 DanmakuFactory 核心与 C 包装层：ASan/UBSan/LSan 覆盖成功与失败清理路径，并检查导出符号都带前缀
-  danmaku-factory-sanitizers:
-    name: DanmakuFactory core under sanitizers
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Run sanitizer checks
-        run: CC=clang crates/danmaku-factory-sys/tests/c/check.sh
-
-  # golden 语料必须能由固定提交的 DanmakuFactory CLI 重新生成：补丁版 CLI 写出期望结果，
-  # 原版 CLI 除标记的上游缺陷用例外必须逐字节相同
-  danmaku-factory-golden:
-    name: DanmakuFactory golden corpus matches the CLI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build the pinned CLI, with and without biliup's patches
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpcre2-dev pkg-config
-          commit=$(sed -n 's/^DANMAKU_FACTORY_COMMIT="\(.*\)"$/\1/p' crates/danmaku-factory-sys/scripts/vendor.sh)
-          git clone --quiet https://github.com/hihkm/DanmakuFactory.git "$RUNNER_TEMP/df"
-          build() {
-            mkdir -p "$RUNNER_TEMP/$1"
-            mapfile -d '' sources < <(find "$RUNNER_TEMP/df/src" -type f -name '*.c' -print0)
-            read -r -a pcre <<< "$(pkg-config --cflags --libs libpcre2-8)"
-            cc -std=gnu11 -O2 "${sources[@]}" "${pcre[@]}" -lm -o "$RUNNER_TEMP/$1/DanmakuFactory"
-          }
-          git -C "$RUNNER_TEMP/df" checkout --quiet "$commit"
-          build upstream
-          git -C "$RUNNER_TEMP/df" apply "$GITHUB_WORKSPACE"/crates/danmaku-factory-sys/patches/*.patch
-          build patched
-      - name: Regenerate the corpus
-        run: |
-          python3 -I crates/danmaku-factory/tests/golden/generate.py \
-            --cli "$RUNNER_TEMP/patched/DanmakuFactory" --upstream-cli "$RUNNER_TEMP/upstream/DanmakuFactory"
-          git diff --exit-code -- crates/danmaku-factory/tests/golden
 
   # 桌面程序是独立 workspace，依赖变动时根 Cargo.lock 会更新，它的锁不会跟着变；
   # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）

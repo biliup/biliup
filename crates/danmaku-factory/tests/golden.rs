@@ -1,11 +1,11 @@
-//! The statically linked core must write exactly what the DanmakuFactory CLI
-//! writes. tests/golden/expected was produced by the CLI (pinned commit plus
-//! biliup's patches) and checked against the unmodified pinned CLI; see
-//! tests/golden/generate.py.
+//! Compare the native converter with immutable DanmakuFactory CLI output from
+//! commit 3813e93b13b087e95901d1822baf9c3540e3f3f6 plus biliup's fixes.
+//! Reviewed text and stable-sort changes have independent assertions.
 
 use danmaku_factory::{ConvertOptions, convert_xml_to_ass};
 use serde::Deserialize;
 use std::path::PathBuf;
+mod support;
 
 #[derive(Deserialize)]
 struct Case {
@@ -81,7 +81,9 @@ fn every_case_matches_the_cli_byte_for_byte() {
         let output = dir.path().join(format!("{}.ass", case.name));
         let stats = convert_xml_to_ass(&input, &output, &case.options)
             .unwrap_or_else(|e| panic!("{}: {e}", case.name));
-        let expected = std::fs::read(golden().join("expected").join(format!("{}.ass", case.name))).unwrap();
+        let legacy =
+            std::fs::read(golden().join("expected").join(format!("{}.ass", case.name))).unwrap();
+        let expected = support::expected(&case.input, legacy);
         let actual = platform_neutral(std::fs::read(&output).unwrap());
         assert!(
             actual == expected,
@@ -90,7 +92,12 @@ fn every_case_matches_the_cli_byte_for_byte() {
             first_difference(&actual, &expected)
         );
         assert!(stats.danmaku_count > 0 && stats.blocked_count <= stats.danmaku_count);
-        assert_eq!(std::fs::read(&input).unwrap(), before, "{}: input changed", case.name);
+        assert_eq!(
+            std::fs::read(&input).unwrap(),
+            before,
+            "{}: input changed",
+            case.name
+        );
     }
 }
 

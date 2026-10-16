@@ -151,15 +151,17 @@ async fn env_with_upload_observations(observe: bool, spawn: bool) -> Env {
         let observations = UploadObservations::new(pool.clone());
         observations.initialize().await.unwrap();
         Some(observations)
-    } else { None };
-    let mut publisher = ClipPublisher::new(
-        pool.clone(),
-        exports.clone(),
-        Arc::new(fake.clone()),
-    );
-    if let Some(observations) = &observations { publisher = publisher.with_observations(observations.clone()); }
+    } else {
+        None
+    };
+    let mut publisher = ClipPublisher::new(pool.clone(), exports.clone(), Arc::new(fake.clone()));
+    if let Some(observations) = &observations {
+        publisher = publisher.with_observations(observations.clone());
+    }
     let publisher = Arc::new(publisher);
-    if spawn { publisher.spawn(); }
+    if spawn {
+        publisher.spawn();
+    }
     Env {
         _dir: dir,
         pool,
@@ -749,16 +751,43 @@ async fn clip_task_is_registered_when_enqueued_with_real_queue_order() {
     let env = env_with_upload_observations(true, false).await;
     let clip = env.clip(1_000, 2_000, "first").await;
     let job = env.enqueue(std::slice::from_ref(&clip));
-    let id = lock(&env.publisher.queue).jobs.iter().find(|queued| queued.view.id == job.id)
-        .and_then(|queued| queued.observation.as_ref()).unwrap().observation().id().to_owned();
-    let task = env.observations.as_ref().unwrap().detail(&id).await.unwrap().unwrap();
+    let id = lock(&env.publisher.queue)
+        .jobs
+        .iter()
+        .find(|queued| queued.view.id == job.id)
+        .and_then(|queued| queued.observation.as_ref())
+        .unwrap()
+        .observation()
+        .id()
+        .to_owned();
+    let task = env
+        .observations
+        .as_ref()
+        .unwrap()
+        .detail(&id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(task.task.source, "clip");
     assert_eq!(task.task.scheduler_group, "clip-publish");
     assert_eq!(task.task.state, "queued");
     assert_eq!(task.task.queue_position, Some(1));
-    lock(&env.publisher.queue).jobs.iter_mut().find(|queued| queued.view.id == job.id).unwrap().view.state = JobState::Failed;
+    lock(&env.publisher.queue)
+        .jobs
+        .iter_mut()
+        .find(|queued| queued.view.id == job.id)
+        .unwrap()
+        .view
+        .state = JobState::Failed;
     env.publisher.retry(job.id).unwrap();
-    let retried = env.observations.as_ref().unwrap().detail(&id).await.unwrap().unwrap();
+    let retried = env
+        .observations
+        .as_ref()
+        .unwrap()
+        .detail(&id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(retried.task.id, id);
     assert!(retried.task.order > task.task.order);
     assert_eq!(retried.task.state, "queued");

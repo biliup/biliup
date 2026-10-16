@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
@@ -475,16 +476,16 @@ pub async fn preview_on_canvas(
     let media = probe(canvas_path.unwrap_or(&source.path), cancel).await?;
     let width = media.width.div_ceil(2) * 2;
     let height = media.height.div_ceil(2) * 2;
-    let temp = tempfile::tempdir().map_err(|e| format!("无法创建预览目录：{e}"))?;
-    super::danmaku::generate(
-        source,
-        &settings.danmaku,
-        width,
-        height,
-        temp.path(),
-        cancel,
-    )
-    .await
+    let temp = Arc::new(
+        super::danmaku::ManagedRoot::new(
+            crate::danmaku_worker::managed_preview_root()
+                .map_err(|e| format!("无法创建预览目录：{e}"))?,
+        )
+        .map_err(|e| format!("无法登记预览工作目录：{e}"))?,
+    );
+    let result =
+        super::danmaku::generate(source, &settings.danmaku, width, height, &temp, cancel).await;
+    super::danmaku::ManagedRoot::finish(temp, result)
 }
 
 fn secs(ms: i64) -> String {
@@ -1390,10 +1391,15 @@ pub async fn render(
     {
         return Err("输出文件已经存在，拒绝覆盖".into());
     }
-    let work = tempfile::Builder::new()
-        .prefix(".render-")
-        .tempdir_in(parent)
-        .map_err(|e| format!("创建合成临时目录失败：{e}"))?;
+    let work = Arc::new(
+        super::danmaku::ManagedRoot::new(
+            tempfile::Builder::new()
+                .prefix(".render-")
+                .tempdir_in(parent)
+                .map_err(|e| format!("创建合成临时目录失败：{e}"))?,
+        )
+        .map_err(|e| format!("无法登记合成工作目录：{e}"))?,
+    );
     let total = request
         .sources
         .iter()
@@ -1472,7 +1478,7 @@ pub async fn render(
             &request.settings.danmaku,
             target.0,
             target.1,
-            &segment_dir,
+            &work,
             &cancel,
         )
         .await?;
@@ -1972,6 +1978,7 @@ pub async fn render(
     tokio::fs::hard_link(&result, &request.output_path)
         .await
         .map_err(|e| format!("发布合成产物失败：{e}"))?;
+    finish_published_work(work, &request.output_path).await?;
     report(engine_progress(
         Some(&active_selected),
         "已完成".into(),
@@ -1993,3 +2000,56 @@ pub async fn render(
 #[cfg(test)]
 #[path = "engine_tests.rs"]
 mod tests;
+
+/// The link was created exclusively by this render immediately before this
+/// call. A checked root-cleanup failure cannot leave an uncommitted product
+/// blocking every retry. Only this render's own published link is rolled back.
+async fn finish_published_work(
+    work: Arc<super::danmaku::ManagedRoot>,
+    output: &Path,
+) -> Result<(), String> {
+    if let Err(primary) = super::danmaku::ManagedRoot::finish(work, Ok(())) {
+        return match tokio::fs::remove_file(output).await {
+            Ok(()) => Err(primary),
+            Err(error) => Err(format!(
+                "{primary}; cleanup unconfirmed output {}: {error}",
+                output.display()
+            )),
+        };
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod danmaku_cleanup_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn failed_checked_root_cleanup_rolls_back_only_this_renders_published_link() {
+        let parent = tempfile::tempdir().unwrap();
+        let root = Arc::new(
+            super::super::danmaku::ManagedRoot::new(
+                tempfile::Builder::new()
+                    .prefix(".render-")
+                    .tempdir_in(parent.path())
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+        let path = root.path().to_owned();
+        let internal = path.join("result.mp4");
+        std::fs::write(&internal, b"complete").unwrap();
+        let output = parent.path().join("new.mp4");
+        let earlier = parent.path().join("earlier.mp4");
+        std::fs::write(&earlier, b"keep").unwrap();
+        std::fs::hard_link(&internal, &output).unwrap();
+        root.record_cleanup_failure("cleanup private ASS attempt: denied");
+        let failure = finish_published_work(root, &output).await.unwrap_err();
+        assert!(failure.contains("denied"));
+        assert!(!output.exists());
+        assert_eq!(std::fs::read(&earlier).unwrap(), b"keep");
+        assert!(path.join(crate::danmaku_worker::ROOT_LEASE_FILE).exists());
+        assert!(super::super::jobs::cleanup_inactive_danmaku_root(&path).unwrap());
+        assert!(!path.exists());
+    }
+}

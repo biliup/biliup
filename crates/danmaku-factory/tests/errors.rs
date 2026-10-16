@@ -23,7 +23,10 @@ fn biliup_options() -> ConvertOptions {
     }
 }
 
-fn convert_text(xml: &str, options: &ConvertOptions) -> Result<String, danmaku_factory::ConvertError> {
+fn convert_text(
+    xml: &str,
+    options: &ConvertOptions,
+) -> Result<String, danmaku_factory::ConvertError> {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("in.xml");
     std::fs::write(&input, xml).unwrap();
@@ -42,11 +45,23 @@ const ONE: &str = "<i>\n<d p=\"1.000,1,25,16777215,0,0,0,0\">hello</d>\n</i>\n";
 fn missing_and_unreadable_inputs() {
     let dir = tempfile::tempdir().unwrap();
     let output = dir.path().join("out.ass");
-    let error = convert_xml_to_ass(&dir.path().join("missing.xml"), &output, &biliup_options()).unwrap_err();
+    let error = convert_xml_to_ass(&dir.path().join("missing.xml"), &output, &biliup_options())
+        .unwrap_err();
     assert_eq!(error.kind, ErrorKind::InputOpen, "{error}");
     #[cfg(unix)]
     assert_eq!(error.os_error, Some(2), "{error}");
     assert!(!output.exists());
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let invalid = Path::new(std::ffi::OsStr::from_bytes(b"bad\0path"));
+        assert_eq!(
+            convert_xml_to_ass(invalid, &output, &biliup_options())
+                .unwrap_err()
+                .kind,
+            ErrorKind::InvalidArgument
+        );
+    }
 
     // fopen() accepts a directory on Linux; the first read fails.
     #[cfg(target_os = "linux")]
@@ -153,33 +168,195 @@ fn every_option_is_range_checked() {
     let base = biliup_options;
     let invalid: Vec<(&str, ConvertOptions)> = vec![
         ("width 0", ConvertOptions { width: 0, ..base() }),
-        ("width", ConvertOptions { width: 16385, ..base() }),
-        ("width overflow", ConvertOptions { width: u32::MAX, ..base() }),
-        ("height 0", ConvertOptions { height: 0, ..base() }),
-        ("display 0", ConvertOptions { display_area: 0., ..base() }),
-        ("display NaN", ConvertOptions { display_area: f32::NAN, ..base() }),
-        ("display >1", ConvertOptions { display_area: 1.1, ..base() }),
-        ("scroll area", ConvertOptions { scroll_area: f32::INFINITY, ..base() }),
-        ("scroll 0", ConvertOptions { scroll_time: 0., ..base() }),
-        ("scroll NaN", ConvertOptions { scroll_time: f32::NAN, ..base() }),
-        ("scroll long", ConvertOptions { scroll_time: 3601., ..base() }),
-        ("fix 0", ConvertOptions { fix_time: 0., ..base() }),
-        ("density", ConvertOptions { density: -2, ..base() }),
-        ("spacing", ConvertOptions { line_spacing: 20000, ..base() }),
-        ("margin", ConvertOptions { top_margin: -20000, ..base() }),
-        ("font 0", ConvertOptions { font_size: 0, ..base() }),
-        ("font big", ConvertOptions { font_size: 4097, ..base() }),
-        ("font name empty", ConvertOptions { font_name: String::new(), ..base() }),
-        ("font name comma", ConvertOptions { font_name: "A,B".into(), ..base() }),
-        ("font name control", ConvertOptions { font_name: "A\nB".into(), ..base() }),
-        ("font name NUL", ConvertOptions { font_name: "A\0B".into(), ..base() }),
-        ("font name long", ConvertOptions { font_name: "字".repeat(43), ..base() }),
-        ("opacity 0", ConvertOptions { opacity: 0, ..base() }),
-        ("outline", ConvertOptions { outline: 4.5, ..base() }),
-        ("outline negative", ConvertOptions { outline: -0.1, ..base() }),
-        ("blur", ConvertOptions { outline_blur: 101., ..base() }),
-        ("shadow", ConvertOptions { shadow: f32::NAN, ..base() }),
-        ("block", ConvertOptions { block_mode: 128, ..base() }),
+        (
+            "width",
+            ConvertOptions {
+                width: 16385,
+                ..base()
+            },
+        ),
+        (
+            "width overflow",
+            ConvertOptions {
+                width: u32::MAX,
+                ..base()
+            },
+        ),
+        (
+            "height 0",
+            ConvertOptions {
+                height: 0,
+                ..base()
+            },
+        ),
+        (
+            "display 0",
+            ConvertOptions {
+                display_area: 0.,
+                ..base()
+            },
+        ),
+        (
+            "display NaN",
+            ConvertOptions {
+                display_area: f32::NAN,
+                ..base()
+            },
+        ),
+        (
+            "display >1",
+            ConvertOptions {
+                display_area: 1.1,
+                ..base()
+            },
+        ),
+        (
+            "scroll area",
+            ConvertOptions {
+                scroll_area: f32::INFINITY,
+                ..base()
+            },
+        ),
+        (
+            "scroll 0",
+            ConvertOptions {
+                scroll_time: 0.,
+                ..base()
+            },
+        ),
+        (
+            "scroll NaN",
+            ConvertOptions {
+                scroll_time: f32::NAN,
+                ..base()
+            },
+        ),
+        (
+            "scroll long",
+            ConvertOptions {
+                scroll_time: 3601.,
+                ..base()
+            },
+        ),
+        (
+            "fix 0",
+            ConvertOptions {
+                fix_time: 0.,
+                ..base()
+            },
+        ),
+        (
+            "density",
+            ConvertOptions {
+                density: -2,
+                ..base()
+            },
+        ),
+        (
+            "spacing",
+            ConvertOptions {
+                line_spacing: 20000,
+                ..base()
+            },
+        ),
+        (
+            "margin",
+            ConvertOptions {
+                top_margin: -20000,
+                ..base()
+            },
+        ),
+        (
+            "font 0",
+            ConvertOptions {
+                font_size: 0,
+                ..base()
+            },
+        ),
+        (
+            "font big",
+            ConvertOptions {
+                font_size: 4097,
+                ..base()
+            },
+        ),
+        (
+            "font name empty",
+            ConvertOptions {
+                font_name: String::new(),
+                ..base()
+            },
+        ),
+        (
+            "font name comma",
+            ConvertOptions {
+                font_name: "A,B".into(),
+                ..base()
+            },
+        ),
+        (
+            "font name control",
+            ConvertOptions {
+                font_name: "A\nB".into(),
+                ..base()
+            },
+        ),
+        (
+            "font name NUL",
+            ConvertOptions {
+                font_name: "A\0B".into(),
+                ..base()
+            },
+        ),
+        (
+            "font name long",
+            ConvertOptions {
+                font_name: "字".repeat(43),
+                ..base()
+            },
+        ),
+        (
+            "opacity 0",
+            ConvertOptions {
+                opacity: 0,
+                ..base()
+            },
+        ),
+        (
+            "outline",
+            ConvertOptions {
+                outline: 4.5,
+                ..base()
+            },
+        ),
+        (
+            "outline negative",
+            ConvertOptions {
+                outline: -0.1,
+                ..base()
+            },
+        ),
+        (
+            "blur",
+            ConvertOptions {
+                outline_blur: 101.,
+                ..base()
+            },
+        ),
+        (
+            "shadow",
+            ConvertOptions {
+                shadow: f32::NAN,
+                ..base()
+            },
+        ),
+        (
+            "block",
+            ConvertOptions {
+                block_mode: 128,
+                ..base()
+            },
+        ),
     ];
     for (name, options) in invalid {
         let error = convert_text(ONE, &options).unwrap_err();
@@ -187,10 +364,30 @@ fn every_option_is_range_checked() {
     }
     // The limits themselves are accepted.
     for options in [
-        ConvertOptions { width: 16384, height: 1, display_area: 1., ..base() },
-        ConvertOptions { font_name: "字".repeat(42), font_size: 4096, ..base() },
-        ConvertOptions { opacity: 255, outline: 4., shadow: 4., density: -1, ..base() },
-        ConvertOptions { scroll_time: 3600., fix_time: 0.0001, block_mode: 127, ..base() },
+        ConvertOptions {
+            width: 16384,
+            height: 1,
+            display_area: 1.,
+            ..base()
+        },
+        ConvertOptions {
+            font_name: "字".repeat(42),
+            font_size: 4096,
+            ..base()
+        },
+        ConvertOptions {
+            opacity: 255,
+            outline: 4.,
+            shadow: 4.,
+            density: -1,
+            ..base()
+        },
+        ConvertOptions {
+            scroll_time: 3600.,
+            fix_time: 0.0001,
+            block_mode: 127,
+            ..base()
+        },
     ] {
         convert_text(ONE, &options).unwrap();
     }
@@ -231,6 +428,16 @@ fn long_paths_on_windows() {
     let output = nested.join("输出.ass");
     convert_xml_to_ass(&input, &output, &biliup_options()).unwrap();
     assert!(std::fs::metadata(&output).unwrap().len() > 1000);
+    let complete = std::fs::read(&output).unwrap();
+    assert_eq!(
+        convert_xml_to_ass(&input, &output, &biliup_options())
+            .unwrap_err()
+            .kind,
+        ErrorKind::OutputExists
+    );
+    assert_eq!(std::fs::read(&output).unwrap(), complete);
+    assert_eq!(std::fs::read_dir(&nested).unwrap().count(), 2);
+    std::fs::rename(&output, nested.join("released.ass")).unwrap();
     // Relative paths work as well.
     let relative = Path::new("relative-out.ass");
     let _ = std::fs::remove_file(relative);
@@ -254,7 +461,11 @@ fn racing_callers_never_replace_or_delete_each_others_output() {
             .collect();
         handles.into_iter().map(|h| h.join().unwrap()).collect()
     });
-    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1, "{results:?}");
+    assert_eq!(
+        results.iter().filter(|r| r.is_ok()).count(),
+        1,
+        "{results:?}"
+    );
     for result in results.iter().filter_map(|r| r.as_ref().err()) {
         assert_eq!(result.kind, ErrorKind::OutputExists, "{result}");
     }
@@ -275,7 +486,8 @@ fn concurrent_callers_get_correct_results() {
             scope.spawn(move || {
                 for round in 0..3 {
                     let output = dir.join(format!("{thread}-{round}.ass"));
-                    convert_xml_to_ass(&golden("inputs/dense.xml"), &output, &biliup_options()).unwrap();
+                    convert_xml_to_ass(&golden("inputs/dense.xml"), &output, &biliup_options())
+                        .unwrap();
                     let actual = std::fs::read(&output).unwrap();
                     if !cfg!(windows) {
                         assert!(actual == *expected, "thread {thread} round {round}");

@@ -4,8 +4,8 @@
 //! the embedding host ships (the desktop app passes the ffmpeg bundled in its
 //! installer through `ServeOptions::ffmpeg`), then `ffmpeg` on `PATH`.
 //!
-//! Danmaku XML -> ASS conversion needs no external program: DanmakuFactory's
-//! core is linked into biliup (see `crate::danmaku_worker`). The render tools
+//! Danmaku XML -> ASS conversion uses the native Rust converter built into
+//! biliup (see `crate::danmaku_worker`). The render tools
 //! directory only provides the font shared by the browser preview and FFmpeg.
 
 use serde::Serialize;

@@ -1,0 +1,17 @@
+[
+  {"seconds":"-0.00009","source_time_ms":0,"ass_start_ms":0},
+  {"seconds":"0","source_time_ms":0,"ass_start_ms":0},
+  {"seconds":"0.000049","source_time_ms":0,"ass_start_ms":0},
+  {"seconds":"0.0001","source_time_ms":0,"ass_start_ms":0},
+  {"seconds":"0.0004999","source_time_ms":0,"ass_start_ms":0},
+  {"seconds":"0.0005","source_time_ms":1,"ass_start_ms":0},
+  {"seconds":"0.0015","source_time_ms":2,"ass_start_ms":0},
+  {"seconds":"1.001","source_time_ms":1001,"ass_start_ms":1000},
+  {"seconds":"1.004","source_time_ms":1004,"ass_start_ms":1000},
+  {"seconds":"1.005","source_time_ms":1005,"ass_start_ms":1010},
+  {"seconds":"1.0145","source_time_ms":1015,"ass_start_ms":1020},
+  {"seconds":"12345.6785","source_time_ms":12345680,"ass_start_ms":12345680},
+  {"seconds":"900000.001","source_time_ms":900000000,"ass_start_ms":900000000},
+  {"seconds":"1800000.001","source_time_ms":1800000000,"ass_start_ms":1800000000},
+  {"seconds":"2147470","source_time_ms":2147469952,"ass_start_ms":2147469950}
+]

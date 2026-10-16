@@ -1,6 +1,0 @@
-Repository: https://github.com/PCRE2Project/pcre2.git
-Tag: pcre2-10.49
-Commit: 6f9d7c1373262c541324a16a358785b33ef116cf
-Unmodified. pcre2.h, config.h and pcre2_chartables.c are copies of
-pcre2.h.generic, config.h.generic and pcre2_chartables.c.dist.
-License: BSD-3-Clause with the PCRE2 exception (LICENCE.md)

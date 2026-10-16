@@ -3,8 +3,8 @@ use crate::server::common::upload::{
     execute_postprocessor, initialize_upload_context, submit_to_bilibili, upload_byte_stream_parts,
     upload_single_file,
 };
-use crate::server::common::util::Recorder;
 use crate::server::common::upload_observation::{FileObservation, TaskObservation};
+use crate::server::common::util::Recorder;
 use crate::server::core::downloader::sync_downloader::{
     PumpResult, SyncDownloader, align_file_size, pump_chunks,
 };
@@ -114,19 +114,39 @@ pub(crate) async fn run_sync_pipeline(
     }
 
     let guard = crate::server::common::upload::observe_context(ctx, "sync", "sync", false);
-    if let Some(guard) = &guard { guard.observation().phase("initializing"); }
+    if let Some(guard) = &guard {
+        guard.observation().phase("initializing");
+    }
     ctx.change_status(Stage::Upload, WorkerStatus::Pending)
         .await;
     let result = if let Some(guard) = &guard {
-        guard.scope(run_inner(
-            downloader, token, ctx, download_config, &upload_config, session,
-        )).await
+        guard
+            .scope(run_inner(
+                downloader,
+                token,
+                ctx,
+                download_config,
+                &upload_config,
+                session,
+            ))
+            .await
     } else {
-        run_inner(downloader, token, ctx, download_config, &upload_config, session).await
+        run_inner(
+            downloader,
+            token,
+            ctx,
+            download_config,
+            &upload_config,
+            session,
+        )
+        .await
     };
     ctx.change_status(Stage::Upload, WorkerStatus::Idle).await;
     if let Some(guard) = guard {
-        let telemetry_result = result.as_ref().map(|_| ()).map_err(|error| format!("{error:#}"));
+        let telemetry_result = result
+            .as_ref()
+            .map(|_| ())
+            .map_err(|error| format!("{error:#}"));
         guard.finish_result(&telemetry_result);
     }
     result
@@ -366,7 +386,8 @@ async fn record_segments(
                 let len = chunk.len();
                 Ok((chunk, len))
             });
-            let upload = upload_byte_stream_parts(&segment_ctx, parcel, stream, upload_file_observation);
+            let upload =
+                upload_byte_stream_parts(&segment_ctx, parcel, stream, upload_file_observation);
             match observation {
                 Some(observation) => observation.scope(upload).await,
                 None => upload.await,
@@ -392,7 +413,9 @@ async fn record_segments(
             Err(error) => {
                 upload.abort();
                 let _ = upload.await;
-                if let Some(observation) = &file_observation { observation.finish(Some(&format!("{error:#}"))); }
+                if let Some(observation) = &file_observation {
+                    observation.finish(Some(&format!("{error:#}")));
+                }
                 retain_or_remove(&SegmentFile { path, keep }).await;
                 return Err(error);
             }
@@ -418,7 +441,9 @@ async fn record_segments(
         if pump.actual_size < MIN_MEDIA_BYTES {
             upload.abort();
             let _ = upload.await;
-            if let Some(observation) = &file_observation { observation.cancel(); }
+            if let Some(observation) = &file_observation {
+                observation.cancel();
+            }
             if !keep {
                 if let Some(workbench) = &workbench {
                     workbench.settled().await;
@@ -522,12 +547,16 @@ async fn finish_pending(
                 None
             }
             Ok(Err(error)) => {
-                if let Some(observation) = &work.observation { observation.finish(Some(&format!("{error:#}"))); }
+                if let Some(observation) = &work.observation {
+                    observation.finish(Some(&format!("{error:#}")));
+                }
                 warn!(seq = work.seq, ?error, "UPOS 预传失败，按临时文件重传");
                 None
             }
             Err(error) => {
-                if let Some(observation) = &work.observation { observation.finish(Some(&format!("{error:#}"))); }
+                if let Some(observation) = &work.observation {
+                    observation.finish(Some(&format!("{error:#}")));
+                }
                 warn!(seq = work.seq, ?error, "UPOS 预传任务失败，按临时文件重传");
                 None
             }
@@ -536,7 +565,9 @@ async fn finish_pending(
         if let Ok(Err(error)) = uploaded {
             warn!(seq = work.seq, ?error, "短流预传未完成，按实际长度重传");
         }
-        if let Some(observation) = &work.observation { observation.finish(Some("直播结束前流式上传未完成，改用完整文件重传")); }
+        if let Some(observation) = &work.observation {
+            observation.finish(Some("直播结束前流式上传未完成，改用完整文件重传"));
+        }
         None
     };
 

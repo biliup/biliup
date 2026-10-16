@@ -1,4 +1,0 @@
-Repository: https://github.com/hihkm/DanmakuFactory.git
-Commit: 3813e93b13b087e95901d1822baf9c3540e3f3f6
-Patches: crates/danmaku-factory-sys/patches/*.patch (applied)
-License: MIT (LICENSE)

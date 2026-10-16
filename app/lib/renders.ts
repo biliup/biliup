@@ -39,7 +39,7 @@ export interface RenderJob {
 export interface RenderCapabilities {
   available: boolean; ffmpeg: boolean; libass: boolean; libx264: boolean
   encoders?: RenderEncoderCapability[]
-  /** 内置弹幕转换（静态链接的 DanmakuFactory 核心）在工作进程中自检通过；不需要外部程序 */
+  /** 内置 Rust 弹幕转换器在工作进程中自检通过；不需要外部程序 */
   danmaku_factory: boolean; font: boolean; error: string | null
 }
 export const defaultRecipe = (): RenderRecipe => ({

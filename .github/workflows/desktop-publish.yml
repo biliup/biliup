@@ -26,11 +26,11 @@ jobs:
         node-version: lts/*
     # biliup-cli 通过 rust-embed 把 out/ 编进桌面程序
     - name: Build frontend
+      shell: bash
       run: |
         npm install
         npm run build
-    - name: Set desktop installer version
-      run: node .github/scripts/desktop-version.mjs
+        node .github/scripts/desktop-version.mjs
     # 只取 ffmpeg.exe 和许可文本，由 tauri.ffmpeg.conf.json 作为资源打进安装包（安装目录下的 ffmpeg\）。
     # GPL 对应源码不由我们托管：README.txt 和 Release 说明链接到上游固定 commit 的 FFmpeg 源码
     # 与 BtbN 构建脚本（scripts.d/ 固定了各依赖的版本与源码地址）。
@@ -77,13 +77,11 @@ jobs:
         EOF
         ls -l "$dest"
         rm ffmpeg.zip
-    # 字体与第三方声明；弹幕转换已静态链接进桌面程序，不再打包 DanmakuFactory.exe
-    - name: Prepare render tools
-      shell: bash
-      run: bash .github/scripts/build-render-tools.sh tauri-app/src-tauri/render-tools
     - name: Render download notes
       shell: bash
       run: |
+        # Package the fonts and native converter attribution with the installer.
+        bash .github/scripts/build-render-tools.sh tauri-app/src-tauri/render-tools
         sed -e "s|{{FFMPEG_VERSION}}|${FFMPEG_VERSION}|g" \
           -e "s|{{FFMPEG_TAG}}|${FFMPEG_TAG}|g" \
           -e "s|{{FFMPEG_SOURCE_URL}}|${FFMPEG_SOURCE_URL}|g" \

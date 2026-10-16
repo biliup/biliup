@@ -1735,15 +1735,9 @@ dependencies = [
 name = "danmaku-factory"
 version = "1.2.11"
 dependencies = [
- "danmaku-factory-sys",
+ "quick-xml 0.37.5",
  "serde",
-]
-
-[[package]]
-name = "danmaku-factory-sys"
-version = "1.2.11"
-dependencies = [
- "cc",
+ "tempfile",
 ]
 
 [[package]]

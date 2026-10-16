@@ -626,11 +626,24 @@ impl Standby {
             return;
         };
         let (source, group) = upload_observation_source(append.is_some());
-        let title = session.unit.stream.as_ref().and_then(|stream| stream.get("title")).and_then(serde_json::Value::as_str).unwrap_or(&session.unit.remark);
-        let guard = self.services.upload_observations.register(crate::server::common::upload_observation::NewTask {
-            source, scheduler_group: group, title, streamer_name: Some(&session.unit.remark),
-            session_id: Some(session.unit.stream_session), template_name: None, fifo: false,
-        });
+        let title = session
+            .unit
+            .stream
+            .as_ref()
+            .and_then(|stream| stream.get("title"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&session.unit.remark);
+        let guard = self.services.upload_observations.register(
+            crate::server::common::upload_observation::NewTask {
+                source,
+                scheduler_group: group,
+                title,
+                streamer_name: Some(&session.unit.remark),
+                session_id: Some(session.unit.stream_session),
+                template_name: None,
+                fifo: false,
+            },
+        );
         let slots = self.services.managers.upload_slots();
         let _slot = slots.acquire().await;
         let ctx = match self.context(&session).await {
@@ -649,7 +662,11 @@ impl Standby {
         );
         self.update(|core, now| core.upload_started(now, &id));
         let observation = guard.observation();
-        observation.template_name(ctx.upload_config().as_ref().map(|template| template.template_name.as_str()));
+        observation.template_name(
+            ctx.upload_config()
+                .as_ref()
+                .map(|template| template.template_name.as_str()),
+        );
         let segments = session
             .unit
             .segments
@@ -664,8 +681,16 @@ impl Standby {
             })
             .collect();
         let result = match &append {
-            None => observation.scope(upload::run_standby(&self, &id, &ctx, segments)).await,
-            Some(bvid) => observation.scope(upload::run_append(&self, &id, &ctx, segments, bvid)).await,
+            None => {
+                observation
+                    .scope(upload::run_standby(&self, &id, &ctx, segments))
+                    .await
+            }
+            Some(bvid) => {
+                observation
+                    .scope(upload::run_append(&self, &id, &ctx, segments, bvid))
+                    .await
+            }
         };
         match &result {
             Ok(Submitted::Done { bvid, .. }) => guard.finish("succeeded", None, Some(bvid)),
@@ -692,7 +717,11 @@ impl Standby {
 }
 
 fn upload_observation_source(append: bool) -> (&'static str, &'static str) {
-    if append { ("ha_append", "ha-pool") } else { ("ha", "ha-pool") }
+    if append {
+        ("ha_append", "ha-pool")
+    } else {
+        ("ha", "ha-pool")
+    }
 }
 
 /// 主机投成了：删掉备机这份录像（`delete_standby_copy`）

@@ -40,7 +40,7 @@ COPY --from=webui-builder /biliup/out /biliup/out
 
 WORKDIR /biliup
 
-# 只准备字体与第三方声明：弹幕 XML -> ASS 已静态链接进 biliup（含 PCRE2），不再构建 DanmakuFactory
+# 只准备字体与第三方声明：XML -> ASS 使用内置 Rust 转换器，不再构建外部转换程序
 RUN .github/scripts/build-render-tools.sh /biliup/render-tools
 
 RUN set -eux; \

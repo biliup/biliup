@@ -21,8 +21,13 @@ async fn records_confirmed_ranges_partial_results_and_restart_recovery() {
     let observations = UploadObservations::new(pool.clone());
     observations.initialize().await.unwrap();
     let guard = observations.register(NewTask {
-        source: "sync", scheduler_group: "sync", title: "live", streamer_name: Some("room"),
-        session_id: Some(7), template_name: Some("template"), fifo: true,
+        source: "sync",
+        scheduler_group: "sync",
+        title: "live",
+        streamer_name: Some("room"),
+        session_id: Some(7),
+        template_name: Some("template"),
+        fifo: true,
     });
     let task = guard.observation();
     let first = task.file("first.mp4", Some(100));
@@ -56,8 +61,13 @@ async fn interruption_during_submission_is_unknown_and_never_retried() {
     let observations = UploadObservations::new(pool.clone());
     observations.initialize().await.unwrap();
     let guard = observations.register(NewTask {
-        source: "manual", scheduler_group: "manual", title: "manual upload", streamer_name: None,
-        session_id: None, template_name: None, fifo: false,
+        source: "manual",
+        scheduler_group: "manual",
+        title: "manual upload",
+        streamer_name: None,
+        session_id: None,
+        template_name: None,
+        fifo: false,
     });
     let id = guard.observation().id().to_owned();
     guard.observation().submitting().await;
@@ -77,31 +87,73 @@ async fn explicit_ha_skip_stays_skipped_when_upload_pipeline_returns_ok() {
     let observations = UploadObservations::new(pool);
     observations.initialize().await.unwrap();
     let guard = observations.register(NewTask {
-        source: "ha", scheduler_group: "automatic-pool", title: "standby", streamer_name: None,
-        session_id: Some(1), template_name: None, fifo: false,
+        source: "ha",
+        scheduler_group: "automatic-pool",
+        title: "standby",
+        streamer_name: None,
+        session_id: Some(1),
+        template_name: None,
+        fifo: false,
     });
     let id = guard.observation().id().to_owned();
-    guard.observation().finish("skipped", Some("已交由备机处理"), None);
+    guard
+        .observation()
+        .finish("skipped", Some("已交由备机处理"), None);
     guard.finish_result(&Ok::<(), String>(()));
-    assert_eq!(observations.detail(&id).await.unwrap().unwrap().task.state, "skipped");
+    assert_eq!(
+        observations.detail(&id).await.unwrap().unwrap().task.state,
+        "skipped"
+    );
 
     let guard = observations.register(NewTask {
-        source: "ha", scheduler_group: "automatic-pool", title: "standby drop", streamer_name: None,
-        session_id: Some(2), template_name: None, fifo: false,
+        source: "ha",
+        scheduler_group: "automatic-pool",
+        title: "standby drop",
+        streamer_name: None,
+        session_id: Some(2),
+        template_name: None,
+        fifo: false,
     });
     let drop_id = guard.observation().id().to_owned();
-    guard.observation().finish("skipped", Some("备机处理"), None);
+    guard
+        .observation()
+        .finish("skipped", Some("备机处理"), None);
     drop(guard);
-    assert_eq!(observations.detail(&drop_id).await.unwrap().unwrap().task.state, "skipped");
+    assert_eq!(
+        observations
+            .detail(&drop_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "skipped"
+    );
 
     let guard = observations.register(NewTask {
-        source: "ha", scheduler_group: "ha-pool", title: "fenced", streamer_name: None,
-        session_id: Some(3), template_name: None, fifo: false,
+        source: "ha",
+        scheduler_group: "ha-pool",
+        title: "fenced",
+        streamer_name: None,
+        session_id: Some(3),
+        template_name: None,
+        fifo: false,
     });
     let fenced_id = guard.observation().id().to_owned();
-    guard.observation().finish("skipped", Some("提交前已由备机接手"), None);
+    guard
+        .observation()
+        .finish("skipped", Some("提交前已由备机接手"), None);
     guard.finish_result(&Err::<(), _>("pipeline error"));
-    assert_eq!(observations.detail(&fenced_id).await.unwrap().unwrap().task.state, "skipped");
+    assert_eq!(
+        observations
+            .detail(&fenced_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "skipped"
+    );
 }
 
 #[tokio::test]
@@ -110,21 +162,34 @@ async fn old_history_is_paginated_from_sql_without_growing_the_live_cache() {
     let observations = UploadObservations::new(pool);
     observations.initialize().await.unwrap();
     let mut first = observations.register(NewTask {
-        source: "clip", scheduler_group: "clip-publish", title: "retryable history", streamer_name: None,
-        session_id: None, template_name: None, fifo: true,
+        source: "clip",
+        scheduler_group: "clip-publish",
+        title: "retryable history",
+        streamer_name: None,
+        session_id: None,
+        template_name: None,
+        fifo: true,
     });
     first.pin();
     let first_id = first.observation().id().to_owned();
     first.finish_and_keep("failed", Some("try again"), None);
     for _ in 1..503 {
         let guard = observations.register(NewTask {
-            source: "manual", scheduler_group: "manual", title: "history", streamer_name: None,
-            session_id: None, template_name: None, fifo: false,
+            source: "manual",
+            scheduler_group: "manual",
+            title: "history",
+            streamer_name: None,
+            session_id: None,
+            template_name: None,
+            fifo: false,
         });
         guard.finish("succeeded", None, None);
     }
     observations.flush().await;
-    assert_eq!(lock(&observations.inner).tasks.len(), CACHED_TERMINAL_TASKS + 1);
+    assert_eq!(
+        lock(&observations.inner).tasks.len(),
+        CACHED_TERMINAL_TASKS + 1
+    );
     let old = observations.detail(&first_id).await.unwrap().unwrap();
     assert_eq!(old.task.state, "failed");
     let page = observations.list(None, None, 10, 500).await;
@@ -133,7 +198,16 @@ async fn old_history_is_paginated_from_sql_without_growing_the_live_cache() {
     first.reopen();
     first.observation().requeue();
     observations.flush().await;
-    assert_eq!(observations.detail(&first_id).await.unwrap().unwrap().task.state, "queued");
+    assert_eq!(
+        observations
+            .detail(&first_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "queued"
+    );
 }
 
 #[test]

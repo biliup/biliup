@@ -30,6 +30,277 @@ impl ProgressSamples {
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+#[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryMarker {
+    token: String,
+    root: PathBuf,
+}
+
+fn recovery_marker(file: &mut std::fs::File) -> std::io::Result<Option<RecoveryMarker>> {
+    use std::io::{Read, Seek};
+    file.rewind()?;
+    let mut bytes = Vec::new();
+    (&mut *file)
+        .take(crate::danmaku_worker::ROOT_LEASE_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > crate::danmaku_worker::ROOT_LEASE_MAX_BYTES {
+        return Ok(None);
+    }
+    let marker: RecoveryMarker = match serde_json::from_slice(&bytes) {
+        Ok(marker) => marker,
+        Err(_) => return Ok(None),
+    };
+    if marker.token.is_empty()
+        || marker.token == "."
+        || marker.token == ".."
+        || marker.token.len() > 128
+        || !marker
+            .token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_'))
+    {
+        return Ok(None);
+    }
+    Ok(Some(marker))
+}
+
+fn recovery_file(path: &Path) -> std::io::Result<Option<std::fs::File>> {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if !metadata.file_type().is_file() => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+        _ => {}
+    }
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map(Some)
+}
+
+fn recovery_lock(file: &std::fs::File) -> std::io::Result<bool> {
+    match file.try_lock() {
+        Ok(()) => Ok(true),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(false),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+fn recovery_manifest_path(parent: &Path, marker: &RecoveryMarker) -> PathBuf {
+    parent.join(format!(".render-recovery-{}.json", marker.token))
+}
+
+fn ensure_recovery_manifest(
+    parent: &Path,
+    private_root: &Path,
+    marker: &RecoveryMarker,
+) -> std::io::Result<std::fs::File> {
+    use std::io::Write;
+    let path = recovery_manifest_path(parent, marker);
+    if !path.try_exists()? {
+        // Publish the external ownership record completely before renaming or
+        // deleting any root contents. Partial recursive deletion cannot erase it.
+        let mut temp = tempfile::Builder::new()
+            .prefix(".render-manifest-")
+            .tempfile_in(private_root)?;
+        serde_json::to_writer(temp.as_file_mut(), marker).map_err(std::io::Error::other)?;
+        temp.flush()?;
+        temp.as_file().sync_all()?;
+        if let Err(error) = temp.persist_noclobber(&path)
+            && error.error.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            return Err(error.error);
+        }
+    }
+    let mut file = recovery_file(&path)?
+        .ok_or_else(|| std::io::Error::other("invalid recovery manifest file"))?;
+    if recovery_marker(&mut file)?.as_ref() != Some(marker) {
+        return Err(std::io::Error::other("recovery manifest identity changed"));
+    }
+    Ok(file)
+}
+
+fn remove_recovery_tombstone(
+    tombstone: &Path,
+    manifest: &Path,
+    manifest_file: std::fs::File,
+    remove: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<bool> {
+    if let Err(error) = remove(tombstone)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(std::io::Error::new(
+            error.kind(),
+            format!(
+                "cleanup residue {}; manifest {}: {error}",
+                tombstone.display(),
+                manifest.display()
+            ),
+        ));
+    }
+    drop(manifest_file); // Windows: close the sibling handle before deleting it.
+    match std::fs::remove_file(manifest) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+        Err(error) => Err(std::io::Error::new(
+            error.kind(),
+            format!("cleanup recovery manifest {}: {error}", manifest.display()),
+        )),
+    }
+}
+
+/// Only authenticated managed roots are disposable. The external, locked
+/// manifest survives partial deletion even when the internal lease is gone.
+pub(crate) fn cleanup_inactive_danmaku_root(path: &Path) -> std::io::Result<bool> {
+    cleanup_danmaku_root_with(path, &mut |path| std::fs::remove_dir_all(path))
+}
+
+fn cleanup_danmaku_root_with(
+    path: &Path,
+    remove: &mut impl FnMut(&Path) -> std::io::Result<()>,
+) -> std::io::Result<bool> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let canonical = std::fs::canonicalize(path)?;
+    let parent = canonical
+        .parent()
+        .ok_or_else(|| std::io::Error::other("managed root has no parent"))?;
+    if metadata.is_file() {
+        let Some(mut manifest_file) = recovery_file(&canonical)? else {
+            return Ok(false);
+        };
+        if !recovery_lock(&manifest_file)? {
+            return Ok(false);
+        }
+        let Some(marker) = recovery_marker(&mut manifest_file)? else {
+            return Ok(false);
+        };
+        if !marker.root.is_absolute()
+            || marker.root.parent() != Some(parent)
+            || recovery_manifest_path(parent, &marker) != canonical
+        {
+            return Ok(false);
+        }
+        let tombstone = parent.join(format!(".render-recovery-{}", marker.token));
+        match std::fs::symlink_metadata(&tombstone) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if marker.root.try_exists()? {
+                    // Crash between manifest publication and rename. Retry the
+                    // original root only after acquiring its own exclusive lease.
+                    drop(manifest_file);
+                    return cleanup_danmaku_root_with(&marker.root, remove);
+                }
+            }
+            Err(error) => return Err(error),
+            Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+                return Ok(false);
+            }
+            Ok(_) => {
+                let lease_path = tombstone.join(crate::danmaku_worker::ROOT_LEASE_FILE);
+                if std::fs::symlink_metadata(&lease_path).is_ok_and(|m| !m.file_type().is_file()) {
+                    return Ok(false);
+                }
+                if let Some(mut lease) = recovery_file(&lease_path)? {
+                    if !recovery_lock(&lease)?
+                        || recovery_marker(&mut lease)?.as_ref() != Some(&marker)
+                    {
+                        return Ok(false);
+                    }
+                    drop(lease);
+                }
+            }
+        }
+        return remove_recovery_tombstone(&tombstone, &canonical, manifest_file, remove);
+    }
+    if !metadata.is_dir() {
+        return Ok(false);
+    }
+    let lease_path = canonical.join(crate::danmaku_worker::ROOT_LEASE_FILE);
+    if std::fs::symlink_metadata(&lease_path).is_ok_and(|m| !m.file_type().is_file()) {
+        return Ok(false);
+    }
+    let Some(mut lease) = recovery_file(&lease_path)? else {
+        // The internal marker may already have been removed by a failed cleanup.
+        // Only an independently published sibling manifest can prove ownership.
+        if canonical
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with(".render-recovery-"))
+        {
+            let mut name = canonical.as_os_str().to_owned();
+            name.push(".json");
+            let manifest = PathBuf::from(name);
+            if !manifest.try_exists()? {
+                return Ok(false);
+            }
+            return cleanup_danmaku_root_with(&manifest, remove);
+        }
+        return Ok(false);
+    };
+    if !recovery_lock(&lease)? {
+        return Ok(false);
+    }
+    let Some(marker) = recovery_marker(&mut lease)? else {
+        return Ok(false);
+    };
+    let tombstone = parent.join(format!(".render-recovery-{}", marker.token));
+    if !marker.root.is_absolute()
+        || marker.root.parent() != Some(parent)
+        || (marker.root != canonical && tombstone != canonical)
+    {
+        return Ok(false);
+    }
+    let manifest_path = recovery_manifest_path(parent, &marker);
+    let manifest_file = ensure_recovery_manifest(parent, &canonical, &marker)?;
+    if !recovery_lock(&manifest_file)? {
+        return Ok(false);
+    }
+    // Retire the root while its lease is exclusive. Late parents/workers must
+    // reject it after this point, including a crash before the rename. Close
+    // every handle inside the directory before renaming it on Windows; the
+    // external manifest stays locked throughout rename and recursive removal.
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(canonical.join(crate::danmaku_worker::ROOT_RETIRED_FILE))
+    {
+        Ok(file) => file.sync_all()?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+    drop(lease);
+    if canonical != tombstone {
+        // The retired marker prevents new workers; the unpredictable original
+        // token and the locked create-new manifest bind the destination.
+        if std::fs::symlink_metadata(&tombstone).is_ok() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "recovery tombstone already exists",
+            ));
+        }
+        std::fs::rename(&canonical, &tombstone)?;
+    }
+    remove_recovery_tombstone(&tombstone, &manifest_path, manifest_file, remove)
+}
+
+async fn recover_danmaku_root(path: PathBuf) {
+    let path_text = path.display().to_string();
+    match tokio::task::spawn_blocking(move || cleanup_inactive_danmaku_root(&path)).await {
+        Ok(Ok(true)) => {}
+        Ok(Ok(false)) => tracing::warn!(path=%path_text,"保留仍活动或无法确认归属的弹幕工作目录"),
+        Ok(Err(error)) => {
+            tracing::warn!(path=%path_text,%error,"弹幕工作目录恢复清理失败，下次启动重试")
+        }
+        Err(error) => tracing::warn!(path=%path_text,%error,"弹幕工作目录恢复任务失败"),
+    }
+}
 /// A bounded filename stem works on both Unix and Windows. The task ID added
 /// by the caller provides uniqueness even after unsafe characters are removed.
 fn output_file_name(name: Option<&str>, id: i64) -> String {
@@ -85,8 +356,28 @@ impl RenderJobs {
     pub async fn initialize(&self) -> sqlx::Result<()> {
         store::recover(&self.pool, recorder::now_ms()).await?;
         self.cleanup_unreferenced_snapshots().await?;
-        // Only job-private temp folders are disposable; completed products live outside them.
-        let _ = tokio::fs::remove_dir_all(self.root.join("work")).await;
+        // Preview/self-check workers use this application-owned cache root,
+        // so they participate in the same lease-guarded crash recovery.
+        if let Ok(mut entries) =
+            tokio::fs::read_dir(crate::danmaku_worker::managed_preview_root_dir()).await
+        {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(".render-"))
+                {
+                    recover_danmaku_root(entry.path()).await;
+                }
+            }
+        }
+        // Do not recursively remove an ancestor of a surviving worker. Each
+        // managed root is recovered separately under its own exclusive lease.
+        if let Ok(mut entries) = tokio::fs::read_dir(self.root.join("work")).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                recover_danmaku_root(entry.path()).await;
+            }
+        }
         if let Ok(mut sessions) = tokio::fs::read_dir(&self.root).await {
             while let Ok(Some(session)) = sessions.next_entry().await {
                 if !session
@@ -103,7 +394,7 @@ impl RenderJobs {
                             .to_str()
                             .is_some_and(|name| name.starts_with(".render-"))
                         {
-                            let _ = tokio::fs::remove_dir_all(file.path()).await;
+                            recover_danmaku_root(file.path()).await;
                         }
                     }
                 }
@@ -755,6 +1046,173 @@ impl RenderJobs {
 #[cfg(test)]
 mod progress_tests {
     use super::*;
+
+    #[test]
+    fn recovery_preserves_active_and_unmanaged_roots_and_retries_tombstones() {
+        let directory = tempfile::tempdir().unwrap();
+        let unmanaged = directory.path().join(".render-legacy");
+        std::fs::create_dir(&unmanaged).unwrap();
+        std::fs::write(unmanaged.join("keep"), b"user or unknown owner").unwrap();
+        assert!(!cleanup_inactive_danmaku_root(&unmanaged).unwrap());
+        assert!(unmanaged.join("keep").exists());
+        let managed = directory.path().join(".render-owned");
+        std::fs::create_dir(&managed).unwrap();
+        let lease = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
+        std::fs::write(managed.join("out.ass"), b"complete but unconfirmed").unwrap();
+        assert!(!cleanup_inactive_danmaku_root(&managed).unwrap());
+        assert!(managed.join("out.ass").exists());
+        drop(lease);
+        assert!(cleanup_inactive_danmaku_root(&managed).unwrap());
+        assert!(!managed.exists());
+
+        let managed = directory.path().join(".render-interrupted-cleanup");
+        std::fs::create_dir(&managed).unwrap();
+        let lease = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
+        drop(lease);
+        let marker: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(managed.join(crate::danmaku_worker::ROOT_LEASE_FILE)).unwrap(),
+        )
+        .unwrap();
+        let pending = directory.path().join(format!(
+            ".render-recovery-{}",
+            marker["token"].as_str().unwrap()
+        ));
+        std::fs::rename(&managed, &pending).unwrap();
+        assert!(cleanup_inactive_danmaku_root(&pending).unwrap());
+        assert!(!pending.exists());
+    }
+
+    #[test]
+    fn recovery_rejects_replaced_malformed_and_other_root_markers() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join(".render-first");
+        let second = directory.path().join(".render-second");
+        std::fs::create_dir(&first).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        drop(crate::danmaku_worker::acquire_root_lease(&first).unwrap());
+        std::fs::copy(
+            first.join(crate::danmaku_worker::ROOT_LEASE_FILE),
+            second.join(crate::danmaku_worker::ROOT_LEASE_FILE),
+        )
+        .unwrap();
+        assert!(!cleanup_inactive_danmaku_root(&second).unwrap());
+        std::fs::write(
+            second.join(crate::danmaku_worker::ROOT_LEASE_FILE),
+            b"broken",
+        )
+        .unwrap();
+        assert!(!cleanup_inactive_danmaku_root(&second).unwrap());
+        assert!(first.exists() && second.exists());
+    }
+
+    #[test]
+    fn recovery_retries_after_partial_deletion_removes_the_internal_lease() {
+        let directory = tempfile::tempdir().unwrap();
+        let managed = directory.path().join(".render-partially-deleted");
+        std::fs::create_dir(&managed).unwrap();
+        drop(crate::danmaku_worker::acquire_root_lease(&managed).unwrap());
+        std::fs::write(managed.join("unconfirmed.ass"), b"complete but unconfirmed").unwrap();
+        let mut tombstone = PathBuf::new();
+        let error = cleanup_danmaku_root_with(&managed, &mut |path| {
+            tombstone = path.to_owned();
+            std::fs::remove_file(path.join(crate::danmaku_worker::ROOT_LEASE_FILE))?;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "injected failure after marker deletion",
+            ))
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("cleanup residue"));
+        assert!(tombstone.join("unconfirmed.ass").exists());
+        assert!(
+            !tombstone
+                .join(crate::danmaku_worker::ROOT_LEASE_FILE)
+                .exists()
+        );
+        let mut manifest_path = tombstone.as_os_str().to_owned();
+        manifest_path.push(".json");
+        let manifest_path = PathBuf::from(manifest_path);
+        assert!(manifest_path.is_file());
+        assert!(cleanup_inactive_danmaku_root(&tombstone).unwrap());
+        assert!(!tombstone.exists());
+        assert!(!manifest_path.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_preserves_its_manifest_after_a_real_permission_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let managed = directory.path().join(".render-permission-failure");
+        std::fs::create_dir(&managed).unwrap();
+        drop(crate::danmaku_worker::acquire_root_lease(&managed).unwrap());
+        let blocked = managed.join("blocked");
+        std::fs::create_dir(&blocked).unwrap();
+        std::fs::write(blocked.join("retained"), b"must retry").unwrap();
+        std::fs::set_permissions(&blocked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let permission_enforced = std::fs::read_dir(&blocked).is_err();
+        let mut tombstone = PathBuf::new();
+        let result = cleanup_danmaku_root_with(&managed, &mut |path| {
+            tombstone = path.to_owned();
+            // Force the exact partial-deletion state independently of readdir order.
+            std::fs::remove_file(path.join(crate::danmaku_worker::ROOT_LEASE_FILE))?;
+            std::fs::remove_dir_all(path)
+        });
+        let restored = tombstone.join("blocked");
+        if restored.exists() {
+            std::fs::set_permissions(&restored, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        // Root can bypass Unix mode bits; this environment cannot exercise
+        // that failure, while the injected cross-platform test still does.
+        if !permission_enforced {
+            assert!(result.is_ok(), "privileged cleanup unexpectedly failed");
+            return;
+        }
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        let mut manifest = tombstone.as_os_str().to_owned();
+        manifest.push(".json");
+        let manifest = PathBuf::from(manifest);
+        assert!(manifest.exists());
+        assert!(cleanup_inactive_danmaku_root(&manifest).unwrap());
+        assert!(!tombstone.exists() && !manifest.exists());
+    }
+
+    #[test]
+    fn recovery_finishes_a_manifest_written_before_rename_and_after_root_removal() {
+        let directory = tempfile::tempdir().unwrap();
+        let managed = directory.path().join(".render-manifest-stages");
+        std::fs::create_dir(&managed).unwrap();
+        let active = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
+        let mut lease = recovery_file(&managed.join(crate::danmaku_worker::ROOT_LEASE_FILE))
+            .unwrap()
+            .unwrap();
+        let marker = recovery_marker(&mut lease).unwrap().unwrap();
+        drop(lease);
+        drop(ensure_recovery_manifest(directory.path(), &managed, &marker).unwrap());
+        let manifest = recovery_manifest_path(directory.path(), &marker);
+        assert!(!cleanup_inactive_danmaku_root(&manifest).unwrap());
+        assert!(managed.exists() && manifest.exists());
+        drop(active);
+        // A crash after retirement but before rename must still be recoverable.
+        std::fs::File::create_new(managed.join(crate::danmaku_worker::ROOT_RETIRED_FILE))
+            .unwrap()
+            .sync_all()
+            .unwrap();
+        assert!(crate::danmaku_worker::acquire_root_lease(&managed).is_err());
+        assert!(cleanup_inactive_danmaku_root(&manifest).unwrap());
+        assert!(!managed.exists() && !manifest.exists());
+        let private = tempfile::tempdir_in(directory.path()).unwrap();
+        drop(ensure_recovery_manifest(directory.path(), private.path(), &marker).unwrap());
+        assert!(cleanup_inactive_danmaku_root(&manifest).unwrap());
+        assert!(!manifest.exists());
+        let unknown = directory.path().join(".render-recovery-unknown");
+        std::fs::create_dir(&unknown).unwrap();
+        assert!(!cleanup_inactive_danmaku_root(&unknown).unwrap());
+        assert!(unknown.exists());
+    }
     #[test]
     fn output_names_are_safe_bounded_and_unique() {
         assert_eq!(

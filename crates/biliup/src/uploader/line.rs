@@ -35,7 +35,9 @@ pub mod upos;
 /// Receives successful UPOS PUT acknowledgements, never bytes merely read.
 /// Implementations must be quick and must not block the upload on telemetry IO.
 pub trait UploadObserver: Send + Sync {
-    fn can_upload(&self) -> bool { true }
+    fn can_upload(&self) -> bool {
+        true
+    }
     fn chunk_confirmed(&self, part_number: usize, bytes: usize) -> bool;
     fn chunk_confirmed_range(&self, part_number: usize, _start: u64, bytes: usize) -> bool {
         self.chunk_confirmed(part_number, bytes)
@@ -61,7 +63,8 @@ impl Parcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
-        self.upload_with_observer(client, limit, progress, None).await
+        self.upload_with_observer(client, limit, progress, None)
+            .await
     }
 
     pub async fn upload_with_observer<F, S, B>(
@@ -308,7 +311,8 @@ impl StreamParcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
-        self.upload_parts_with_observer(client, limit, stream, None).await
+        self.upload_parts_with_observer(client, limit, stream, None)
+            .await
     }
 
     pub async fn upload_parts_with_observer<S, B>(
@@ -328,7 +332,9 @@ impl StreamParcel {
                 let mut parts = Vec::new();
                 let mut uploaded_size = 0u64;
                 {
-                    let uploaded = upos.upload_stream_with_observer(stream, self.total_size, limit, observer).await?;
+                    let uploaded = upos
+                        .upload_stream_with_observer(stream, self.total_size, limit, observer)
+                        .await?;
                     tokio::pin!(uploaded);
                     while let Some((part, size)) = uploaded.try_next().await? {
                         parts.push(part);

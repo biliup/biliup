@@ -2,17 +2,17 @@
 name = "danmaku-factory"
 version.workspace = true
 edition = "2024"
-description = "Safe XML to ASS danmaku conversion with the statically linked DanmakuFactory core"
-license = "MIT OR Apache-2.0"
+description = "Safe native Rust XML to ASS danmaku conversion"
+license = "(MIT OR Apache-2.0) AND MIT"
 
 [dependencies]
-danmaku-factory-sys = { path = "../danmaku-factory-sys" }
 serde = { workspace = true }
+quick-xml = "0.37"
+tempfile = "3.14"
 
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3.14"
 
-[target.'cfg(unix)'.dev-dependencies]
-# tests/errors.rs limits the file size of a child process to fail writes
+# Integration-test hosts set LC_NUMERIC and, on Unix, a process file-size limit.
 libc = "0.2"

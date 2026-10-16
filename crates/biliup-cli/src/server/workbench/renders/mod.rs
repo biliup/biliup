@@ -1,6 +1,7 @@
 //! Post-recording effects. Source files are never overwritten.
 pub mod assets;
 pub mod danmaku;
+mod danmaku_directory;
 pub mod encoding;
 pub mod engine;
 pub mod gpu;

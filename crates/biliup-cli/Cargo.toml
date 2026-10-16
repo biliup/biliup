@@ -12,7 +12,7 @@ path = "src/main.rs"
 [dependencies]
 biliup = { path = "../biliup", features = ["cli"] }
 danmaku-client = { package = "danmaku", path = "../danmaku" }
-# 弹幕 XML -> ASS：静态链接的 DanmakuFactory 核心，在内部工作进程里运行，见 src/danmaku_worker.rs
+# 弹幕 XML -> ASS：原生 Rust 排版，在受监督的工作进程里运行，见 src/danmaku_worker.rs
 danmaku-factory = { path = "../danmaku-factory" }
 
 # mesio（rust-srec）：进程内 FLV/HLS 下载 + 修复管线，见 server/core/downloader/mesio.rs

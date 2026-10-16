@@ -62,15 +62,31 @@ mod upload_observation_tests {
 
     #[tokio::test]
     async fn no_submit_ha_branch_remains_skipped_after_successful_pipeline_return() {
-        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
         sqlx::query("CREATE TABLE activity_events(event_key TEXT PRIMARY KEY,kind TEXT,ts INTEGER,text TEXT,sub TEXT,session_id INTEGER)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE upload_observation_tasks(id TEXT PRIMARY KEY,source TEXT,scheduler_group TEXT,task_order INTEGER,state TEXT,created_at INTEGER,updated_at INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE upload_observation_files(id TEXT PRIMARY KEY,task_id TEXT,file_order INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
         let observations = UploadObservations::new(pool);
         observations.initialize().await.unwrap();
-        let guard = observations.register(NewTask { source: "ha", scheduler_group: "automatic-pool", title: "standby", streamer_name: None, session_id: Some(1), template_name: None, fifo: false });
+        let guard = observations.register(NewTask {
+            source: "ha",
+            scheduler_group: "automatic-pool",
+            title: "standby",
+            streamer_name: None,
+            session_id: Some(1),
+            template_name: None,
+            fifo: false,
+        });
         let id = guard.observation().id().to_owned();
-        guard.scope(async { finish_unsubmitted("已交由备机处理，这里未执行投稿"); }).await;
+        guard
+            .scope(async {
+                finish_unsubmitted("已交由备机处理，这里未执行投稿");
+            })
+            .await;
         guard.finish_result(&Ok::<(), String>(()));
         let task = observations.detail(&id).await.unwrap().unwrap();
         assert_eq!(task.task.state, "skipped");
@@ -293,10 +309,18 @@ pub(crate) async fn run_resume(
     job: Resume,
     started: i64,
 ) {
-    let guard = services.upload_observations.register(crate::server::common::upload_observation::NewTask {
-        source: "ha_resume", scheduler_group: "ha-pool", title: "HA 补投", streamer_name: None,
-        session_id: job.session, template_name: None, fifo: false,
-    });
+    let guard =
+        services
+            .upload_observations
+            .register(crate::server::common::upload_observation::NewTask {
+                source: "ha_resume",
+                scheduler_group: "ha-pool",
+                title: "HA 补投",
+                streamer_name: None,
+                session_id: job.session,
+                template_name: None,
+                fifo: false,
+            });
     let slots = services.managers.upload_slots();
     let _slot = slots.acquire().await;
     match resume_input(&primary, &services, &job, started).await {
@@ -305,8 +329,19 @@ pub(crate) async fn run_resume(
             let observation = guard.observation();
             observation.template_name(Some(&found.config.template_name));
             let segments = futures::stream::iter(found.segments);
-            let result = observation.scope(run_primary(&primary, &job.key, segments, &found.ctx, &found.config)).await;
-            let telemetry_result = result.as_ref().map(|_| ()).map_err(|error| format!("{error:#}"));
+            let result = observation
+                .scope(run_primary(
+                    &primary,
+                    &job.key,
+                    segments,
+                    &found.ctx,
+                    &found.config,
+                ))
+                .await;
+            let telemetry_result = result
+                .as_ref()
+                .map(|_| ())
+                .map_err(|error| format!("{error:#}"));
             guard.finish_result(&telemetry_result);
             if let Err(e) = result {
                 warn!(key = job.key, error = ?e, "HA：主机补投它那半没有做完");

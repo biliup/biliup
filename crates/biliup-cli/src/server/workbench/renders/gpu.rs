@@ -84,7 +84,7 @@ pub async fn snapshot() -> GpuSnapshot {
 }
 
 async fn collect() -> GpuSnapshot {
-    let mut devices = Vec::new();
+    let mut devices: Vec<GpuDevice> = Vec::new();
     #[cfg(target_os = "linux")]
     {
         devices.extend(linux_drm_devices());

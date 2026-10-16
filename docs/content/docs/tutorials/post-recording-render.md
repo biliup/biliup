@@ -50,7 +50,7 @@ top = false
 
 第一次导出前，请在 **空间配置** 确认 FFmpeg 可用。打开回看中的「画面与弹幕」面板后，编码器检测会实际生成短视频，显示可用设备及失败原因。启用弹幕时还需要 `libass` 和随包中文字体。
 
-弹幕 XML 到 ASS 的转换已经内置在 biliup 中：使用的是 [DanmakuFactory](https://github.com/hihkm/DanmakuFactory) 的转换与排布核心，编译时静态链接进 biliup 本体、桌面版和 Python 包，不需要再安装 DanmakuFactory，也不再读取 `danmaku_factory_path` 配置（旧配置仍可正常加载，但该项会被忽略并在日志中提示）。预览和导出使用同一个转换流程和同一份字体：
+弹幕 XML 到 ASS 的转换已经内置在 biliup 中：使用原生 Rust 实现，排版算法派生自 [DanmakuFactory](https://github.com/hihkm/DanmakuFactory)，随 biliup 本体、桌面版和 Python 包提供，不需要再安装 DanmakuFactory，也不再读取 `danmaku_factory_path` 配置（旧配置仍可正常加载，但该项会被忽略并在日志中提示）。预览和导出使用同一个转换流程和同一份字体：
 
 - 桌面版安装包和 Docker 镜像自带中文字体 Noto Sans CJK SC；
 - 独立二进制和 pip 安装会在需要时从程序内嵌的 Noto Sans CJK SC 字体创建用户缓存，通常无需手动准备默认字体。需要使用自定义字体，或无法写入缓存时，可把 `BILIUP_RENDER_TOOLS_DIR` 指向包含 `fonts/` 的目录；独立二进制也可以把 `render-tools/fonts/` 放在 biliup 可执行文件旁边。可用的外部字体目录优先于内嵌默认字体。
