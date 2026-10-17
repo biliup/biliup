@@ -114,7 +114,7 @@ const Douyin: React.FC<Props> = props => {
             <div style={{ fontSize: '14px' }}>
               默认关闭。开启后录制抖音的真原画流，<strong>仅在画质为原画、直播流协议为 flv 时生效</strong>。
               <br />
-              真原画可能是 HEVC 编码。mesio 与 stream-gears 都能录 FLV 里的 HEVC 与 AV1（stream-gears 不支持 hls_fmp4）；浏览器能否预览 HEVC 取决于浏览器、
+              真原画可能是 HEVC 编码。mesio 与 stream-gears 都能录 HEVC 与 AV1；浏览器能否预览 HEVC 取决于浏览器、
               系统和设备解码能力，录制不受影响。
             </div>
           }
