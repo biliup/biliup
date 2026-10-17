@@ -67,7 +67,6 @@ mod upload_observation_tests {
             .connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::query("CREATE TABLE activity_events(event_key TEXT PRIMARY KEY,kind TEXT,ts INTEGER,text TEXT,sub TEXT,session_id INTEGER)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE upload_observation_tasks(id TEXT PRIMARY KEY,source TEXT,scheduler_group TEXT,task_order INTEGER,state TEXT,created_at INTEGER,updated_at INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
         sqlx::query("CREATE TABLE upload_observation_files(id TEXT PRIMARY KEY,task_id TEXT,file_order INTEGER,snapshot TEXT)").execute(&pool).await.unwrap();
         let observations = UploadObservations::new(pool);

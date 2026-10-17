@@ -6,8 +6,6 @@ async fn pool() -> ConnectionPool {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE activity_events(event_key TEXT PRIMARY KEY,kind TEXT NOT NULL,ts INTEGER NOT NULL,text TEXT NOT NULL,sub TEXT,session_id INTEGER)")
-        .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE upload_observation_tasks(id TEXT PRIMARY KEY,source TEXT NOT NULL,scheduler_group TEXT NOT NULL,task_order INTEGER NOT NULL,state TEXT NOT NULL,created_at INTEGER NOT NULL,updated_at INTEGER NOT NULL,snapshot TEXT NOT NULL)")
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE upload_observation_files(id TEXT PRIMARY KEY,task_id TEXT NOT NULL REFERENCES upload_observation_tasks(id) ON DELETE CASCADE,file_order INTEGER NOT NULL,snapshot TEXT NOT NULL)")
