@@ -651,15 +651,13 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(seeded, vec![12, 95]);
-        let after_seed: i64 =
-            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let after_seed = crate::server::workbench::store::allocate_session_id(&pool)
+            .await
+            .unwrap();
         assert_eq!(after_seed, 96);
 
-        // Legacy writers that still insert into stream_sessions must advance the durable
-        // reservation sequence before the next open_session-style allocation.
+        // Legacy writers that still insert into stream_sessions are taken into account by the
+        // next open_session-style allocation.
         sqlx::query(
             "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
              VALUES(120, 'legacy', 'https://example.test', 'legacy', '2026-10-11', '')",
@@ -667,11 +665,9 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
-        let reserved: i64 =
-            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let reserved = crate::server::workbench::store::allocate_session_id(&pool)
+            .await
+            .unwrap();
         assert_eq!(reserved, 121);
         sqlx::query(
             "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
@@ -687,11 +683,9 @@ mod tests {
             .await
             .unwrap();
 
-        let after_delete: i64 =
-            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let after_delete = crate::server::workbench::store::allocate_session_id(&pool)
+            .await
+            .unwrap();
         assert_eq!(
             after_delete, 122,
             "deleting the largest session must not reuse its ID"

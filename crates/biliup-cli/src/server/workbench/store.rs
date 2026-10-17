@@ -128,6 +128,25 @@ pub enum DeleteSessionOutcome {
 ///
 /// 复用时不改标题和开播时间（直播历史里仍显示第一次开播），`ended_at` 由这次录制的
 /// [`begin_recording`] 清空。最近一场还没结束（另一个任务在录，或上次崩溃还没收尾）时不去抢它。
+/// 取下一个场次 id：在持久序列和现有最大 id 之间取大者再加一。
+///
+/// 直接写进 `stream_sessions` 的行（导入、测试夹具、旧代码）也算数，所以删掉最大的场次之后它的 id
+/// 不会被复用 —— id 同时是录像与合成产物的文件命名空间。原先靠 `reserve_stream_session_id` 触发器把
+/// 序列顶上去，现在由分配本身保证。
+pub async fn allocate_session_id<'e, E>(executor: E) -> sqlx::Result<i64>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query_scalar(
+        "INSERT INTO stream_session_ids(id)
+         SELECT MAX(COALESCE((SELECT MAX(id) FROM stream_session_ids), 0),
+                    COALESCE((SELECT MAX(id) FROM stream_sessions), 0)) + 1
+         RETURNING id",
+    )
+    .fetch_one(executor)
+    .await
+}
+
 pub async fn open_session(
     pool: &ConnectionPool,
     streamer_id: i64,
@@ -153,10 +172,7 @@ pub async fn open_session(
         None => {
             // Session rows may be deleted while their media remains on disk. Allocate IDs from a
             // durable AUTOINCREMENT sequence so a later scene cannot reuse an old file namespace.
-            let id: i64 =
-                sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
-                    .fetch_one(&mut *tx)
-                    .await?;
+            let id = allocate_session_id(&mut *tx).await?;
             sqlx::query(
                 "INSERT INTO stream_sessions (id, name, url, title, date, live_cover_path, streamer_id)
                  VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -255,6 +271,17 @@ pub async fn delete_session(pool: &ConnectionPool, id: i64) -> sqlx::Result<Dele
     .bind(id)
     .fetch_all(&mut *tx)
     .await?;
+    // 删掉的 id 不再复用：它的文件命名空间可能还被录像或合成产物引用着。直接写进
+    // stream_sessions 的 id 没经过序列，这里按需补一次预留。
+    sqlx::query(
+        "INSERT INTO stream_session_ids(id)
+         SELECT ? + 1 WHERE ? >= COALESCE((SELECT MAX(id) FROM stream_session_ids), 0)",
+    )
+    .bind(id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
     let deleted = sqlx::query("DELETE FROM stream_sessions WHERE id = ?")
         .bind(id)
         .execute(&mut *tx)

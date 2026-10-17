@@ -281,10 +281,7 @@ async fn create_in(conn: &mut SqliteConnection, ids: &[i64]) -> Result<i64, Merg
     let id = if let Some(id) = group {
         id
     } else {
-        let id: i64 =
-            sqlx::query_scalar("INSERT INTO stream_session_ids DEFAULT VALUES RETURNING id")
-                .fetch_one(&mut *conn)
-                .await?;
+        let id = super::store::allocate_session_id(&mut *conn).await?;
         sqlx::query("INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path,streamer_id,started_at,ended_at,kind)
            SELECT ?1,name,url,title,date,live_cover_path,streamer_id,started_at,ended_at,'group' FROM stream_sessions WHERE id=?2")
             .bind(id).bind(sources[0].0).execute(&mut *conn).await?;
