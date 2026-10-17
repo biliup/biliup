@@ -1,5 +1,4 @@
-//! Shared entry point for the native `biliup` binary and the Python
-//! `stream_gears.main_loop` wrapper, so both parse, log and dispatch the same way.
+//! Native CLI entry point: argument parsing, logging and command dispatch.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -89,7 +88,7 @@ pub fn init_tracing(cli: &Cli) -> Logging {
 }
 
 /// Installs the global subscriber on the first call. Later calls in the same
-/// process (e.g. `main_loop` called twice) keep the existing layers and only
+/// process keep the existing layers and only
 /// swap the filter.
 pub fn init_tracing_with(filter: &str, log_file: bool) -> Logging {
     if let Some(handle) = LOG_HANDLE.get() {

@@ -20,7 +20,7 @@ pub mod renders;
 pub mod retention;
 pub mod session_groups;
 pub mod store;
-pub mod transcode;
+pub use crate::server::common::processing::transcode;
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use index::Container;

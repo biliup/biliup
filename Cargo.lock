@@ -4628,16 +4628,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pythonize"
-version = "0.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a8f29db331e28c332c63496cfcbb822aca3d7320bc08b655d7fd0c29c50ede"
-dependencies = [
- "pyo3",
- "serde",
-]
-
-[[package]]
 name = "qoi"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6047,15 +6037,13 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 name = "stream-gears"
 version = "1.2.11"
 dependencies = [
- "axum",
  "biliup",
- "biliup-cli",
  "bon",
- "error-stack",
+ "futures",
  "nom 8.0.0",
  "pyo3",
  "pyo3-build-config",
- "pythonize",
+ "reqwest 0.13.4",
  "serde_json",
  "time",
  "tokio",

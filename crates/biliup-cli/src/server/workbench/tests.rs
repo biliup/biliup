@@ -1017,13 +1017,16 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
         path: path.to_string(),
         start_ms,
     };
-    let dir = Path::new("/rec");
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let inside = dir.join("c.flv").to_string_lossy().into_owned();
+    let outside = dir.join("elsewhere").join("d.flv").to_string_lossy().into_owned();
     let by_name = store::segment_files_in_dir(
         vec![
             file(1, "a.flv", 0),
             file(1, "./b.ts", 60_000),
-            file(2, "/rec/c.flv", 5_000),
-            file(3, "/elsewhere/d.flv", 0),
+            file(2, &inside, 5_000),
+            file(3, &outside, 0),
             file(3, "sub/e.flv", 0),
             file(4, "a.flv", 7_000),
         ],
@@ -1041,7 +1044,7 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
         (1, 60_000)
     );
     assert_eq!(by_name["c.flv"].session_id, 2);
-    let no_cwd = store::segment_files_in_dir(vec![file(2, "/rec/c.flv", 0)], None);
+    let no_cwd = store::segment_files_in_dir(vec![file(2, &inside, 0)], None);
     assert!(no_cwd.is_empty());
 }
 

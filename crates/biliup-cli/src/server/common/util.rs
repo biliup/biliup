@@ -550,7 +550,7 @@ impl FileValidator {
 
     fn validate_format(&self, path: &Path) -> AppResult<()> {
         // 简单的格式验证 - 检查扩展名
-        let masked = crate::server::plugins::mosaic::masked_path(path);
+        let masked = crate::server::common::processing::masking::masked_path(path);
         let path = masked.as_path();
         if let Some(extension) = path.extension() {
             let ext = extension.to_string_lossy().to_lowercase();

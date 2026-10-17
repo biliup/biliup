@@ -25,6 +25,10 @@ pub enum HookStep {
     /// 重新生成 PTS。仅当输入扩展名为 .ts/.m2ts 时生效；其它格式跳过。
     /// 路径列表会被原地替换为新生成的 .mp4，原文件保留（postprocessor 中再 "rm"）。
     Remux { remux: String },
+    /// Native masking and danmaku burn-in, sharing the manual export engine.
+    Render {
+        render: crate::server::common::processing::model::RenderRecipe,
+    },
     /// 删除文件格式："rm"
     Remove(String),
 }
@@ -66,6 +70,11 @@ impl HookStep {
                 self.move_file(video_paths, mv, retention.map(|r| &r.pool))
                     .await?;
             }
+            HookStep::Render { .. } => {
+                bail!(AppError::Custom(
+                    "render requires the path-mutating processing API".into()
+                ));
+            }
             HookStep::Remux { remux } => {
                 bail!(AppError::Custom(format!(
                     "remux step needs the path-mutating execute_paths API; \
@@ -92,7 +101,33 @@ impl HookStep {
     /// Path-mutating variant: lets steps swap entries in the working set
     /// (e.g. Remux replaces .ts with the newly-created .mp4).
     pub async fn execute_paths(&self, video_paths: &mut Vec<PathBuf>) -> AppResult<()> {
+        self.execute_paths_with_source(video_paths, None).await
+    }
+
+    pub async fn execute_paths_with_source(
+        &self,
+        video_paths: &mut Vec<PathBuf>,
+        source: Option<&crate::server::common::processing::model::RenderSource>,
+    ) -> AppResult<()> {
         match self {
+            HookStep::Render { render } => {
+                if let Some(input) = video_paths.first() {
+                    let xml = video_paths
+                        .iter()
+                        .skip(1)
+                        .find(|p| p.extension().is_some_and(|e| e == "xml"));
+                    let output = crate::server::common::processing::engine::process_video(
+                        input,
+                        xml.map(PathBuf::as_path),
+                        render,
+                        source,
+                    )
+                    .await
+                    .map_err(AppError::Custom)?;
+                    video_paths[0] = output;
+                }
+            }
+
             HookStep::Remux { remux } => {
                 let target = remux.to_lowercase();
                 if target != "mp4" {
@@ -447,9 +482,19 @@ pub async fn process_video_paths(
     video_paths: &mut Vec<PathBuf>,
     processors: &[HookStep],
 ) -> AppResult<()> {
+    process_video_paths_with_source(video_paths, processors, None).await
+}
+
+pub async fn process_video_paths_with_source(
+    video_paths: &mut Vec<PathBuf>,
+    processors: &[HookStep],
+    source: Option<&crate::server::common::processing::model::RenderSource>,
+) -> AppResult<()> {
     info!("Starting video processing (path-mutating)...");
     for processor in processors {
-        processor.execute_paths(video_paths).await?;
+        processor
+            .execute_paths_with_source(video_paths, source)
+            .await?;
     }
     info!("Video processing completed");
     Ok(())

@@ -111,6 +111,7 @@ fn publish_with(
     let mut create_os_error = None;
     let mut temp = tempfile::Builder::new()
         .prefix(TEMP_PREFIX)
+        .suffix(".part")
         .make_in(parent, |name| {
             let mut options = std::fs::OpenOptions::new();
             options.read(true).write(true).create_new(true);

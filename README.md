@@ -323,12 +323,11 @@ graph TB
         AUTOCLIP[自动切片<br/>biliup-cli auto_clip<br/>OpenAI 兼容客户端]
         CORE[核心库<br/>biliup<br/>直播解析 / 下载 / 上传]
         DANMAKU[弹幕库<br/>danmaku<br/>多平台协议 / XML输出]
-        GEARS[Python绑定<br/>stream-gears<br/>python -m biliup 入口]
+        GEARS[Python绑定<br/>stream-gears<br/>上传 / 下载 / 登录 API]
     end
 
     subgraph "🐍 Python包"
-        PYENTRY[最小入口<br/>biliup.__main__<br/>调用 stream_gears.main_loop]
-        PYUPLOAD[投稿库<br/>bili_webup / bili_webup_sync<br/>供外部项目调用]
+        PYAPI[stream_gears<br/>上传 / 直链下载 / 登录]
     end
 
     subgraph "🗄️ 数据层"
@@ -350,9 +349,8 @@ graph TB
     AUTOCLIP --> LLM
     CORE --> STREAMS & BILI
     DANMAKU --> STREAMS & FILES
-    GEARS --> CLI
-    PYENTRY --> GEARS
-    PYUPLOAD --> BILI
+    GEARS --> CORE
+    PYAPI --> GEARS
 
     classDef ui fill:#e1f5fe
     classDef rust fill:#f3e5f5
@@ -361,7 +359,7 @@ graph TB
     classDef ext fill:#ffebee
     class UI ui
     class CLI,FLEET,AUTOCLIP,CORE,DANMAKU,GEARS rust
-    class PYENTRY,PYUPLOAD py
+    class PYAPI py
     class DB,FLEETDB,FILES data
     class BILI,STREAMS,LLM ext
 ```
@@ -376,9 +374,8 @@ graph TB
 | `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–15） |
 | `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–7） |
 | `crates/danmaku` | 弹幕客户端：多平台协议解析与 XML 输出 |
-| `crates/stream-gears` | PyO3 绑定，暴露给 `python -m biliup` |
+| `crates/stream-gears` | PyO3 基础 API 绑定，不依赖服务端 |
 | `app`、`public` | Next.js WebUI 源码；`npm run build` 产物输出到 `out/` 并由后端内嵌 |
-| `crates/stream-gears/biliup` | 精简 Python 包：最小入口与可供外部调用的投稿库 |
 | `tauri-app` | Windows 桌面端（Tauri，进程内运行 biliup 服务） |
 
 </details>
@@ -392,9 +389,7 @@ graph TB
 
 ### Python
 
-1. 安装依赖 `maturin develop -m crates/stream-gears/Cargo.toml`
-2. `npm run build` 
-3. 启动 Biliup：`python3 -m biliup`
+安装绑定：`maturin develop -m crates/stream-gears/Cargo.toml`，然后 `import stream_gears` 使用上传、直链下载和登录 API。Python 包不含录制服务、前端、字体或命令行入口；运行完整应用请使用原生 CLI、桌面版或 Docker。构建 Python 包无需构建前端。
 
 ### Rust-cli
 
@@ -405,7 +400,7 @@ graph TB
 > [!NOTE]
 > `biliup-cli` 通过 `rust-embed` 内嵌前端产物目录 `out/`，因此在 `cargo build` / `cargo test` 之前必须先执行 `npm run build`，否则编译会因 `out/` 不存在而失败。
 >
-> 字体资产 `crates/biliup-cli/src/assets/*.otf`、`*.ttf` 通过 Git LFS 存储，会被内嵌进二进制。克隆后需要 `git lfs install`（并 `git lfs pull`），否则检出到的是 LFS 指针文件，编出来的程序字体是坏的。CI 已在 `actions/checkout` 上开启 `lfs: true`。
+> 字体位于 `crates/biliup-cli/assets/render-tools/fonts/`，通过 Git LFS 存储，作为独立文件随 CLI 发布包、桌面版和 Docker 镜像分发，不内嵌进二进制。克隆后执行 `git lfs install` 和 `git lfs pull` 获取真实字体。自行部署时，将 `render-tools/` 放在可执行文件旁，或设置 `BILIUP_RENDER_TOOLS_DIR` 指向该目录。
 
 ### 测试
 

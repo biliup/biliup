@@ -1,5 +1,4 @@
 mod login;
-mod server;
 mod uploader;
 
 use pyo3::prelude::*;
@@ -7,12 +6,12 @@ use time::macros::format_description;
 use uploader::{PyCredit, StudioPre};
 
 use crate::uploader::UploadLine;
-use axum::http::HeaderMap;
 use biliup::credential::Credential;
 use biliup::downloader::util::{CallbackFn, LifecycleFile, Segmentable};
 use biliup::downloader::{hls, httpflv};
 use biliup::uploader::credential::save_login_info;
-use pyo3::types::{PyList, PyMapping};
+use pyo3::types::PyMapping;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::panic::{self, AssertUnwindSafe};
@@ -24,8 +23,7 @@ use tracing::{debug, error, info};
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::header;
 use biliup::downloader::httpflv::Connection;
-use biliup_cli::server::common::construct_headers;
-use pyo3::exceptions::{PyRuntimeError, PySystemExit, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use tracing_subscriber::layer::SubscriberExt;
 
 pyo3::create_exception!(
@@ -67,6 +65,18 @@ pub(crate) fn get_field<'py>(
     } else {
         Ok(None)
     }
+}
+
+fn construct_headers(values: &HashMap<String, String>) -> Result<HeaderMap, String> {
+    let mut headers = HeaderMap::new();
+    for (name, value) in values {
+        let key = HeaderName::from_bytes(name.as_bytes())
+            .map_err(|e| format!("invalid header name {name:?}: {e}"))?;
+        let value = HeaderValue::from_str(value)
+            .map_err(|e| format!("invalid header value for {name:?}: {e}"))?;
+        headers.insert(key, value);
+    }
+    Ok(headers)
 }
 
 pub async fn download_with_hook(
@@ -534,40 +544,6 @@ fn upload(
     })
 }
 
-#[pyfunction]
-pub fn main_loop(py: Python<'_>) -> PyResult<()> {
-    // 获取 Python 的 sys.argv
-    let sys = py.import("sys")?;
-    let bound = sys.getattr("argv")?;
-    let argv: &Bound<PyList> = bound.cast()?;
-
-    let args: Vec<String> = argv
-        .iter()
-        .map(|x| x.extract::<String>())
-        .collect::<PyResult<Vec<_>>>()?;
-
-    // A danmaku conversion never reaches Python: the converter is a Rust crate
-    // linked into this extension module, so the server converts in-process and
-    // nothing here starts a second interpreter or the `biliup` binary.
-    let cli = match biliup_cli::entry::parse(args) {
-        Ok(cli) => cli,
-        Err(e) => {
-            // `--help` / `--version` exit with 0; the console script turns
-            // SystemExit into the process exit code.
-            let code = e.exit_code();
-            e.print()
-                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
-            return if code == 0 {
-                Ok(())
-            } else {
-                Err(PySystemExit::new_err(code))
-            };
-        }
-    };
-
-    py.detach(|| server::run(cli).map_err(|e| PyRuntimeError::new_err(format!("{e:?}"))))
-}
-
 /// A Python module implemented in Rust.
 #[pymodule]
 fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -587,8 +563,6 @@ fn stream_gears(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(login_by_sms, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_cookies, m)?)?;
     m.add_function(wrap_pyfunction!(login_by_web_qrcode, m)?)?;
-    m.add_function(wrap_pyfunction!(main_loop, m)?)?;
-    m.add_function(wrap_pyfunction!(server::config_bindings, m)?)?;
     m.add_class::<UploadLine>()?;
     m.add_class::<PySegment>()?;
     m.add("StreamGearsError", m.py().get_type::<StreamGearsError>())?;

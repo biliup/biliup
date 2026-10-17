@@ -7,7 +7,7 @@ COPY . /biliup
 
 RUN set -eux; \
 	\
-	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
+	if [ ! -f /biliup/crates/biliup-cli/Cargo.toml ]; then \
 	rm -rf /biliup; \
 	git clone --depth 1 --branch "$branch_name" "$repo_url" /biliup; \
 	fi;
@@ -19,56 +19,20 @@ RUN set -eux; \
 	npm run build;
 
 
-# Build biliup's python wheel
-FROM rust:latest AS wheel-builder
-ARG repo_url=https://github.com/biliup/biliup
-ARG branch_name=master
-
-COPY . /biliup
-
-RUN set -eux; \
-	\
-	apt-get update; \
-	apt-get install -y --no-install-recommends python3-pip g++ patchelf git git-lfs curl; \
-	git lfs install --system; \
-	pip3 install maturin --break-system-packages; \
-	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
-	rm -rf /biliup; \
-	git clone --depth 1 --branch "$branch_name" "$repo_url" /biliup; \
-	fi;
-
-COPY --from=webui-builder /biliup/out /biliup/out
-
+# The service runs the native CLI; the Python distribution only provides APIs.
+FROM rust:latest AS binary-builder
+COPY --from=webui-builder /biliup /biliup
 WORKDIR /biliup
+RUN cargo build --locked --release -p biliup-cli --bin biliup
 
-# 只准备字体与第三方声明：XML -> ASS 使用内置 Rust 转换器，不再构建外部转换程序
-RUN .github/scripts/build-render-tools.sh /biliup/render-tools
-
-RUN set -eux; \
-	maturin build --release -m crates/stream-gears/Cargo.toml;
-
-
-# Deploy Biliup
-FROM python:3.13-slim AS biliup
-
-ENV TZ="Asia/Shanghai"
-ENV LANG="C.UTF-8"
-ENV LANGUAGE="C.UTF-8"
-ENV LC_ALL="C.UTF-8"
-ENV BILIUP_RENDER_TOOLS_DIR="/opt/render-tools"
+FROM python:3.13-slim-trixie AS biliup
+ENV TZ="Asia/Shanghai" LANG="C.UTF-8" LANGUAGE="C.UTF-8" LC_ALL="C.UTF-8"
+RUN pip3 install --no-cache-dir "yt-dlp>=2025.7.21" "streamlink>=7.5.0"
 EXPOSE 19159/tcp
 VOLUME /opt
-
-# 需要遵守 wheel 文件名规范
-COPY --from=wheel-builder /biliup/target/wheels/* /tmp/
-COPY --from=wheel-builder /biliup/render-tools /opt/render-tools
-
-RUN set -eux; \
-	\
-	whl=$(ls /tmp/biliup*.whl); \
-	pip3 install --no-cache-dir "$whl"; \
-	pip3 cache purge; \
-	rm -rf /tmp/*;
+COPY --from=binary-builder /biliup/target/release/biliup /usr/local/bin/biliup
+COPY --from=binary-builder /biliup/crates/biliup-cli/assets/render-tools /usr/local/bin/render-tools
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3t64 && rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
 	\

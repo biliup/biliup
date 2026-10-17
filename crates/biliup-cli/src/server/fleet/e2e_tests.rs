@@ -2307,7 +2307,8 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
             .fetch_all(&c.pool)
             .await
             .unwrap();
-    assert_eq!(registered, [received.to_string_lossy().into_owned()]);
+    let expected = received.canonicalize().unwrap_or_else(|_| received.clone());
+    assert_eq!(registered, [expected.to_string_lossy().into_owned()]);
     for entry in std::fs::read_dir(dir.path()).unwrap() {
         let path = entry.unwrap().path();
         if path

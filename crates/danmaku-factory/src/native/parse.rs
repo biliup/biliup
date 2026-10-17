@@ -194,7 +194,6 @@ fn finish(
     Ok(())
 }
 
-#[cfg(test)]
 pub(crate) fn read(reader: impl Read, budget: Budget) -> Result<Vec<Danmaku>, ConvertError> {
     read_with_capacity(reader, budget, 0)
 }

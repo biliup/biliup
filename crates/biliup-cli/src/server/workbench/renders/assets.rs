@@ -4,7 +4,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use sha2::{Digest, Sha256};
 use sqlx::Row;
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub const MAX_ASSET_BYTES: usize = 10 * 1024 * 1024;
 #[derive(Debug, Clone)]
 pub struct Asset {
@@ -180,4 +180,33 @@ fn animated_png(data: &[u8]) -> bool {
         at = next;
     }
     false
+}
+
+/// The asset store owns immutable, reference-protected files. Verify the saved
+/// identity at enqueue and execution without making per-task copies.
+pub async fn verify(asset: &RenderAsset) -> Result<(), String> {
+    let mut file = tokio::fs::File::open(&asset.path)
+        .await
+        .map_err(|e| format!("读取图片 {} 失败：{e}", asset.id))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 16 * 1024];
+    let mut size = 0usize;
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .await
+            .map_err(|e| format!("读取图片 {} 失败：{e}", asset.id))?;
+        if count == 0 {
+            break;
+        }
+        size += count;
+        if size > MAX_ASSET_BYTES {
+            return Err(format!("图片 {} 超出大小限制", asset.id));
+        }
+        digest.update(&buffer[..count]);
+    }
+    if format!("{:x}", digest.finalize()) != asset.sha256 {
+        return Err(format!("图片 {} 内容发生变化，请重新上传", asset.id));
+    }
+    Ok(())
 }

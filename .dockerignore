@@ -1,9 +1,6 @@
 # 版本控制与 CI
 .git
-.github/*
-!.github/scripts
-.github/scripts/*
-!.github/scripts/build-render-tools.sh
+.github
 
 # 构建产物（镜像内会重新构建）
 target
@@ -25,8 +22,8 @@ cookies.json
 *.unmasked
 *.xml
 *.log
-.env.local
-.env.*.local
+.env
+.env.*
 
 # 文档站与桌面端与镜像无关
 docs

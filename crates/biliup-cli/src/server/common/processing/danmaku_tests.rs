@@ -1,6 +1,41 @@
 use super::*;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
+use tempfile::TempDir;
+
+const XML_FILE: &str = "danmaku.xml";
+const ASS_FILE: &str = "danmaku.ass";
+
+#[derive(Debug)]
+struct Conversion {
+    stats: danmaku_factory::ConvertStats,
+    ass: Vec<u8>,
+}
+
+async fn convert_stream(
+    _work: &Arc<TempDir>,
+    xml: Vec<u8>,
+    options: &ConvertOptions,
+    cancel: &CancellationToken,
+) -> Result<Conversion, String> {
+    let options = options.clone();
+    let control = ConversionControl::new(cancel, CONVERT_TIMEOUT);
+    supervised(CONVERT_TIMEOUT, cancel, move || {
+        let mut ass = Vec::new();
+        let stats = danmaku_factory::convert_normalized_xml_to_writer(
+            CheckedReader {
+                input: Cursor::new(xml),
+                control,
+            },
+            &mut ass,
+            &options,
+        )
+        .map_err(|e| describe(&e))?;
+        Ok(Conversion { stats, ass })
+    })
+    .await
+}
 
 #[test]
 fn time_correction_cannot_overflow_before_the_offset_budget_filter() {
@@ -160,8 +195,8 @@ fn emoji_fallback_marks_only_dialogue_runs_and_keeps_zwj_sequences() {
 }
 
 #[test]
-fn embedded_emoji_font_has_a_valid_sfnt_header() {
-    let font = crate::tools::render_emoji_font_bytes();
+fn external_emoji_font_has_a_valid_sfnt_header() {
+    let font = std::fs::read(crate::tools::render_emoji_font().expect("test font bundle")).unwrap();
     assert!(font.len() > 1_000_000);
     assert!(font.starts_with(b"\0\x01\0\0"));
 }
@@ -198,13 +233,13 @@ fn gui_defaults() -> DanmakuSettings {
     }
 }
 
-fn work_with(input: &str) -> Arc<ManagedRoot> {
-    let work = Arc::new(ManagedRoot::new(tempfile::tempdir().unwrap()).unwrap());
+fn work_with(input: &str) -> Arc<TempDir> {
+    let work = Arc::new(tempfile::tempdir().unwrap());
     std::fs::copy(golden(input), work.path().join(XML_FILE)).unwrap();
     work
 }
 
-fn input(work: &ManagedRoot) -> Vec<u8> {
+fn input(work: &TempDir) -> Vec<u8> {
     std::fs::read(work.path().join(XML_FILE)).unwrap()
 }
 
@@ -243,11 +278,11 @@ fn gui_settings_map_to_the_former_command_line() {
 }
 
 #[tokio::test]
-async fn a_conversion_writes_what_the_cli_wrote() {
+async fn streamed_conversion_matches_the_former_cli() {
     for name in ["basic_cn", "dense"] {
         let work = work_with(&format!("inputs/{name}.xml"));
         let options = factory_options(&gui_defaults(), 1920, 1080);
-        let output = convert_in_attempt(&work, input(&work), &options, &CancellationToken::new())
+        let output = convert_stream(&work, input(&work), &options, &CancellationToken::new())
             .await
             .unwrap();
         assert!(output.stats.danmaku_count > 0);
@@ -258,22 +293,19 @@ async fn a_conversion_writes_what_the_cli_wrote() {
 }
 
 #[tokio::test]
-async fn paths_with_spaces_and_chinese_convert_without_leaving_an_attempt() {
+async fn paths_with_spaces_and_chinese_convert_without_creating_staging_files() {
     let root = tempfile::tempdir().unwrap();
     let parent = root.path().join("录播 目录");
     std::fs::create_dir_all(&parent).unwrap();
     let work = Arc::new(
-        ManagedRoot::new(
-            tempfile::Builder::new()
-                .prefix(".render-段 1")
-                .tempdir_in(parent)
-                .unwrap(),
-        )
-        .unwrap(),
+        tempfile::Builder::new()
+            .prefix(".render-段 1")
+            .tempdir_in(parent)
+            .unwrap(),
     );
     let xml = std::fs::read(golden("inputs/basic_cn.xml")).unwrap();
     let options = factory_options(&gui_defaults(), 1920, 1080);
-    let output = convert_in_attempt(&work, xml, &options, &CancellationToken::new())
+    let output = convert_stream(&work, xml, &options, &CancellationToken::new())
         .await
         .unwrap();
     let expected = std::fs::read(golden("expected/basic_cn-biliup.ass")).unwrap();
@@ -282,7 +314,7 @@ async fn paths_with_spaces_and_chinese_convert_without_leaving_an_attempt() {
 }
 
 #[tokio::test]
-async fn concurrent_conversions_use_separate_attempts() {
+async fn concurrent_stream_conversions_do_not_create_staging_files() {
     let options = factory_options(&gui_defaults(), 1920, 1080);
     let work = work_with("inputs/dense.xml");
     let xml = input(&work);
@@ -291,7 +323,7 @@ async fn concurrent_conversions_use_separate_attempts() {
         let options = options.clone();
         let work = &work;
         let xml = xml.clone();
-        async move { convert_in_attempt(work, xml, &options, &CancellationToken::new()).await }
+        async move { convert_stream(work, xml, &options, &CancellationToken::new()).await }
     }))
     .await;
     let expected = std::fs::read(golden("expected/dense-biliup.ass")).unwrap();
@@ -306,13 +338,10 @@ async fn concurrent_conversions_use_separate_attempts() {
 async fn cancelling_answers_at_once_and_keeps_the_attempt_until_the_core_stops() {
     let owner = tempfile::tempdir().unwrap();
     let work = Arc::new(
-        ManagedRoot::new(
-            tempfile::Builder::new()
-                .prefix(".render-")
-                .tempdir_in(owner.path())
-                .unwrap(),
-        )
-        .unwrap(),
+        tempfile::Builder::new()
+            .prefix(".render-")
+            .tempdir_in(owner.path())
+            .unwrap(),
     );
     let path = work.path().to_owned();
     // The test thread must not block on the runtime: `started` is awaited, and
@@ -324,8 +353,8 @@ async fn cancelling_answers_at_once_and_keeps_the_attempt_until_the_core_stops()
         let work = work.clone();
         let cancel = cancel.clone();
         tokio::spawn(async move {
-            let _held_by_the_core = work;
             supervised(CONVERT_TIMEOUT, &cancel, move || {
+                let _held_by_the_core = work;
                 let _ = started.send(());
                 let _ = blocked.recv();
                 Ok::<(), String>(())
@@ -364,7 +393,7 @@ async fn a_conversion_that_makes_no_progress_is_stopped_by_the_timeout() {
     .await
     .unwrap_err();
     assert!(
-        error.contains("弹幕转换失败") && error.contains("没有推进"),
+        error.contains("弹幕转换失败") && error.contains("超时"),
         "{error}"
     );
     assert!(started.elapsed() < Duration::from_secs(5));
@@ -387,12 +416,12 @@ async fn conversion_errors_are_reported_without_a_fallback() {
     let work = work_with("inputs/basic_cn.xml");
     let mut options = factory_options(&gui_defaults(), 1920, 1080);
     options.width = 0;
-    let error = convert_in_attempt(&work, input(&work), &options, &CancellationToken::new())
+    let error = convert_stream(&work, input(&work), &options, &CancellationToken::new())
         .await
         .unwrap_err();
     assert!(error.contains("弹幕转换参数无效"), "{error}");
     std::fs::write(work.path().join(XML_FILE), "<i></i>").unwrap();
-    let error = convert_in_attempt(
+    let error = convert_stream(
         &work,
         input(&work),
         &factory_options(&gui_defaults(), 1920, 1080),
@@ -406,11 +435,11 @@ async fn conversion_errors_are_reported_without_a_fallback() {
 }
 
 #[tokio::test]
-async fn caller_files_are_preserved_and_attempt_results_are_private() {
+async fn stream_conversion_preserves_all_caller_files() {
     let work = work_with("inputs/basic_cn.xml");
     std::fs::write(work.path().join(ASS_FILE), b"earlier successful attempt").unwrap();
     std::fs::write(work.path().join("earlier.json"), b"earlier task result").unwrap();
-    let output = convert_in_attempt(
+    let output = convert_stream(
         &work,
         input(&work),
         &factory_options(&gui_defaults(), 1920, 1080),
@@ -429,7 +458,7 @@ async fn caller_files_are_preserved_and_attempt_results_are_private() {
     );
     let mut invalid = factory_options(&gui_defaults(), 1920, 1080);
     invalid.width = 0;
-    convert_in_attempt(&work, input(&work), &invalid, &CancellationToken::new())
+    convert_stream(&work, input(&work), &invalid, &CancellationToken::new())
         .await
         .unwrap_err();
     assert_eq!(
@@ -439,45 +468,80 @@ async fn caller_files_are_preserved_and_attempt_results_are_private() {
     assert!(no_attempts(work.path()));
 }
 
-#[tokio::test]
-async fn cleanup_failure_preserves_residue_and_reports_the_path() {
-    let work = work_with("inputs/basic_cn.xml");
-    let error = run_attempt(
-        &work,
-        input(&work),
-        &factory_options(&gui_defaults(), 1920, 1080),
-        Cleanup::Retain,
-    )
-    .unwrap_err();
-    assert!(
-        error.contains("cleanup ") && error.contains("injected attempt cleanup failure"),
-        "{error}"
-    );
-    let attempt = std::fs::read_dir(work.path())
-        .unwrap()
-        .map(|e| e.unwrap().path())
-        .find(|path| {
-            path.file_name()
+#[test]
+fn partial_ass_is_published_only_after_success_and_failures_preserve_existing_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.ass");
+    let earlier = dir.path().join("earlier.ass");
+    std::fs::write(&earlier, b"keep").unwrap();
+    let control = ConversionControl::new(&CancellationToken::new(), CONVERT_TIMEOUT);
+    let error = publish_ass(&output, &control, |writer| -> Result<(), String> {
+        writer.write_all(b"half").unwrap();
+        assert!(!output.exists());
+        assert!(std::fs::read_dir(dir.path()).unwrap().any(|entry| {
+            entry
                 .unwrap()
-                .to_string_lossy()
-                .starts_with(".danmaku-attempt-")
-        })
+                .path()
+                .extension()
+                .is_some_and(|ext| ext == "part")
+        }));
+        Err("injected write failure".into())
+    })
+    .unwrap_err();
+    assert_eq!(error, "injected write failure");
+    assert!(!output.exists());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    publish_ass(&output, &control, |writer| {
+        writer.write_all(b"complete").map_err(|e| e.to_string())
+    })
+    .unwrap();
+    assert_eq!(std::fs::read(&output).unwrap(), b"complete");
+    assert!(publish_ass(&output, &control, |_| Ok(())).is_err());
+    assert_eq!(std::fs::read(&output).unwrap(), b"complete");
+    assert_eq!(std::fs::read(earlier).unwrap(), b"keep");
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+}
+
+#[test]
+fn cancelling_before_publish_removes_the_partial_ass() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = dir.path().join("out.ass");
+    let cancel = CancellationToken::new();
+    let control = ConversionControl::new(&cancel, CONVERT_TIMEOUT);
+    let error = publish_ass(&output, &control, |writer| {
+        writer.write_all(b"complete but cancelled").unwrap();
+        cancel.cancel();
+        Ok(())
+    })
+    .unwrap_err();
+    assert!(error.contains("取消"));
+    assert!(!output.exists());
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
+
+#[tokio::test]
+async fn export_and_preview_match_without_xml_or_ass_staging_directories() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = source_with(
+        "<i recording_start_time_ms=\"100000\"><d p=\"1,1,25,16777215\">中文 😡</d></i>",
+        dir.path(),
+    );
+    let work = Arc::new(tempfile::tempdir().unwrap());
+    let cancel = CancellationToken::new();
+    let preview = generate(&source, &gui_defaults(), 320, 180, &cancel)
+        .await
         .unwrap();
-    assert!(attempt.join(ASS_FILE).is_file());
-    assert!(error.contains(&attempt.display().to_string()));
-    std::fs::remove_dir_all(&attempt).unwrap();
+    let (output, metadata) =
+        generate_for_render(&source, &gui_defaults(), 320, 180, work.path(), &cancel)
+            .await
+            .unwrap();
+    assert_eq!(output.path().extension().unwrap(), "ass");
+    assert_eq!(metadata.time_origin_ms, preview.time_origin_ms);
+    assert_eq!(metadata.comment_count, preview.comment_count);
+    assert_eq!(std::fs::read_to_string(output.path()).unwrap(), preview.ass);
+    assert_eq!(std::fs::read_dir(work.path()).unwrap().count(), 1); // Only the ASS input; no directory lease.
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1); // Original XML only.
     assert!(no_attempts(work.path()));
-    let root_path = work.path().to_owned();
-    drop(work);
-    assert!(
-        root_path.exists(),
-        "failed cleanup must retain its managed identity"
-    );
-    assert!(super::super::jobs::cleanup_inactive_danmaku_root(&root_path).unwrap());
-    assert!(
-        !root_path.exists(),
-        "managed recovery must retry the retained root"
-    );
 }
 
 #[tokio::test]
@@ -511,13 +575,11 @@ async fn generate_keeps_negative_origins_and_drops_impossible_times() {
          <d p=\"5,1,25,16777215\">later</d><d p=\"999999999,1,25,16777215\">bogus</d></i>",
         dir.path(),
     );
-    let work = Arc::new(ManagedRoot::new(tempfile::tempdir().unwrap()).unwrap());
     let preview = generate(
         &source,
         &gui_defaults(),
         320,
         180,
-        &work,
         &CancellationToken::new(),
     )
     .await

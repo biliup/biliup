@@ -538,9 +538,14 @@ pub async fn preview_render(
 }
 
 fn font_urls() -> Vec<String> {
-    crate::tools::render_font()
-        .map(|_| vec!["/v1/render-fonts/0".into(), "/v1/render-fonts/1".into()])
-        .unwrap_or_default()
+    let mut urls = Vec::new();
+    if crate::tools::render_font().is_some() {
+        urls.push("/v1/render-fonts/0".into());
+    }
+    if crate::tools::render_emoji_font().is_some() {
+        urls.push("/v1/render-fonts/1".into());
+    }
+    urls
 }
 
 pub async fn render_tools() -> Response {
@@ -549,24 +554,13 @@ pub async fn render_tools() -> Response {
 }
 
 pub async fn get_render_font(Path(id): Path<usize>, request: Request) -> Response {
-    if id == 1 {
-        let mut response =
-            Body::from(crate::tools::render_emoji_font_bytes().to_vec()).into_response();
-        response
-            .headers_mut()
-            .insert(header::CONTENT_TYPE, HeaderValue::from_static("font/ttf"));
-        response.headers_mut().insert(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("private, max-age=3600"),
-        );
-        return response;
-    }
-    if id != 0 {
+    let path = match id {
+        0 => crate::tools::render_font(),
+        1 => crate::tools::render_emoji_font(),
+        _ => None,
+    };
+    let Some(path) = path else {
         return not_found("字体不存在");
-    }
-    let path = match crate::tools::render_font() {
-        Some(path) => path,
-        None => return not_found("字体不存在"),
     };
     // Files come exclusively from the configured/bundled font inventory.
     let mut response = match ServeFile::new(path).oneshot(request).await {

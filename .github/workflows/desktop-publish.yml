@@ -82,8 +82,6 @@ jobs:
     - name: Render download notes
       shell: bash
       run: |
-        # Package the fonts and native converter attribution with the installer.
-        bash .github/scripts/build-render-tools.sh tauri-app/src-tauri/render-tools
         sed -e "s|{{FFMPEG_VERSION}}|${FFMPEG_VERSION}|g" \
           -e "s|{{FFMPEG_TAG}}|${FFMPEG_TAG}|g" \
           -e "s|{{FFMPEG_SOURCE_URL}}|${FFMPEG_SOURCE_URL}|g" \

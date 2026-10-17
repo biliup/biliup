@@ -10,10 +10,9 @@
 
 use serde::Serialize;
 use std::ffi::OsStr;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, Once, OnceLock, PoisonError, RwLock};
+use std::sync::{Mutex, Once, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use biliup::tools::{command, std_command};
@@ -22,8 +21,6 @@ const FFMPEG: &str = "ffmpeg";
 const RENDER_TOOLS_ENV: &str = "BILIUP_RENDER_TOOLS_DIR";
 const RENDER_TOOLS_DIR: &str = "render-tools";
 const RENDER_FONT: &str = "NotoSansSC-Regular.otf";
-const RENDER_FONT_BYTES: &[u8] = include_bytes!("assets/NotoSansSC-Regular.otf");
-const RENDER_EMOJI_FONT: &[u8] = include_bytes!("assets/NotoEmoji.ttf");
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -51,7 +48,6 @@ static LOCATIONS: RwLock<Locations> = RwLock::new(Locations {
 
 /// Successful `ffmpeg -version` results, keyed by the program that was run.
 static VERSION_CACHE: Mutex<Option<(PathBuf, FfmpegVersion)>> = Mutex::new(None);
-static EMBEDDED_RENDER_TOOLS: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 /// Applies the `ffmpeg_path` setting; blank means unset.
 pub fn set_configured_ffmpeg(path: Option<&str>) {
@@ -135,85 +131,43 @@ fn render_font_files_in(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
-fn embedded_render_font_matches(path: &Path) -> bool {
-    std::fs::read(path).is_ok_and(|bytes| bytes.as_slice() == RENDER_FONT_BYTES)
-}
-
-fn materialize_embedded_render_tools() -> Option<PathBuf> {
-    let cache = dirs::cache_dir().unwrap_or_else(|| {
-        std::env::temp_dir().join(format!("biliup-cache-{}", std::process::id()))
-    });
-    let root = cache.join("biliup").join("render-tools-embedded-v1");
-    let fonts = root.join("fonts");
-    std::fs::create_dir_all(&fonts).ok()?;
-    let font = fonts.join(RENDER_FONT);
-    if embedded_render_font_matches(&font) {
-        return Some(root);
-    }
-
-    let mut temporary = tempfile::NamedTempFile::new_in(&fonts).ok()?;
-    temporary.write_all(RENDER_FONT_BYTES).ok()?;
-    if temporary.persist(&font).is_err() && !embedded_render_font_matches(&font) {
-        // On platforms that cannot replace an existing file atomically, remove
-        // only the invalid cached copy and retry through a fresh temporary file.
-        std::fs::remove_file(&font).ok()?;
-        let mut replacement = tempfile::NamedTempFile::new_in(&fonts).ok()?;
-        replacement.write_all(RENDER_FONT_BYTES).ok()?;
-        replacement.persist(&font).ok()?;
-    }
-    embedded_render_font_matches(&font).then_some(root)
-}
-
-fn embedded_render_tools() -> Option<PathBuf> {
-    EMBEDDED_RENDER_TOOLS
-        .get_or_init(materialize_embedded_render_tools)
-        .clone()
-}
-
-/// Directory containing fonts shared by FFmpeg/libass and browser preview.
-/// Shipped render-tools take precedence; the CJK font embedded in the binary
-/// is materialized into the user cache when no external font is available.
+/// External fonts shared by FFmpeg/libass and the browser preview. Development
+/// builds can read the checked-out resource bundle; release builds use the
+/// configured, installed or executable-adjacent directory.
 pub fn render_fonts_dir() -> Option<PathBuf> {
     let bundled = bundled_render_tools()
         .map(|dir| dir.join("fonts"))
         .filter(|path| !render_font_files_in(path).is_empty());
-    bundled.or_else(|| embedded_render_tools().map(|dir| dir.join("fonts")))
-}
-
-/// Returns the preferred bundled CJK font, or another supported font in the
-/// shared font directory.
-pub fn render_font() -> Option<PathBuf> {
-    let dir = render_fonts_dir()?;
-    render_font_in_with_embedded_fallback(&dir, || {
-        embedded_render_tools().map(|root| root.join("fonts").join(RENDER_FONT))
+    bundled.or_else(|| {
+        #[cfg(debug_assertions)]
+        {
+            let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/render-tools/fonts");
+            (!render_font_files_in(&fonts).is_empty()).then_some(fonts)
+        }
+        #[cfg(not(debug_assertions))]
+        {
+            None
+        }
     })
 }
 
-fn render_font_in_with_embedded_fallback(
-    dir: &Path,
-    embedded: impl FnOnce() -> Option<PathBuf>,
-) -> Option<PathBuf> {
-    if let Some(font) = render_font_in(dir, None) {
-        return Some(font);
-    }
-    let embedded = embedded()?;
-    render_font_in(dir, Some(&embedded))
-}
-
-fn render_font_in(dir: &Path, embedded: Option<&Path>) -> Option<PathBuf> {
+fn render_font_in(dir: &Path) -> Option<PathBuf> {
     let preferred = dir.join(RENDER_FONT);
     if preferred.is_file() {
         return Some(preferred);
     }
-    if let Some(path) = render_font_files_in(&dir)
+    render_font_files_in(dir)
         .into_iter()
         .find(|path| path.file_name().and_then(OsStr::to_str) != Some("NotoEmoji.ttf"))
-    {
-        return Some(path);
-    }
-    embedded
-        .filter(|path| path.is_file())
-        .map(Path::to_path_buf)
+}
+
+pub fn render_font() -> Option<PathBuf> {
+    render_font_in(&render_fonts_dir()?)
+}
+
+pub fn render_emoji_font() -> Option<PathBuf> {
+    let font = render_fonts_dir()?.join("NotoEmoji.ttf");
+    font.is_file().then_some(font)
 }
 
 pub fn render_font_path() -> Result<PathBuf, String> {
@@ -228,12 +182,6 @@ pub fn render_font_files() -> Vec<PathBuf> {
         return Vec::new();
     };
     render_font_files_in(&dir)
-}
-
-/// Monochrome Noto Emoji is embedded in the binary so libass and the browser
-/// preview always have a deterministic fallback for emoji missing from CJK.
-pub fn render_emoji_font_bytes() -> &'static [u8] {
-    RENDER_EMOJI_FONT
 }
 
 /// The ffmpeg program to run and where it came from.
@@ -461,70 +409,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_cjk_font_materializes_from_compiled_asset() {
-        let tools = embedded_render_tools().expect("embedded CJK font should be extractable");
-        let font = tools.join("fonts").join(RENDER_FONT);
-        assert_eq!(std::fs::read(font).unwrap().as_slice(), RENDER_FONT_BYTES);
-    }
-
-    /// The fonts are Git LFS objects: a checkout without LFS inlines an ASCII
-    /// pointer instead of a font, which is only visible at run time.
-    #[test]
-    fn embedded_fonts_are_real_sfnt_files() {
-        assert!(RENDER_FONT_BYTES.len() > 1_000_000);
-        assert!(
-            RENDER_FONT_BYTES.starts_with(b"OTTO"),
-            "the embedded CJK font is not an OpenType file; was it checked out without git-lfs?"
-        );
-        assert!(
-            RENDER_EMOJI_FONT.starts_with(b"\0\x01\0\0"),
-            "the embedded emoji font is not a TrueType file; was it checked out without git-lfs?"
-        );
-    }
-
-    #[test]
-    fn emoji_only_directory_uses_only_an_existing_embedded_cjk_font() {
+    fn external_font_inventory_prefers_cjk_and_does_not_treat_emoji_as_cjk() {
         let fonts = tempfile::tempdir().unwrap();
         std::fs::write(fonts.path().join("NotoEmoji.ttf"), b"emoji").unwrap();
-
-        let missing_fallback = fonts.path().join("missing-cjk.otf");
-        assert_eq!(render_font_in(fonts.path(), Some(&missing_fallback)), None);
-
-        let embedded = fonts.path().join("embedded-cjk.otf");
-        std::fs::write(&embedded, b"cjk").unwrap();
-        assert_eq!(
-            render_font_in(fonts.path(), Some(&embedded)),
-            Some(embedded)
-        );
-    }
-
-    #[test]
-    fn external_cjk_font_does_not_materialize_embedded_fallback() {
-        let fonts = tempfile::tempdir().unwrap();
-        let external = fonts.path().join("custom-cjk.ttf");
-        std::fs::write(&external, b"cjk").unwrap();
-        let embedded_was_requested = std::cell::Cell::new(false);
-
-        let selected = render_font_in_with_embedded_fallback(fonts.path(), || {
-            embedded_was_requested.set(true);
-            panic!("external CJK font should skip embedded extraction");
-        });
-
-        assert_eq!(selected, Some(external));
-        assert!(!embedded_was_requested.get());
-    }
-
-    #[test]
-    fn emoji_only_directory_extracts_embedded_cjk_fallback_on_demand() {
-        let fonts = tempfile::tempdir().unwrap();
-        std::fs::write(fonts.path().join("NotoEmoji.ttf"), b"emoji").unwrap();
-        let fallback = fonts.path().join("embedded-cjk.otf");
-        std::fs::write(&fallback, b"cjk").unwrap();
-
-        let selected =
-            render_font_in_with_embedded_fallback(fonts.path(), || Some(fallback.clone()));
-
-        assert_eq!(selected, Some(fallback));
+        assert_eq!(render_font_in(fonts.path()), None);
+        let custom = fonts.path().join("custom.ttf");
+        std::fs::write(&custom, b"custom").unwrap();
+        assert_eq!(render_font_in(fonts.path()), Some(custom));
+        let preferred = fonts.path().join(RENDER_FONT);
+        std::fs::write(&preferred, b"cjk").unwrap();
+        assert_eq!(render_font_in(fonts.path()), Some(preferred.clone()));
+        assert_eq!(render_font_files_in(fonts.path())[0], preferred);
     }
 
     const BTBN_WIN64: &str = "ffmpeg version n8.1.2-50-g1a748fe2cd-20260831 Copyright (c) 2000-2026 the FFmpeg developers\n\

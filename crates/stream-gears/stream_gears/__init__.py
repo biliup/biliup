@@ -13,7 +13,6 @@ __all__ = [
     "Segment",
     "StreamGearsError",
     "UploadLine",
-    "config_bindings",
     "download",
     "download_with_callback",
     "get_qrcode",
@@ -22,7 +21,6 @@ __all__ = [
     "login_by_sms",
     "login_by_web_cookies",
     "login_by_web_qrcode",
-    "main_loop",
     "send_sms",
     "upload",
 ]

@@ -30,7 +30,7 @@ export function hookStepToForm(step: unknown): PostprocessorFormStep {
     // {run}/{mv}/{remux} 等单键对象 → cmd/key, value/value
     const keys = Object.keys(s).filter(k => s[k] !== undefined && s[k] !== null && s[k] !== '')
     if (keys.length > 0) {
-      return { cmd: keys[0], value: String(s[keys[0]]) }
+      return { cmd: keys[0], value: keys[0] === 'render' ? JSON.stringify(s.render, null, 2) : String(s[keys[0]]) }
     }
   }
   return { cmd: 'run', value: '' }
@@ -50,6 +50,13 @@ export function formToHookStep(step: PostprocessorFormStep): unknown {
       return { mv: value }
     case 'remux':
       return { remux: value }
+    case 'render': {
+      const render: unknown = JSON.parse(value)
+      if (!render || typeof render !== 'object' || Array.isArray(render)) {
+        throw new Error('画面与弹幕设置必须是 JSON 对象')
+      }
+      return { render }
+    }
     default:
       throw new Error(`不支持的后处理操作: ${String(cmd ?? '')}`)
   }

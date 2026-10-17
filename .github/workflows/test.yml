@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # 字体内嵌进 biliup-cli，检出时必须拉取 Git LFS 对象
+          # 随包分发的字体资源使用 Git LFS，检出时拉取真实字体文件
           lfs: true
       - uses: actions/setup-node@v4
         with:
@@ -39,8 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ffmpeg locales
           sudo locale-gen de_DE.UTF-8
-          bash .github/scripts/build-render-tools.sh "$RUNNER_TEMP/render-tools"
-          echo "BILIUP_RENDER_TOOLS_DIR=$RUNNER_TEMP/render-tools" >> "$GITHUB_ENV"
+          echo "BILIUP_RENDER_TOOLS_DIR=$GITHUB_WORKSPACE/crates/biliup-cli/assets/render-tools" >> "$GITHUB_ENV"
           echo "BILIUP_REQUIRE_RENDER_TESTS=1" >> "$GITHUB_ENV"
       - name: Run tests
         run: cargo test --locked --workspace

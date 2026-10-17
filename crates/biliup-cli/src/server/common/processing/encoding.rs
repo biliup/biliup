@@ -386,7 +386,11 @@ async fn test_encoder(
     if let Some(result) = cached(&key) {
         return result;
     }
-    let temp = tempfile::tempdir().map_err(|error| format!("创建编码探测目录失败：{error}"))?;
+    let probe = tempfile::Builder::new()
+        .prefix(".biliup-encoder-check-")
+        .suffix(".mp4")
+        .tempfile()
+        .map_err(|error| format!("创建编码探测文件失败：{error}"))?;
     let mut command = crate::tools::low_priority_ffmpeg_command();
     command
         .args([
@@ -407,7 +411,7 @@ async fn test_encoder(
         .args(["-vf", selected.video_filter(), "-frames:v", "8", "-an"])
         .args(selected.output_args())
         .args(["-f", "mp4", "-y"])
-        .arg(temp.path().join("probe.mp4"));
+        .arg(probe.path());
     // The probe emits no FFmpeg progress, making run_process's watchdog an
     // absolute timeout here. It also kills and reaps on timeout/cancellation.
     let mut outcome = super::engine::run_process(command, cancel, PROBE_TIMEOUT, |_, _| {})
@@ -426,7 +430,7 @@ async fn test_encoder(
                 "h264",
                 "-i",
             ])
-            .arg(temp.path().join("probe.mp4"))
+            .arg(probe.path())
             .args(["-map", "0:v:0", "-frames:v", "8", "-an", "-f", "null", "-"]);
         outcome = super::engine::run_process(decode, cancel, PROBE_TIMEOUT, |_, _| {})
             .await
@@ -437,7 +441,7 @@ async fn test_encoder(
     }
     let outcome = outcome
         .and_then(|()| {
-            std::fs::metadata(temp.path().join("probe.mp4"))
+            std::fs::metadata(probe.path())
                 .map_err(|error| format!("未生成编码探测视频：{error}"))
                 .and_then(|metadata| {
                     if metadata.len() > 0 {

@@ -377,11 +377,11 @@ mod tests {
 
         assert_eq!(
             resolve_static_path(root.path(), "recording.mp4").unwrap(),
-            video
+            video.canonicalize().unwrap()
         );
         assert_eq!(
             resolve_static_path(root.path(), "ds_update.log").unwrap(),
-            log
+            log.canonicalize().unwrap()
         );
         assert_eq!(
             resolve_static_path(root.path(), "cookies.json"),

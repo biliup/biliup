@@ -1,10 +1,6 @@
 //! Post-recording effects. Source files are never overwritten.
 pub mod assets;
-pub mod danmaku;
-mod danmaku_directory;
-pub mod encoding;
-pub mod engine;
-pub mod gpu;
+pub use crate::server::common::processing::{danmaku, encoding, engine, gpu};
 pub mod jobs;
 pub mod model;
 pub mod store;

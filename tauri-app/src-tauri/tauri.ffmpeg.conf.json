@@ -4,12 +4,7 @@
     "resources": {
       "ffmpeg/ffmpeg.exe": "ffmpeg/ffmpeg.exe",
       "ffmpeg/LICENSE.txt": "ffmpeg/LICENSE.txt",
-      "ffmpeg/README.txt": "ffmpeg/README.txt",
-      "render-tools/README.txt": "render-tools/README.txt",
-      "render-tools/fonts/NotoSansSC-Regular.otf": "render-tools/fonts/NotoSansSC-Regular.otf",
-      "render-tools/fonts/NotoEmoji-OFL.txt": "render-tools/fonts/NotoEmoji-OFL.txt",
-      "render-tools/fonts/OFL.txt": "render-tools/fonts/OFL.txt",
-      "render-tools/THIRD-PARTY-NOTICES.txt": "render-tools/THIRD-PARTY-NOTICES.txt"
+      "ffmpeg/README.txt": "ffmpeg/README.txt"
     }
   }
 }

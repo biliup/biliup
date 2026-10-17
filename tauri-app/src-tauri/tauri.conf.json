@@ -15,7 +15,7 @@
   "bundle": {
     "active": true,
     "resources": {
-      "../../crates/biliup-cli/assets/NotoEmoji-OFL.txt": "NotoEmoji-OFL.txt"
+      "../../crates/biliup-cli/assets/render-tools/": "render-tools/"
     },
     "targets": "all",
     "icon": [

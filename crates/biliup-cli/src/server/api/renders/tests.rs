@@ -186,7 +186,7 @@ async fn body(response: Response) -> Bytes {
 }
 
 #[tokio::test]
-async fn embedded_emoji_font_is_available_from_the_preview_font_route() {
+async fn external_emoji_font_is_streamed_from_the_preview_font_route() {
     let response = get_render_font(Path(1), Request::new(Body::empty())).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.headers()[header::CONTENT_TYPE], "font/ttf");
@@ -196,7 +196,9 @@ async fn embedded_emoji_font_is_available_from_the_preview_font_route() {
     );
     assert_eq!(
         body(response).await.as_ref(),
-        crate::tools::render_emoji_font_bytes()
+        std::fs::read(crate::tools::render_emoji_font().expect("test font bundle"))
+            .unwrap()
+            .as_slice()
     );
 
     let app = Router::new().route("/v1/render-fonts/{id}", get(get_render_font));
@@ -663,7 +665,7 @@ async fn group_lists_inherited_images_and_saves_its_independent_recipe() {
 #[tokio::test]
 async fn group_render_request_for_inherited_clip_keeps_original_snapshot_and_history() {
     let f = fixture().await;
-    let permit = crate::server::workbench::transcode::acquire(&CancellationToken::new())
+    let permit = crate::server::common::processing::transcode::acquire(&CancellationToken::new())
         .await
         .unwrap();
     sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
@@ -841,7 +843,7 @@ async fn queued_whole_jobs_fix_recipe_snapshot_cancel_and_retry_original() {
     let f = fixture().await;
     // Keep work queued while exercising the HTTP lifecycle. The recorder would
     // supply real video bytes; FFmpeg never reads this cancelled fixture.
-    let permit = crate::server::workbench::transcode::acquire(&CancellationToken::new())
+    let permit = crate::server::common::processing::transcode::acquire(&CancellationToken::new())
         .await
         .unwrap();
     let source = f.dir.path().join("long.flv");

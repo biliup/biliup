@@ -2,6 +2,8 @@
 name = "biliup-cli"
 version.workspace = true
 edition = "2024"
+# Local SQLx settings and credentials must not enter source distributions.
+exclude = [".env", ".env.*"]
 description = "Upload video to bilibili."
 license = "MIT OR Apache-2.0"
 

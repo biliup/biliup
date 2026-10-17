@@ -183,7 +183,7 @@ pub async fn compute(
         .collect();
     if segments
         .iter()
-        .any(|segment| crate::server::plugins::mosaic::is_unmasked(Path::new(&segment.path)))
+        .any(|segment| crate::server::common::processing::masking::is_unmasked(Path::new(&segment.path)))
     {
         return Err(PlanError::Unavailable(
             "所选录像尚未完成画面遮挡，请等待处理完成后重新导出".into(),

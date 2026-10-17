@@ -209,8 +209,7 @@ where
 {
     let session = Session::login(ctx, upload_config).await?;
     let processors = segment_processors(ctx);
-    let plugins = crate::server::plugins::get_all_plugins();
-    let uploaded = pipeline_upload_videos(rx, &processors, &plugins, ctx, |path| {
+    let uploaded = pipeline_upload_videos(rx, &processors, ctx, |path| {
         session.upload(path, bytes)
     })
     .await?;
@@ -240,12 +239,10 @@ pub(crate) async fn run_standby(
         .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
-    let plugins = crate::server::plugins::get_all_plugins();
     let bytes = AtomicU64::new(0);
     let uploaded = pipeline_upload_videos(
         futures::stream::iter(segments),
         &processors,
-        &plugins,
         ctx,
         |path| session.upload(path, &bytes),
     )
@@ -278,12 +275,10 @@ pub(crate) async fn run_append(
         .ok_or_else(|| AppError::Custom("这个房间没有投稿模板".into()))?;
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
-    let plugins = crate::server::plugins::get_all_plugins();
     let bytes = AtomicU64::new(0);
     let uploaded = pipeline_upload_videos(
         futures::stream::iter(segments),
         &processors,
-        &plugins,
         ctx,
         |path| session.upload(path, &bytes),
     )

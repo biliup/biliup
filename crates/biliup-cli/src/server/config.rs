@@ -658,7 +658,7 @@ impl Config {
         let Some(value) = &self.mosaic_config else {
             return Ok(());
         };
-        let mosaic: crate::server::plugins::mosaic::MosaicConfig =
+        let mosaic: crate::server::common::processing::masking::MosaicConfig =
             serde_json::from_value(value.clone())
                 .map_err(|_| "画面遮挡配置格式错误".to_string())?;
         mosaic.validate()

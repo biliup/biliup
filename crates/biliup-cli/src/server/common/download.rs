@@ -135,16 +135,23 @@ impl SegmentEventProcessor {
         self.output.seen += 1;
         // 验证文件有效性
         let settled = settled.boxed().shared();
-        let protected = crate::server::plugins::mosaic::masking_required(
-            &self.ctx.config(),
-            &self.ctx.live_streamer().override_cfg,
-        ) || crate::server::plugins::mosaic::is_unmasked(&event.prev_file_path);
+        let protected =
+            crate::server::common::processing::masking::masking_required(
+                &self.ctx.config(),
+                &self.ctx.live_streamer().override_cfg,
+            ) || crate::server::common::processing::requires_masking(
+                self.ctx
+                    .live_streamer()
+                    .segment_processor
+                    .as_deref()
+                    .unwrap_or_default(),
+            ) || crate::server::common::processing::masking::is_unmasked(&event.prev_file_path);
         // A filtered segment can still be kept by a marker/retention pin. Check
         // its audio before retention decides whether to retain or delete it.
         let filtered = !protected && self.file_validator.will_delete(&event.prev_file_path);
         self.file_validator
             .validate_without_size(&event.prev_file_path)?;
-        if protected {
+        if protected || self.ctx.live_streamer().segment_processor.as_ref().is_some_and(|steps| steps.iter().any(|s| matches!(s, crate::server::infrastructure::models::hook_step::HookStep::Render { .. }))) {
             event.ready = Some(crate::server::core::downloader::SegmentReady(
                 settled.clone(),
             ));
@@ -702,7 +709,12 @@ impl DownloadTask {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
-        if crate::server::plugins::mosaic::masking_required(&ctx.config(), &streamer.override_cfg) {
+        if crate::server::common::processing::masking::masking_required(
+            &ctx.config(),
+            &streamer.override_cfg,
+        ) || crate::server::common::processing::requires_masking(
+            streamer.segment_processor.as_deref().unwrap_or_default(),
+        ) {
             // Put a durable raw marker in the basename before any byte is written.
             // A crash/restart or later config change must not make a `.part` raw
             // recording eligible for HA recovery uploads.
@@ -728,10 +740,17 @@ impl DownloadTask {
         download_config.preview = self.preview.clone();
         download_config.index_tap = workbench.index_tap();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
-            if crate::server::plugins::mosaic::masking_required(
+            if crate::server::common::processing::masking::masking_required(
                 &ctx.config(),
                 &streamer.override_cfg,
-            ) {
+            ) || streamer.segment_processor.as_ref().is_some_and(|steps| {
+                steps.iter().any(|s| {
+                    matches!(
+                        s,
+                        crate::server::infrastructure::models::hook_step::HookStep::Render { .. }
+                    )
+                })
+            }) {
                 return Err(AppError::Custom(
                     "画面遮挡需要落盘处理，不能与边录边传同时启用；请选择 mesio、stream-gears 或 ffmpeg 下载器".into(),
                 ).into());
@@ -762,9 +781,11 @@ impl DownloadTask {
                     workbench.opened(&next_file_path);
                 }
                 SegmentEvent::Segment(mut event) => {
-                    let protect = crate::server::plugins::mosaic::masking_required(
+                    let protect = crate::server::common::processing::masking::masking_required(
                         &ctx.config(),
                         &streamer.override_cfg,
+                    ) || crate::server::common::processing::requires_masking(
+                        streamer.segment_processor.as_deref().unwrap_or_default(),
                     );
                     // 分段时，获取到的是已下载的文件名
                     // 触发弹幕滚动保存
@@ -780,7 +801,9 @@ impl DownloadTask {
                     // processor/restart must never leave raw media at a normal
                     // uploadable filename. All disk downloaders share this hook.
                     let quarantined = if protect {
-                        match crate::server::plugins::mosaic::quarantine(&event.prev_file_path) {
+                        match crate::server::common::processing::masking::quarantine(
+                            &event.prev_file_path,
+                        ) {
                             Ok(path) => {
                                 event.prev_file_path = path;
                                 true

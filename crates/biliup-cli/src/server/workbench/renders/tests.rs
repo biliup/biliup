@@ -440,8 +440,8 @@ async fn cancelling_a_queued_composition_keeps_the_previous_clip_product() {
 }
 
 #[tokio::test]
-async fn retry_uses_frozen_image_content_after_the_original_asset_changes() {
-    use crate::server::workbench::transcode;
+async fn retry_rejects_changed_immutable_asset_without_private_copies() {
+    use crate::server::common::processing::transcode;
     let (dir, pool, session, _) = setup().await;
     let root = dir.path().join("renders");
     let original = png();
@@ -474,21 +474,20 @@ async fn retry_uses_frozen_image_content_after_the_original_asset_changes() {
     std::fs::write(original_path, b"external modification").unwrap();
     let frozen = store::get(&pool, first.id).await.unwrap().unwrap();
     assert_eq!(
-        std::fs::read(&frozen.spec.assets[0].path).unwrap(),
-        original
+        frozen.spec.assets[0].path,
+        assets::get(&pool, asset.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .render
+            .path
     );
+    assert!(!jobs.root().join("snapshots").exists());
     jobs.cancel(first.id).await.unwrap();
     jobs.shutdown().await;
-    let retry = jobs.retry(first.id).await.unwrap();
-    let second = store::get(&pool, retry.id).await.unwrap().unwrap();
-    assert_ne!(frozen.spec.assets[0].path, second.spec.assets[0].path);
-    assert_eq!(
-        std::fs::read(&second.spec.assets[0].path).unwrap(),
-        original
-    );
+    let error = jobs.retry(first.id).await.unwrap_err();
+    assert!(error.contains("内容发生变化"), "{error}");
     assert!(assets::delete(&pool, asset.id).await.is_err());
-    jobs.cancel(retry.id).await.unwrap();
-    jobs.shutdown().await;
     drop(permit);
 }
 
@@ -639,97 +638,6 @@ async fn finish_transaction_errors_keep_the_worker_until_the_result_is_committed
         "the completed render releases its pin while the unpublished clip retains its own"
     );
     assert!(dir.path().join("source.mp4").exists());
-}
-
-#[tokio::test]
-async fn cancelled_snapshot_registration_cleans_only_unreferenced_private_copies() {
-    let (dir, pool, session, _) = setup().await;
-    let root = dir.path().join("renders");
-    let original = png();
-    let asset = assets::upload(&pool, &root, session, "image/png", &original, now_ms())
-        .await
-        .unwrap();
-    let recipe = RenderRecipe {
-        regions: vec![MaskRegion {
-            id: "image".into(),
-            effect_type: EffectType::Image,
-            asset_id: Some(asset.id),
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-    let jobs = RenderJobs::new(pool.clone(), &root);
-    let mut cancelled_spec = jobs
-        .make_spec(session, None, None, recipe.clone())
-        .await
-        .unwrap();
-    let cancelled_job = store::insert(&pool, &cancelled_spec, now_ms())
-        .await
-        .unwrap();
-    let cancelled_dir = root
-        .join("snapshots")
-        .join(cancelled_job.view.id.to_string());
-    tokio::fs::create_dir_all(&cancelled_dir).await.unwrap();
-    let copied = cancelled_dir.join("asset.png");
-    tokio::fs::write(&copied, &original).await.unwrap();
-    cancelled_spec.assets[0].path = copied;
-    assert!(
-        store::terminal(
-            &pool,
-            cancelled_job.view.id,
-            "cancelled",
-            Some("cancelled"),
-            now_ms()
-        )
-        .await
-        .unwrap()
-    );
-    assert!(
-        !jobs
-            .register_snapshot(cancelled_job.view.id, &cancelled_spec)
-            .await
-            .unwrap()
-    );
-    assert!(!cancelled_dir.exists());
-
-    let mut retry_spec = jobs.make_spec(session, None, None, recipe).await.unwrap();
-    let retry_job_id = store::insert(&pool, &retry_spec, now_ms())
-        .await
-        .unwrap()
-        .view
-        .id;
-    let retry_dir = root.join("snapshots").join(retry_job_id.to_string());
-    tokio::fs::create_dir_all(&retry_dir).await.unwrap();
-    let frozen = retry_dir.join("asset.png");
-    tokio::fs::write(&frozen, &original).await.unwrap();
-    retry_spec.assets[0].path = frozen;
-    assert!(
-        store::update_snapshot(&pool, retry_job_id, &retry_spec)
-            .await
-            .unwrap()
-    );
-    assert!(
-        store::terminal(&pool, retry_job_id, "failed", Some("retryable"), now_ms())
-            .await
-            .unwrap()
-    );
-
-    let orphan_dir = root.join("snapshots/999999");
-    tokio::fs::create_dir_all(&orphan_dir).await.unwrap();
-    tokio::fs::write(orphan_dir.join("orphan.png"), &original)
-        .await
-        .unwrap();
-    jobs.initialize().await.unwrap();
-    assert!(!orphan_dir.exists());
-    assert!(
-        retry_dir.exists(),
-        "a failed job must retain its frozen retry inputs"
-    );
-    let original_asset = assets::get(&pool, asset.id).await.unwrap().unwrap();
-    assert_eq!(
-        tokio::fs::read(&original_asset.render.path).await.unwrap(),
-        original
-    );
 }
 
 #[tokio::test]

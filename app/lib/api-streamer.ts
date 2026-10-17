@@ -220,7 +220,7 @@ export interface LiveStreamerEntity {
     time_range?: string | Date[];
     excluded_keywords?: string[];
 	preprocessor?: Record<'run', string>[];
-	segment_processor?: Record<'run', string>[];
+	segment_processor?: unknown[];
 	downloaded_processor?: Record<'run', string>[];
 	postprocessor?: (Record<'run' | 'mv', string> | 'rm')[];
 	opt_args?: string[];

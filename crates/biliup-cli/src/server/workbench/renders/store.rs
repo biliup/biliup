@@ -458,20 +458,6 @@ pub async fn recover(pool: &ConnectionPool, now: i64) -> sqlx::Result<()> {
     }
     Ok(())
 }
-/// Freeze paths of job-private supporting files before the worker starts.
-pub async fn update_snapshot(
-    pool: &ConnectionPool,
-    id: i64,
-    spec: &RenderSpec,
-) -> sqlx::Result<bool> {
-    let result = sqlx::query("UPDATE render_jobs SET spec_json=? WHERE id=? AND state='queued'")
-        .bind(serde_json::to_string(spec).map_err(json_error)?)
-        .bind(id)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() > 0)
-}
-
 #[cfg(test)]
 mod telemetry_tests {
     use super::estimate_remaining;

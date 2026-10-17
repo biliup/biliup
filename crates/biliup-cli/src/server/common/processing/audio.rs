@@ -403,3 +403,7 @@ impl FileIdentity {
         )
     }
 }
+
+#[cfg(test)]
+#[path = "audio_tests.rs"]
+mod tests;

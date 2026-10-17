@@ -23,7 +23,7 @@ use tracing::info;
 /// 切片产物的目录（相对工作目录）。
 pub const CLIPS_DIR: &str = "clips";
 /// 原素材的录后合成产物及图片资产目录。
-pub const RENDERS_DIR: &str = "renders";
+pub use crate::server::common::processing::OUTPUT_DIR as RENDERS_DIR;
 
 /// 服务注册器
 /// 负责管理应用程序中的各种服务实例，包括数据库连接池、工作器、下载管理器等
