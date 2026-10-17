@@ -347,6 +347,9 @@ enum Step {
 
 impl Dvr {
     pub fn into_stream(self) -> impl futures::Stream<Item = io::Result<Bytes>> + Send + 'static {
+        // 结束之后再被 poll 也只返回 None：消费者用 timeout 包着 next() 时，超时可能赢过一次
+        // 「流已经返回 None」的 poll，循环会继续拉，而未 fuse 的 unfold 会 panic。
+        use futures::StreamExt as _;
         futures::stream::unfold(self, |mut dvr| async move {
             match dvr.next_chunk().await {
                 Ok(Some(chunk)) => {
@@ -361,6 +364,7 @@ impl Dvr {
                 }
             }
         })
+        .fuse()
     }
 
     async fn next_chunk(&mut self) -> io::Result<Option<Bytes>> {
