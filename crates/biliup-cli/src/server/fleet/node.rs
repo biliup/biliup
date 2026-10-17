@@ -731,7 +731,7 @@ async fn run_agent(
             _ = stopped.changed() => break,
         }
     }
-    ha.shutdown();
+    ha.shutdown().await;
     endpoint.close().await;
 }
 

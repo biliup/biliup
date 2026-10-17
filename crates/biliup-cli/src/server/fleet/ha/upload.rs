@@ -208,10 +208,8 @@ where
 {
     let session = Session::login(ctx, upload_config).await?;
     let processors = segment_processors(ctx);
-    let uploaded = pipeline_upload_videos(rx, &processors, ctx, |path| {
-        session.upload(path, bytes)
-    })
-    .await?;
+    let uploaded =
+        pipeline_upload_videos(rx, &processors, ctx, |path| session.upload(path, bytes)).await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
@@ -239,13 +237,11 @@ pub(crate) async fn run_standby(
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
     let bytes = AtomicU64::new(0);
-    let uploaded = pipeline_upload_videos(
-        futures::stream::iter(segments),
-        &processors,
-        ctx,
-        |path| session.upload(path, &bytes),
-    )
-    .await?;
+    let uploaded =
+        pipeline_upload_videos(futures::stream::iter(segments), &processors, ctx, |path| {
+            session.upload(path, &bytes)
+        })
+        .await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
@@ -275,13 +271,11 @@ pub(crate) async fn run_append(
     let session = Session::login(ctx, &upload_config).await?;
     let processors = segment_processors(ctx);
     let bytes = AtomicU64::new(0);
-    let uploaded = pipeline_upload_videos(
-        futures::stream::iter(segments),
-        &processors,
-        ctx,
-        |path| session.upload(path, &bytes),
-    )
-    .await?;
+    let uploaded =
+        pipeline_upload_videos(futures::stream::iter(segments), &processors, ctx, |path| {
+            session.upload(path, &bytes)
+        })
+        .await?;
     if uploaded.videos.is_empty() {
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
