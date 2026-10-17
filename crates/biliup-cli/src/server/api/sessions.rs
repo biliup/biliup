@@ -926,20 +926,18 @@ mod tests {
             "",
         );
         let deleted = store::open_session(&f.pool, 1, &info, at, 0).await.unwrap();
-        store::close_session(&f.pool, deleted.id, at + 1000)
-            .await
-            .unwrap();
-        let uri = format!("/v1/sessions/{}", deleted.id);
+        // 并行跑的测试共用一个进程级的「正在录制」表（按场次 id 记），而每个测试的库都从小编号发
+        // id：照其它夹具的做法把场次挪到进程内唯一的编号，免得删除时被别的测试登记着的同号场次挡住。
+        let id = live::unique_session_id(&f.pool, deleted.id).await;
+        store::close_session(&f.pool, id, at + 1000).await.unwrap();
+        let uri = format!("/v1/sessions/{id}");
         let response = delete_as(&f.app, Some(&admin), &uri).await;
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
         let next = store::open_session(&f.pool, 1, &info, at + 2000, 0)
             .await
             .unwrap();
-        assert!(
-            next.id > deleted.id,
-            "session media namespaces must not be reused"
-        );
+        assert!(next.id > id, "session media namespaces must not be reused");
     }
 
     #[test]
