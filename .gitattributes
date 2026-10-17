@@ -8,4 +8,4 @@
 /crates/danmaku-factory/tests/fixtures/*.ass -text
 
 # 随包字体不进仓库：构建与 CI 按固定 SHA-256 获取，见 crates/biliup-cli/assets/render-tools/README.txt。
-# 仓库里只留 NotoEmoji.ttf 这类小文件，这里不再需要 LFS 规则。
+# 字体文件一律不在版本控制里，也不需要 LFS 规则。

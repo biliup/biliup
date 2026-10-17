@@ -24,7 +24,7 @@ FROM rust:latest AS binary-builder
 COPY --from=webui-builder /biliup /biliup
 WORKDIR /biliup
 # 随包字体不进仓库：镜像里按固定 SHA-256 取回，来源与 CI、发布包一致
-RUN set -eux; dir=crates/biliup-cli/assets/render-tools/fonts; mkdir -p "$dir"; curl -fsSL --retry 3 -o "$dir/NotoSansSC-Regular.otf" 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'; echo "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b  $dir/NotoSansSC-Regular.otf" | sha256sum -c -
+RUN set -eux; dir=crates/biliup-cli/assets/render-tools/fonts; mkdir -p "$dir"; curl -fsSL --retry 3 -o "$dir/NotoSansSC-Regular.otf" 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'; echo "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b  $dir/NotoSansSC-Regular.otf" | sha256sum -c -; curl -fsSL --retry 3 -o "$dir/NotoEmoji.ttf" 'https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf'; echo "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551  $dir/NotoEmoji.ttf" | sha256sum -c -
 RUN cargo build --locked --release -p biliup-cli --bin biliup
 
 FROM python:3.13-slim-trixie AS biliup
