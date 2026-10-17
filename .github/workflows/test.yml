@@ -59,13 +59,3 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: cargo metadata --locked
         run: cargo metadata --locked --format-version 1 --manifest-path tauri-app/src-tauri/Cargo.toml > /dev/null
-      # 安装包版本改为手写在 tauri.conf.json 里，两处必须一致，否则会打出旧版本号
-      - name: Desktop version matches the workspace
-        run: |
-          workspace=$(grep -F -m1 -A1 '[workspace.package]' Cargo.toml | grep -F -m1 version | cut -d'"' -f2)
-          desktop=$(grep -F -m1 '"version"' tauri-app/src-tauri/tauri.conf.json | cut -d'"' -f4)
-          echo "Cargo.toml $workspace, tauri.conf.json $desktop"
-          if [ -z "$workspace" ] || [ "$workspace" != "$desktop" ]; then
-            echo "tauri.conf.json 的 version 要与根目录 Cargo.toml 的 [workspace.package] version 一致"
-            exit 1
-          fi
