@@ -2,8 +2,7 @@ use crate::server::common::construct_headers;
 use crate::server::errors::{AppError, AppResult};
 use biliup::client::StatelessClient;
 use biliup::downloader::flv_parser::{
-    CodecId, SoundFormat, TagData, aac_audio_packet_header, avc_video_packet_header, header,
-    script_data, tag_data, tag_header,
+    SoundFormat, TagData, aac_audio_packet_header, header, script_data, tag_data, tag_header,
 };
 use biliup::downloader::flv_writer;
 use biliup::downloader::flv_writer::{FlvTag, TagDataHeader};
@@ -195,27 +194,16 @@ pub fn generate_json(mut file_name: PathBuf) -> AppResult<()> {
             TagData::Video(video_data) => {
                 video_tag_count += 1;
 
-                let (packet_type, composition_time) = if CodecId::H264 == video_data.codec_id {
-                    let (_, avc_video_header) = map_parse_err(
-                        avc_video_packet_header(video_data.video_data),
-                        "AVC packet header",
-                    )
-                    .change_context(AppError::Unknown)?;
-                    (
-                        Some(avc_video_header.packet_type),
-                        Some(avc_video_header.composition_time),
-                    )
-                } else {
-                    (None, None)
-                };
-
                 FlvTag {
                     header: tag_header,
                     data: TagDataHeader::Video {
                         frame_type: video_data.frame_type,
                         codec_id: video_data.codec_id,
-                        packet_type,
-                        composition_time,
+                        packet_type: video_data.packet_type,
+                        composition_time: video_data
+                            .packet_type
+                            .map(|_| video_data.composition_time),
+                        fourcc: video_data.fourcc_name(),
                     },
                 }
             }

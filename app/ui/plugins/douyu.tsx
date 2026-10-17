@@ -208,15 +208,15 @@ const Douyu: React.FC<Props> = props => {
           mode="advanced"
           extraText={
             <div style={{ fontSize: '14px' }}>
-              默认 AVC。HEVC 需直播间提供对应视频流，并使用 mesio 或支持该格式的新版 FFmpeg。
+              默认 AVC。HEVC 需直播间提供对应视频流；mesio 与 stream-gears 都能录 FLV 里的 HEVC 与 AV1。
               <br />
-              stream-gears 不支持 HEVC；平台未提供 HEVC 地址时会回退到 AVC，并在日志中提示。
+              平台未提供 HEVC 地址时会回退到 AVC，并在日志中提示。
             </div>
           }
           initValue={entity?.douyu_codec ?? ''}
         >
           <Radio value="AVC">AVC (H.264) - 兼容所有下载器</Radio>
-          <Radio value="HEVC">HEVC (H.265) - 需要 mesio/ffmpeg 下载器</Radio>
+          <Radio value="HEVC">HEVC (H.265) - 需要 mesio / stream-gears 或新版 FFmpeg</Radio>
         </Form.RadioGroup>
         <Form.Select
           allowCreate={true}

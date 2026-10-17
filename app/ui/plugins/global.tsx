@@ -68,8 +68,8 @@ const Global: React.FC<Props> = ({ disabled }) => {
               <br />
               5. ytarchive：仅适用于 YouTube 直播。
               <br />
-              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；不支持 HEVC 编码和 hls_fmp4 流，FLV
-              时间戳沿用源站的原值（不从 0 开始）。
+              6. stream-gears：内置，无需额外安装，可防 FLV 流花屏；能录 AVC / HEVC / AV1（含 Enhanced FLV），
+              不支持 hls_fmp4 流；FLV 时间戳沿用源站的原值（不从 0 开始）。
             </div>
           }
           style={{ width: '100%' }}

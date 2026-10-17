@@ -175,6 +175,9 @@ pub enum TagDataHeader<'a> {
         codec_id: CodecId,
         packet_type: Option<AVCPacketType>,
         composition_time: Option<i32>,
+        /// Enhanced-FLV（E-RTMP）的 FourCC；老式 FLV tag 没有这个字段。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        fourcc: Option<&'a str>,
     },
     Script(ScriptData<'a>),
 }

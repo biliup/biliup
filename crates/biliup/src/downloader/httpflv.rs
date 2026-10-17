@@ -1,6 +1,6 @@
 use crate::downloader::flv_parser::{
-    AACPacketType, AVCPacketType, CodecId, FrameType, SoundFormat, TagData, TagHeader, TagType,
-    aac_audio_packet_header, avc_video_packet_header, script_data, tag_data, tag_header,
+    AACPacketType, FrameType, SoundFormat, TagData, TagHeader, TagType, aac_audio_packet_header,
+    script_data, tag_data, tag_header,
 };
 use crate::downloader::flv_writer::{FlvFile, FlvTag, TagDataHeader};
 use crate::downloader::preview::{self, ChunkKind, PreviewSink};
@@ -145,22 +145,16 @@ const MAX_FLV_HEADER_LEN: usize = 1024;
 /// 不能当成个别残缺的 tag 跳过（那样会悄悄录出一个只有音频的文件）。
 ///
 /// 只认明确的标记，免得把 CDN 切换时的随机残缺字节误判成不支持的编码：
-/// - 国内 CDN（斗鱼、抖音、虎牙等）的 HEVC 用非标准的 codec id 12，AV1 用 13；
-/// - Enhanced-FLV（Enhanced RTMP）用 `IsExHeader` 位加 FourCC（`hvc1`、`av01`、`vp09`）。
-fn unsupported_video_codec(body: &[u8]) -> Option<String> {
+/// - 老式 FLV 的 HEVC（codec id 12）与 AV1（13）、Enhanced-FLV（Enhanced RTMP）的 `hvc1`（`hev1`）
+///   与 `av01` 都照常录制，见 [`crate::downloader::flv_parser::video_data`]；
+/// - Enhanced-FLV 的 `vp09`（VP9）目前录不了。
+fn unsupported_video_codec(body: &[u8]) -> Option<&'static str> {
     let first = *body.first()?;
-    if first & 0x80 != 0 {
-        let fourcc = body.get(1..5)?;
-        return match fourcc {
-            b"hvc1" => Some("HEVC (Enhanced-FLV hvc1)".to_string()),
-            b"av01" => Some("AV1 (Enhanced-FLV av01)".to_string()),
-            b"vp09" => Some("VP9 (Enhanced-FLV vp09)".to_string()),
-            _ => None,
-        };
+    if first & 0x80 == 0 {
+        return None;
     }
-    match first & 0x0f {
-        12 => Some("HEVC (FLV codec id 12)".to_string()),
-        13 => Some("AV1 (FLV codec id 13)".to_string()),
+    match body.get(1..5)? {
+        b"vp09" => Some("VP9 (Enhanced-FLV vp09)"),
         _ => None,
     }
 }
@@ -222,7 +216,7 @@ async fn read_tags(
 ) -> crate::downloader::error::Result<()> {
     let mut on_meta_data = None;
     let mut aac_sequence_header = None;
-    let mut h264_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
+    let mut video_sequence_header: Option<(TagHeader, Bytes, Bytes)> = None;
     let mut create_new = false;
     // Keep timestamp correction per media track. A restart of one encoder must
     // not shift the timestamps of the other track, which may still be running.
@@ -307,11 +301,10 @@ async fn read_tags(
             && let Some(codec) = unsupported_video_codec(&bytes)
         {
             return Err(crate::downloader::error::Error::Custom(format!(
-                "收到 {codec} 编码的视频流，但 stream-gears 下载器只支持 H.264。\n\
+                "收到 {codec} 编码的视频流，stream-gears 下载器不支持这种编码。\n\
                 解决方案：\n\
                 1. 将下载器切换为 mesio 或 ffmpeg\n\
-                2. 或在平台设置中将视频编码改为 AVC (H.264)\n\
-                提示：如果您在斗鱼平台设置中选择了 HEVC 编码，请改为 AVC"
+                2. 或在平台设置中将视频编码改为 AVC (H.264)、HEVC 或 AV1"
             )));
         }
         // out.write(&bytes)?;
@@ -357,40 +350,30 @@ async fn read_tags(
                     }
                 }
                 TagData::Video(video_data) => {
-                    let (packet_type, composition_time) = if CodecId::H264 == video_data.codec_id {
-                        let (_, avc_video_header) = match map_parse_err(
-                            avc_video_packet_header(video_data.video_data),
-                            "avc video packet header",
-                        ) {
-                            Ok(parsed) => parsed,
-                            Err(e) => break 'parse Err(e),
-                        };
-                        if avc_video_header.packet_type == AVCPacketType::SequenceHeader {
-                            if let Some((_, binary_data, _)) = &h264_sequence_header {
-                                warn!("Unexpected h264 sequence header tag. {tag_header:?}");
-                                if bytes != binary_data {
-                                    create_new = true;
-                                    warn!("Different h264 sequence header tag. {tag_header:?}");
-                                }
+                    // H.264 / HEVC / AV1 的序列头一律参与轮转：编码配置变了就另开分段，
+                    // 老式 codec id 12/13 与 Enhanced-FLV 的 hvc1 / av01 都走这一条路。
+                    if video_data.is_sequence_header() {
+                        if let Some((_, binary_data, _)) = &video_sequence_header {
+                            warn!("Unexpected video sequence header tag. {tag_header:?}");
+                            if bytes != binary_data {
+                                create_new = true;
+                                warn!("Different video sequence header tag. {tag_header:?}");
                             }
-                            h264_sequence_header =
-                                Some((tag_header, bytes.clone(), previous_tag_size.clone()))
                         }
-                        (
-                            Some(avc_video_header.packet_type),
-                            Some(avc_video_header.composition_time),
-                        )
-                    } else {
-                        (None, None)
-                    };
+                        video_sequence_header =
+                            Some((tag_header, bytes.clone(), previous_tag_size.clone()))
+                    }
 
                     FlvTag {
                         header: tag_header,
                         data: TagDataHeader::Video {
                             frame_type: video_data.frame_type,
                             codec_id: video_data.codec_id,
-                            packet_type,
-                            composition_time,
+                            packet_type: video_data.packet_type,
+                            composition_time: video_data
+                                .packet_type
+                                .map(|_| video_data.composition_time),
+                            fourcc: video_data.fourcc_name(),
                         },
                     }
                 }
@@ -499,15 +482,15 @@ async fn read_tags(
                         gop.tags
                             .push((*aac_header, aac_bytes.clone(), aac_prev_tag_size.clone()));
                     }
-                    if !create_new {
-                        // H264SequenceHeader
-                        if let Some(h264_header) = h264_sequence_header.as_ref() {
-                            gop.tags.push(h264_header.clone());
-                        } else {
-                            warn!(
-                                "h264_sequence_header not found before segmenting; new segment may be unplayable."
-                            );
-                        }
+                    // 新分段带上当前的视频序列头（H.264 / HEVC / AV1 的编码配置记录）。序列头变化
+                    // 触发的轮转里，变化后的那个 tag 跟着上一个 GOP 写进了旧文件，新文件必须补一份，
+                    // 否则新分段没有解码配置。
+                    if let Some(video_header) = video_sequence_header.as_ref() {
+                        gop.tags.push(video_header.clone());
+                    } else {
+                        warn!(
+                            "video sequence header not found before segmenting; new segment may be unplayable."
+                        );
                     }
                     info!("{} splitting.{segment:?}", out.file.file_name);
                     out.create_new()?;
@@ -1430,34 +1413,181 @@ mod tests {
         assert_eq!(keyframes(&data), 1);
     }
 
-    /// stream-gears 只会解析 H.264 的 FLV。斗鱼 / 抖音 / 虎牙的 HEVC 流（FLV codec id 12，或
-    /// Enhanced-FLV 的 `hvc1`）里，视频 tag 不是「残缺的 tag」，而是整条视频轨都录不了：
-    /// 必须报错（换 mesio / ffmpeg），不能把视频 tag 逐个跳过、只录出一个纯音频文件。
+    /// HEVC / AV1 的流照常录制：老式 codec id 12/13 与 Enhanced-FLV 的 `hvc1` / `av01` 都逐字节
+    /// 落盘，视频 tag 不是被跳过、也不会录出一个只有音频的文件。
     #[tokio::test]
-    async fn an_hevc_stream_is_an_error_not_an_audio_only_recording() {
-        for (keyframe, inter) in [
-            // 国内 CDN 常用的 codec id 12
+    async fn hevc_and_av1_streams_are_recorded_verbatim() {
+        let cases: [(&str, Vec<u8>, Vec<u8>, Vec<u8>); 4] = [
+            // 国内 CDN 常用的 HEVC / AV1 codec id：载荷与 AVC 同构（序列头 / 关键帧 / 普通帧）
             (
+                "HEVC (codec id 12)",
+                vec![0x1c, 0x00, 0, 0, 0, 0x01, 0x64],
                 vec![0x1c, 0x01, 0, 0, 0, 0xaa],
                 vec![0x2c, 0x01, 0, 0, 0, 0xbb],
             ),
-            // Enhanced-FLV：IsExHeader 位 + FourCC `hvc1`
             (
+                "AV1 (codec id 13)",
+                vec![0x1d, 0x00, 0, 0, 0, 0x0a, 0x0b],
+                vec![0x1d, 0x01, 0, 0, 0, 0xaa],
+                vec![0x2d, 0x01, 0, 0, 0, 0xbb],
+            ),
+            // Enhanced-FLV：IsExHeader 位 + FourCC，CodedFrames 带 3 字节 composition time
+            (
+                "Enhanced-FLV hvc1",
+                vec![0x90, b'h', b'v', b'c', b'1', 0x01, 0x64],
                 vec![0x91, b'h', b'v', b'c', b'1', 0, 0, 0, 0xaa],
                 vec![0xa1, b'h', b'v', b'c', b'1', 0, 0, 0, 0xbb],
             ),
-        ] {
+            (
+                "Enhanced-FLV av01",
+                vec![0x90, b'a', b'v', b'0', b'1', 0x0a, 0x0b],
+                vec![0x91, b'a', b'v', b'0', b'1', 0, 0, 0, 0xaa],
+                vec![0xa1, b'a', b'v', b'0', b'1', 0, 0, 0, 0xbb],
+            ),
+        ];
+        for (name, sequence_header, keyframe, inter) in cases {
             let mut body = vec![0, 0, 0, 0];
             push_tag(&mut body, 18, 0, &META);
+            push_tag(&mut body, 9, 0, &sequence_header);
             push_tag(&mut body, 8, 0, &AAC_SEQUENCE_HEADER);
             for i in 0..50u32 {
                 let video = if i % 25 == 0 { &keyframe } else { &inter };
                 push_tag(&mut body, 9, i * 40, video);
                 push_tag(&mut body, 8, i * 40 + 20, &[0xaf, 0x01, 0x21]);
             }
-            let (result, _) = record_unsegmented(body.into()).await;
-            let error = result.expect_err("an HEVC stream must not be recorded as audio only");
-            assert!(error.to_string().contains("HEVC"), "{error}");
+            let (result, data) = record_unsegmented(body.clone().into()).await;
+            result.unwrap_or_else(|e| panic!("{name} 应该能录：{e}"));
+            // 每个 tag（含全部视频 tag）原样落盘，时间戳没有被改写
+            assert_eq!(&data[13..], &body[4..], "{name}：源流的每个 tag 都要落盘");
+            let video_tags: Vec<(u8, u32)> = tag_timestamps(&data, 13)
+                .into_iter()
+                .filter(|(tag_type, _)| *tag_type == 9)
+                .collect();
+            // 1 个序列头 + 50 个视频帧（每 25 帧一个关键帧）
+            assert_eq!(video_tags.len(), 51, "{name}：视频 tag 一个都不能少");
+            assert_eq!(video_tags[0].1, 0);
+            assert_eq!(video_tags[50].1, 49 * 40);
+            assert!(
+                data.windows(keyframe.len()).any(|w| w == &keyframe[..]),
+                "{name}：关键帧必须写进文件"
+            );
+            assert!(
+                data.windows(sequence_header.len())
+                    .any(|w| w == &sequence_header[..]),
+                "{name}：序列头必须写进文件"
+            );
         }
+    }
+
+    /// 真正不支持的编码（Enhanced-FLV 的 VP9）仍然报错：整条视频轨录不了，不能悄悄录成纯音频文件。
+    #[tokio::test]
+    async fn an_unsupported_codec_is_an_error_not_an_audio_only_recording() {
+        let mut body = vec![0, 0, 0, 0];
+        push_tag(&mut body, 18, 0, &META);
+        push_tag(&mut body, 8, 0, &AAC_SEQUENCE_HEADER);
+        for i in 0..50u32 {
+            let video: &[u8] = if i % 25 == 0 {
+                &[0x91, b'v', b'p', b'0', b'9', 0, 0, 0, 0xaa]
+            } else {
+                &[0xa1, b'v', b'p', b'0', b'9', 0, 0, 0, 0xbb]
+            };
+            push_tag(&mut body, 9, i * 40, video);
+            push_tag(&mut body, 8, i * 40 + 20, &[0xaf, 0x01, 0x21]);
+        }
+        let (result, _) = record_unsegmented(body.into()).await;
+        let error = result.expect_err("an unsupported codec must not be recorded as audio only");
+        assert!(error.to_string().contains("VP9"), "{error}");
+        assert!(
+            !error.to_string().contains("只支持 H.264"),
+            "错误文案得说清楚支持哪些编码：{error}"
+        );
+    }
+
+    /// 序列头变化（编码器重启、换编码参数）时另开分段：每个分段都自带序列头，且序列头在第一个
+    /// 关键帧之前 —— 新分段少了它就没法解码。
+    #[tokio::test]
+    async fn a_changed_hevc_sequence_header_starts_a_new_segment() {
+        use crate::downloader::util::{LifecycleFile, Segmentable};
+        use std::sync::{Arc, Mutex};
+
+        let first_header = [0x90, b'h', b'v', b'c', b'1', 0x01, 0x64, 0x00, 0x1f];
+        let second_header = [0x90, b'h', b'v', b'c', b'1', 0x01, 0x64, 0x00, 0x2f];
+        let keyframe = [0x91, b'h', b'v', b'c', b'1', 0, 0, 0, 0xaa];
+        let inter = [0xa1, b'h', b'v', b'c', b'1', 0, 0, 0, 0xbb];
+
+        let mut body = vec![0, 0, 0, 0];
+        push_tag(&mut body, 18, 0, &META);
+        push_tag(&mut body, 8, 0, &AAC_SEQUENCE_HEADER);
+        push_tag(&mut body, 9, 0, &first_header);
+        for i in 0..4u32 {
+            push_tag(&mut body, 9, 1000 + i * 40, &keyframe);
+            push_tag(&mut body, 8, 1000 + i * 40 + 20, &[0xaf, 0x01, 0x21]);
+        }
+        // 编码器重启：新的序列头跟着新的关键帧来
+        push_tag(&mut body, 9, 1400, &second_header);
+        for i in 0..4u32 {
+            push_tag(
+                &mut body,
+                9,
+                1400 + i * 40,
+                if i == 0 { &keyframe } else { &inter },
+            );
+            push_tag(&mut body, 8, 1400 + i * 40 + 20, &[0xaf, 0x01, 0x21]);
+        }
+
+        let http_resp = http::Response::builder().status(200).body(body).unwrap();
+        let connection = super::Connection::new(reqwest::Response::from(http_resp));
+        let dir = tempfile::tempdir().unwrap();
+        let segments: Arc<Mutex<Vec<std::path::PathBuf>>> = Arc::default();
+        let file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "flv", {
+            let segments = segments.clone();
+            let dir = dir.path().to_path_buf();
+            move |name: &str| {
+                let mut segments = segments.lock().unwrap();
+                let path = dir.join(format!("seg-{:04}.flv", segments.len()));
+                std::fs::rename(name, &path).unwrap();
+                segments.push(path);
+            }
+        });
+        // 不按大小 / 时长分段，只有序列头变化能切开
+        super::parse_flv(connection, file, Segmentable::new(None, None), None)
+            .await
+            .unwrap();
+
+        let segments = segments.lock().unwrap();
+        assert!(
+            segments.len() >= 2,
+            "the changed sequence header must split the recording, got {} segment(s)",
+            segments.len()
+        );
+        for path in segments.iter() {
+            let bytes = std::fs::read(path).unwrap();
+            let header_at = bytes
+                .windows(first_header.len())
+                .position(|w| w == &first_header[..] || w == &second_header[..])
+                .unwrap_or_else(|| panic!("{}: no video sequence header", path.display()));
+            let keyframe_at = bytes
+                .windows(keyframe.len())
+                .position(|w| w == &keyframe[..])
+                .unwrap_or_else(|| panic!("{}: no keyframe", path.display()));
+            assert!(
+                header_at < keyframe_at,
+                "{}: the sequence header must come before the first keyframe",
+                path.display()
+            );
+        }
+        // 第一个分段带旧序列头，最后一个分段带新的
+        let first = std::fs::read(&segments[0]).unwrap();
+        let last = std::fs::read(segments.last().unwrap()).unwrap();
+        assert!(
+            first
+                .windows(first_header.len())
+                .any(|w| w == &first_header[..])
+        );
+        assert!(
+            last.windows(second_header.len())
+                .any(|w| w == &second_header[..]),
+            "the new segment must carry the new sequence header"
+        );
     }
 }

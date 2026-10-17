@@ -142,7 +142,7 @@ ffprobe -v error -select_streams v:0 \
 
 默认编码为 AVC（H.264）。选择 HEVC（H.265）时，biliup 请求平台提供 HEVC，并使用返回的对应播放地址；房间未提供 HEVC 地址时会回退到 AVC 并提示。
 
-HEVC 录制应使用 **mesio** 或支持实际 FLV 格式的新版 **FFmpeg**。**stream-gears** 的 FLV 解析器不支持 HEVC 和 AV1，会报错停止，以避免生成只有音频的文件。不同房间和 CDN 可能使用传统 codec id 12 或 Enhanced FLV，旧版 FFmpeg 不一定兼容。
+HEVC 与 AV1 录制用 **mesio** 或 **stream-gears** 都可以：stream-gears 的内置 FLV 解析器认传统 codec id 12（HEVC）/ 13（AV1）与 Enhanced FLV 的 `hvc1` / `av01`，遇到真正不支持的编码（如 Enhanced FLV 的 `vp09`）会报错停止，而不是生成只有音频的文件。用 **FFmpeg** 需要支持实际 FLV 格式的新版：不同房间和 CDN 可能使用传统 codec id 12 或 Enhanced FLV，旧版 FFmpeg 不一定兼容。
 
 ## 开发者验证
 

@@ -1258,6 +1258,7 @@ pub mod flv {
             let fourcc: &[u8] = match first & 0x0f {
                 7 => b"avc1",
                 12 => b"hvc1",
+                13 => b"av01",
                 _ => return None,
             };
             (fourcc, body.get(5..)?)
@@ -1302,8 +1303,8 @@ pub mod flv {
                     }
                 } else {
                     let codec = first & 0x0f;
-                    // AVC(7) / HEVC(12) 的第二字节 0 = 序列头
-                    if matches!(codec, 7 | 12) && body.get(1) == Some(&0) {
+                    // AVC(7) / HEVC(12) / AV1(13) 的第二字节 0 = 序列头
+                    if matches!(codec, 7 | 12 | 13) && body.get(1) == Some(&0) {
                         return ChunkKind::SequenceHeader(TAG_VIDEO);
                     }
                 }
