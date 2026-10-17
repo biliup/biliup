@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 字体内嵌进 biliup-cli，检出时必须拉取 Git LFS 对象
+          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: '20'

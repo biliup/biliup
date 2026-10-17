@@ -1,5 +1,4 @@
 use super::*;
-use crate::danmaku_worker::tests::Hook;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -199,17 +198,6 @@ fn gui_defaults() -> DanmakuSettings {
     }
 }
 
-fn request(options: ConvertOptions, test_hook: Option<Hook>) -> Request {
-    Request {
-        protocol: PROTOCOL,
-        input: XML_FILE.into(),
-        output: ASS_FILE.into(),
-        result: RESULT_FILE.into(),
-        options,
-        test_hook,
-    }
-}
-
 fn work_with(input: &str) -> Arc<ManagedRoot> {
     let work = Arc::new(ManagedRoot::new(tempfile::tempdir().unwrap()).unwrap());
     std::fs::copy(golden(input), work.path().join(XML_FILE)).unwrap();
@@ -218,40 +206,6 @@ fn work_with(input: &str) -> Arc<ManagedRoot> {
 
 fn input(work: &ManagedRoot) -> Vec<u8> {
     std::fs::read(work.path().join(XML_FILE)).unwrap()
-}
-
-async fn test_worker(
-    work: &Arc<ManagedRoot>,
-    request: &Request,
-    cancel: &CancellationToken,
-    timeout: Duration,
-) -> Result<WorkerOutput, String> {
-    run_worker(work, input(work), request, cancel, timeout).await
-}
-
-async fn ready(path: &Path) -> (u32, PathBuf) {
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if let Ok(bytes) = tokio::fs::read(path).await
-                && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
-            {
-                return (
-                    value["pid"].as_u64().unwrap() as u32,
-                    PathBuf::from(value["work"].as_str().unwrap()),
-                );
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
-    .await
-    .expect("worker readiness marker")
-}
-
-fn process_exists(pid: u32) -> bool {
-    let pid = sysinfo::Pid::from_u32(pid);
-    let mut system = sysinfo::System::new();
-    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-    system.process(pid).is_some()
 }
 
 fn no_attempts(work: &Path) -> bool {
@@ -289,11 +243,11 @@ fn gui_settings_map_to_the_former_command_line() {
 }
 
 #[tokio::test]
-async fn worker_writes_what_the_cli_wrote() {
+async fn a_conversion_writes_what_the_cli_wrote() {
     for name in ["basic_cn", "dense"] {
         let work = work_with(&format!("inputs/{name}.xml"));
         let options = factory_options(&gui_defaults(), 1920, 1080);
-        let output = convert_in_worker(&work, input(&work), &options, &CancellationToken::new())
+        let output = convert_in_attempt(&work, input(&work), &options, &CancellationToken::new())
             .await
             .unwrap();
         assert!(output.stats.danmaku_count > 0);
@@ -304,7 +258,7 @@ async fn worker_writes_what_the_cli_wrote() {
 }
 
 #[tokio::test]
-async fn paths_with_spaces_and_chinese_never_reach_the_worker() {
+async fn paths_with_spaces_and_chinese_convert_without_leaving_an_attempt() {
     let root = tempfile::tempdir().unwrap();
     let parent = root.path().join("录播 目录");
     std::fs::create_dir_all(&parent).unwrap();
@@ -319,15 +273,16 @@ async fn paths_with_spaces_and_chinese_never_reach_the_worker() {
     );
     let xml = std::fs::read(golden("inputs/basic_cn.xml")).unwrap();
     let options = factory_options(&gui_defaults(), 1920, 1080);
-    let output = convert_in_worker(&work, xml, &options, &CancellationToken::new())
+    let output = convert_in_attempt(&work, xml, &options, &CancellationToken::new())
         .await
         .unwrap();
     let expected = std::fs::read(golden("expected/basic_cn-biliup.ass")).unwrap();
     assert_matches_golden_ass(&output.ass, &expected);
+    assert!(no_attempts(work.path()));
 }
 
 #[tokio::test]
-async fn concurrent_previews_use_separate_workers() {
+async fn concurrent_conversions_use_separate_attempts() {
     let options = factory_options(&gui_defaults(), 1920, 1080);
     let work = work_with("inputs/dense.xml");
     let xml = input(&work);
@@ -336,7 +291,7 @@ async fn concurrent_previews_use_separate_workers() {
         let options = options.clone();
         let work = &work;
         let xml = xml.clone();
-        async move { convert_in_worker(work, xml, &options, &CancellationToken::new()).await }
+        async move { convert_in_attempt(work, xml, &options, &CancellationToken::new()).await }
     }))
     .await;
     let expected = std::fs::read(golden("expected/dense-biliup.ass")).unwrap();
@@ -348,111 +303,83 @@ async fn concurrent_previews_use_separate_workers() {
 }
 
 #[tokio::test]
-async fn cancelling_kills_the_worker_promptly() {
-    let work = work_with("inputs/basic_cn.xml");
+async fn cancelling_answers_at_once_and_keeps_the_attempt_until_the_core_stops() {
+    let owner = tempfile::tempdir().unwrap();
+    let work = Arc::new(
+        ManagedRoot::new(
+            tempfile::Builder::new()
+                .prefix(".render-")
+                .tempdir_in(owner.path())
+                .unwrap(),
+        )
+        .unwrap(),
+    );
+    let path = work.path().to_owned();
+    // The test thread must not block on the runtime: `started` is awaited, and
+    // only the conversion thread itself waits for its release.
+    let (started, running) = tokio::sync::oneshot::channel::<()>();
+    let (release, blocked) = std::sync::mpsc::channel::<()>();
     let cancel = CancellationToken::new();
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("ready");
-    let started = Instant::now();
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: false,
-        }),
-    );
-    let result = test_worker(&work, &request, &cancel, CONVERT_TIMEOUT);
-    let (error, (pid, attempt)) = tokio::join!(async { result.await.unwrap_err() }, async {
-        let ready = ready(&marker).await;
-        cancel.cancel();
-        ready
-    });
+    let task = {
+        let work = work.clone();
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            let _held_by_the_core = work;
+            supervised(CONVERT_TIMEOUT, &cancel, move || {
+                let _ = started.send(());
+                let _ = blocked.recv();
+                Ok::<(), String>(())
+            })
+            .await
+        })
+    };
+    running.await.unwrap();
+    let answered = Instant::now();
+    cancel.cancel();
+    let error = task.await.unwrap().unwrap_err();
     assert!(error.contains("取消"), "{error}");
-    assert!(started.elapsed() < Duration::from_secs(5));
-    assert!(!work.path().join(ASS_FILE).exists());
-    assert!(!work.path().join(RESULT_FILE).exists());
-    assert!(!attempt.exists());
-    assert!(
-        !process_exists(pid),
-        "worker must be reaped before completion"
-    );
+    assert!(answered.elapsed() < Duration::from_secs(5));
+    // The caller has returned, but the core still owns the root: nothing may
+    // reclaim the directory while it can still write into it.
+    assert!(path.exists());
+    release.send(()).unwrap();
+    drop(work);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while path.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the core's own release must reclaim the root");
 }
 
 #[tokio::test]
-async fn a_hung_worker_is_stopped_by_the_timeout() {
-    let work = work_with("inputs/basic_cn.xml");
-    let started = Instant::now();
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("ready");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: false,
-        }),
-    );
+async fn a_conversion_that_makes_no_progress_is_stopped_by_the_timeout() {
     let cancel = CancellationToken::new();
-    let (result, (pid, attempt)) = tokio::join!(
-        test_worker(&work, &request, &cancel, Duration::from_secs(2),),
-        ready(&marker)
-    );
-    let error = result.unwrap_err();
+    let started = Instant::now();
+    let error = supervised(Duration::from_millis(50), &cancel, || {
+        std::thread::sleep(Duration::from_millis(500));
+        Ok::<(), String>(())
+    })
+    .await
+    .unwrap_err();
     assert!(
         error.contains("弹幕转换失败") && error.contains("没有推进"),
         "{error}"
     );
     assert!(started.elapsed() < Duration::from_secs(5));
-    assert!(!work.path().join(ASS_FILE).exists());
-    assert!(!attempt.exists());
-    assert!(!process_exists(pid));
 }
 
 #[tokio::test]
-async fn dropping_the_request_kills_the_worker() {
-    // An HTTP preview whose client went away drops the future mid-conversion.
-    let work = work_with("inputs/basic_cn.xml");
-    let path = work.path().to_path_buf();
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("ready");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: true,
-        }),
-    );
-    let task = tokio::spawn(async move {
-        test_worker(&work, &request, &CancellationToken::new(), CONVERT_TIMEOUT).await
-    });
-    let (pid, attempt) = ready(&marker).await;
-    assert!(attempt.join(ASS_FILE).is_file());
-    assert!(!attempt.join(RESULT_FILE).exists());
-    task.abort();
-    assert!(task.await.unwrap_err().is_cancelled());
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while path.exists() || process_exists(pid) {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-    })
+async fn a_conversion_task_that_panics_is_reported() {
+    let error = supervised(
+        CONVERT_TIMEOUT,
+        &CancellationToken::new(),
+        || -> Result<(), String> { panic!("conversion panicked") },
+    )
     .await
-    .expect("detached supervisor must reap then remove the final root owner");
-}
-
-#[tokio::test]
-async fn a_crashing_worker_is_reported_and_leaves_no_ass() {
-    let work = work_with("inputs/basic_cn.xml");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Abort),
-    );
-    let error = test_worker(&work, &request, &CancellationToken::new(), CONVERT_TIMEOUT)
-        .await
-        .unwrap_err();
-    assert!(
-        error.contains("弹幕转换失败") && error.contains("aborting"),
-        "{error}"
-    );
-    assert!(!work.path().join(ASS_FILE).exists());
+    .unwrap_err();
+    assert!(error.contains("弹幕转换任务失败"), "{error}");
 }
 
 #[tokio::test]
@@ -460,12 +387,12 @@ async fn conversion_errors_are_reported_without_a_fallback() {
     let work = work_with("inputs/basic_cn.xml");
     let mut options = factory_options(&gui_defaults(), 1920, 1080);
     options.width = 0;
-    let error = convert_in_worker(&work, input(&work), &options, &CancellationToken::new())
+    let error = convert_in_attempt(&work, input(&work), &options, &CancellationToken::new())
         .await
         .unwrap_err();
     assert!(error.contains("弹幕转换参数无效"), "{error}");
     std::fs::write(work.path().join(XML_FILE), "<i></i>").unwrap();
-    let error = convert_in_worker(
+    let error = convert_in_attempt(
         &work,
         input(&work),
         &factory_options(&gui_defaults(), 1920, 1080),
@@ -475,15 +402,15 @@ async fn conversion_errors_are_reported_without_a_fallback() {
     .unwrap_err();
     assert_eq!(error, "弹幕转换没有读到弹幕");
     assert!(!work.path().join(ASS_FILE).exists());
+    assert!(no_attempts(work.path()));
 }
 
 #[tokio::test]
 async fn caller_files_are_preserved_and_attempt_results_are_private() {
     let work = work_with("inputs/basic_cn.xml");
-    for name in [ASS_FILE, RESULT_FILE, REQUEST_FILE] {
-        std::fs::write(work.path().join(name), b"earlier successful attempt").unwrap();
-    }
-    let output = convert_in_worker(
+    std::fs::write(work.path().join(ASS_FILE), b"earlier successful attempt").unwrap();
+    std::fs::write(work.path().join("earlier.json"), b"earlier task result").unwrap();
+    let output = convert_in_attempt(
         &work,
         input(&work),
         &factory_options(&gui_defaults(), 1920, 1080),
@@ -492,15 +419,17 @@ async fn caller_files_are_preserved_and_attempt_results_are_private() {
     .await
     .unwrap();
     assert!(decode_ass(&output.ass).contains("[Events]"));
-    for name in [ASS_FILE, RESULT_FILE, REQUEST_FILE] {
-        assert_eq!(
-            std::fs::read(work.path().join(name)).unwrap(),
-            b"earlier successful attempt"
-        );
-    }
+    assert_eq!(
+        std::fs::read(work.path().join(ASS_FILE)).unwrap(),
+        b"earlier successful attempt"
+    );
+    assert_eq!(
+        std::fs::read(work.path().join("earlier.json")).unwrap(),
+        b"earlier task result"
+    );
     let mut invalid = factory_options(&gui_defaults(), 1920, 1080);
     invalid.width = 0;
-    convert_in_worker(&work, input(&work), &invalid, &CancellationToken::new())
+    convert_in_attempt(&work, input(&work), &invalid, &CancellationToken::new())
         .await
         .unwrap_err();
     assert_eq!(
@@ -511,96 +440,15 @@ async fn caller_files_are_preserved_and_attempt_results_are_private() {
 }
 
 #[tokio::test]
-async fn published_ass_without_response_is_cancelled_and_reclaimed() {
-    let work = work_with("inputs/basic_cn.xml");
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("published");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: true,
-        }),
-    );
-    let cancel = CancellationToken::new();
-    let (result, (pid, attempt)) = tokio::join!(
-        test_worker(&work, &request, &cancel, CONVERT_TIMEOUT),
-        async {
-            let observed = ready(&marker).await;
-            assert!(observed.1.join(ASS_FILE).is_file());
-            assert!(!observed.1.join(RESULT_FILE).exists());
-            cancel.cancel();
-            observed
-        }
-    );
-    assert!(result.unwrap_err().contains("取消"));
-    assert!(!process_exists(pid));
-    assert!(!attempt.exists());
-}
-
-#[tokio::test]
-async fn externally_killed_worker_cannot_commit_its_published_ass() {
-    let work = work_with("inputs/basic_cn.xml");
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("published");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: true,
-        }),
-    );
-    let cancel = CancellationToken::new();
-    let (result, (pid, attempt)) = tokio::join!(
-        test_worker(&work, &request, &cancel, CONVERT_TIMEOUT),
-        async {
-            let observed = ready(&marker).await;
-            assert!(observed.1.join(ASS_FILE).is_file());
-            let mut system = sysinfo::System::new();
-            let pid = sysinfo::Pid::from_u32(observed.0);
-            system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
-            assert!(system.process(pid).unwrap().kill());
-            observed
-        }
-    );
-    assert!(result.unwrap_err().contains("处理程序失败"));
-    assert!(!cancel.is_cancelled());
-    assert!(
-        !process_exists(pid),
-        "the supervisor must reap the externally killed child"
-    );
-    assert!(!attempt.exists());
-}
-
-#[tokio::test]
-async fn converted_response_requires_successful_exit_protocol_and_readable_ass() {
-    for (hook, message) in [
-        (Hook::MissingAss, "可读取"),
-        (Hook::WrongProtocol, "版本不一致"),
-        (Hook::MalformedResponse, "无法识别"),
-        (Hook::FailAfterResponse, "处理程序失败"),
-        (Hook::ResultUnwritable, "处理程序失败"),
-    ] {
-        let work = work_with("inputs/basic_cn.xml");
-        let request = request(factory_options(&gui_defaults(), 1920, 1080), Some(hook));
-        let error = test_worker(&work, &request, &CancellationToken::new(), CONVERT_TIMEOUT)
-            .await
-            .unwrap_err();
-        assert!(error.contains(message), "{error}");
-        assert!(no_attempts(work.path()));
-    }
-}
-
-#[tokio::test]
 async fn cleanup_failure_preserves_residue_and_reports_the_path() {
     let work = work_with("inputs/basic_cn.xml");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::CleanupFailure),
-    );
-    let error = test_worker(&work, &request, &CancellationToken::new(), CONVERT_TIMEOUT)
-        .await
-        .unwrap_err();
+    let error = run_attempt(
+        &work,
+        input(&work),
+        &factory_options(&gui_defaults(), 1920, 1080),
+        Cleanup::Retain,
+    )
+    .unwrap_err();
     assert!(
         error.contains("cleanup ") && error.contains("injected attempt cleanup failure"),
         "{error}"
@@ -630,234 +478,6 @@ async fn cleanup_failure_preserves_residue_and_reports_the_path() {
         !root_path.exists(),
         "managed recovery must retry the retained root"
     );
-}
-
-#[tokio::test]
-async fn worker_holds_the_root_lease_after_the_parent_releases_its_lease() {
-    use crate::danmaku_worker::{ROOT_LEASE_FILE, acquire_root_lease, mark_attempt};
-    let root = tempfile::tempdir().unwrap();
-    let lease = acquire_root_lease(root.path()).unwrap();
-    let attempt = tempfile::Builder::new()
-        .prefix(".danmaku-attempt-")
-        .tempdir_in(root.path())
-        .unwrap();
-    mark_attempt(root.path(), attempt.path()).unwrap();
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("worker");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: false,
-        }),
-    );
-    std::fs::write(
-        attempt.path().join(REQUEST_FILE),
-        serde_json::to_vec(&request).unwrap(),
-    )
-    .unwrap();
-    let mut command =
-        crate::danmaku_worker::command(attempt.path(), Path::new(REQUEST_FILE)).unwrap();
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let mut child = command.spawn().unwrap();
-    let (pid, _) = ready(&marker).await;
-    drop(lease);
-    let recovery = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(root.path().join(ROOT_LEASE_FILE))
-        .unwrap();
-    assert!(matches!(
-        recovery.try_lock(),
-        Err(std::fs::TryLockError::WouldBlock)
-    ));
-    child.kill().await.unwrap();
-    child.wait().await.unwrap();
-    assert!(!process_exists(pid));
-    recovery.try_lock().unwrap();
-    drop(recovery);
-}
-
-#[tokio::test]
-async fn killing_the_parent_leaves_a_leased_worker_that_recovery_must_skip() {
-    use crate::danmaku_worker::{ROOT_LEASE_FILE, acquire_root_lease, mark_attempt};
-    let root = tempfile::tempdir().unwrap();
-    drop(acquire_root_lease(root.path()).unwrap());
-    let attempt = tempfile::Builder::new()
-        .prefix(".danmaku-attempt-")
-        .tempdir_in(root.path())
-        .unwrap();
-    mark_attempt(root.path(), attempt.path()).unwrap();
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("worker");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::Pause {
-            ready: marker.clone(),
-            after_publish: false,
-        }),
-    );
-    std::fs::write(
-        attempt.path().join(REQUEST_FILE),
-        serde_json::to_vec(&request).unwrap(),
-    )
-    .unwrap();
-    let mut command =
-        crate::danmaku_worker::tests::parent_proxy_command(root.path(), attempt.path());
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let mut parent = command.spawn().unwrap();
-    let (pid, _) = ready(&marker).await;
-    parent.kill().await.unwrap();
-    parent.wait().await.unwrap();
-    assert!(
-        process_exists(pid),
-        "worker must survive the killed parent for this recovery case"
-    );
-    let recovery = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(root.path().join(ROOT_LEASE_FILE))
-        .unwrap();
-    assert!(matches!(
-        recovery.try_lock(),
-        Err(std::fs::TryLockError::WouldBlock)
-    ));
-    let mut system = sysinfo::System::new();
-    let child_pid = sysinfo::Pid::from_u32(pid);
-    system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[child_pid]), true);
-    assert!(system.process(child_pid).unwrap().kill());
-    // The OS reparents the orphan; it is no longer this test's child to wait.
-    // Successful exclusive locking proves exit released all worker leases.
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            match recovery.try_lock() {
-                Ok(()) => break,
-                Err(std::fs::TryLockError::WouldBlock) => {
-                    tokio::time::sleep(Duration::from_millis(10)).await
-                }
-                Err(error) => panic!("recovery lease: {error}"),
-            }
-        }
-    })
-    .await
-    .expect("orphan worker must release its lease on exit");
-    drop(recovery);
-}
-
-#[tokio::test]
-async fn cancellation_at_the_success_acceptance_checkpoint_is_not_success() {
-    let work = work_with("inputs/basic_cn.xml");
-    let signals = tempfile::tempdir().unwrap();
-    let marker = signals.path().join("accept");
-    let request = request(
-        factory_options(&gui_defaults(), 1920, 1080),
-        Some(Hook::PauseBeforeAccept {
-            ready: marker.clone(),
-        }),
-    );
-    let cancel = CancellationToken::new();
-    let (result, ()) = tokio::join!(
-        test_worker(&work, &request, &cancel, CONVERT_TIMEOUT),
-        async {
-            let (_, attempt) = ready(&marker).await;
-            assert!(attempt.join(ASS_FILE).is_file());
-            assert!(attempt.join(RESULT_FILE).is_file());
-            cancel.cancel();
-        }
-    );
-    assert!(result.unwrap_err().contains("取消"));
-    assert!(no_attempts(work.path()));
-}
-
-#[tokio::test]
-async fn a_delayed_worker_rejects_a_root_already_renamed_for_recovery() {
-    use crate::danmaku_worker::{ROOT_RETIRED_FILE, acquire_root_lease, mark_attempt};
-    let owner = tempfile::tempdir().unwrap();
-    let root = tempfile::Builder::new()
-        .prefix(".render-")
-        .tempdir_in(owner.path())
-        .unwrap();
-    drop(acquire_root_lease(root.path()).unwrap());
-    let attempt = root.path().join(".danmaku-attempt-delayed");
-    std::fs::create_dir(&attempt).unwrap();
-    mark_attempt(root.path(), &attempt).unwrap();
-    let request = request(factory_options(&gui_defaults(), 1920, 1080), None);
-    std::fs::write(
-        attempt.join(REQUEST_FILE),
-        serde_json::to_vec(&request).unwrap(),
-    )
-    .unwrap();
-    std::fs::write(attempt.join(XML_FILE), SELF_TEST_XML).unwrap();
-    // Recovery must also exclude late workers after closing the internal
-    // lease and before renaming the directory (required by Windows).
-    let lease = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(root.path().join(crate::danmaku_worker::ROOT_LEASE_FILE))
-        .unwrap();
-    lease.try_lock().unwrap();
-    std::fs::File::create_new(root.path().join(ROOT_RETIRED_FILE))
-        .unwrap()
-        .sync_all()
-        .unwrap();
-    drop(lease);
-    assert!(acquire_root_lease(root.path()).is_err());
-    let mut command = crate::danmaku_worker::command(&attempt, Path::new(REQUEST_FILE)).unwrap();
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    let output = command.output().await.unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(crate::danmaku_worker::EXIT_BAD_REQUEST)
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("retired for recovery"));
-    assert!(!attempt.join(ASS_FILE).exists());
-    assert!(!attempt.join(RESULT_FILE).exists());
-    // Keep the existing identity check independent of retirement.
-    std::fs::remove_file(root.path().join(ROOT_RETIRED_FILE)).unwrap();
-    let moved = owner.path().join("recovery-tombstone");
-    std::fs::rename(root.path(), &moved).unwrap();
-    let moved_attempt = moved.join(".danmaku-attempt-delayed");
-    let mut command =
-        crate::danmaku_worker::command(&moved_attempt, Path::new(REQUEST_FILE)).unwrap();
-    command
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true);
-    let output = command.output().await.unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(crate::danmaku_worker::EXIT_BAD_REQUEST)
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid managed directory"));
-    assert!(!moved_attempt.join(ASS_FILE).exists());
-    assert!(!moved_attempt.join(RESULT_FILE).exists());
-    // Recursive recovery may already have removed the marker while another
-    // unremovable file keeps this directory alive. An explicit managed launch
-    // must reject that state instead of falling back to a standalone worker.
-    std::fs::remove_file(moved_attempt.join(crate::danmaku_worker::ATTEMPT_LEASE_FILE)).unwrap();
-    let mut command =
-        crate::danmaku_worker::command(&moved_attempt, Path::new(REQUEST_FILE)).unwrap();
-    command
-        .env(crate::danmaku_worker::MANAGED_WORKER_ENV, "1")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped());
-    let output = command.output().await.unwrap();
-    assert_eq!(
-        output.status.code(),
-        Some(crate::danmaku_worker::EXIT_BAD_REQUEST)
-    );
-    assert!(String::from_utf8_lossy(&output.stderr).contains("marker is missing"));
-    assert!(!moved_attempt.join(ASS_FILE).exists());
-    assert!(!moved_attempt.join(RESULT_FILE).exists());
 }
 
 #[tokio::test]

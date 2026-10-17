@@ -1,28 +1,23 @@
 //! Strict XML validation and complete-segment ASS generation. Never clips or
 //! re-lays out comments at a clip's in-point.
 //!
-//! The native Rust layout (`danmaku-factory`) runs in a supervised child
-//! process, retaining cancellation, timeout and crash isolation.
+//! The native Rust layout (`danmaku-factory`) is linked into this program, so
+//! a conversion is an in-process call: no converter program is started and
+//! nothing is negotiated over a command line or a result file. Each conversion
+//! runs under a bounded lifetime. Preview writes to its response buffer; exports
+//! stream to an exclusive same-directory `.part` file and publish on success.
 pub use super::danmaku_directory::ManagedRoot;
 use super::engine::AssPreview;
 use super::model::{DanmakuSettings, RenderSource};
-use crate::danmaku_worker::{PROTOCOL, Request};
 use danmaku_factory::{ConvertError, ConvertOptions, ConvertStats, ErrorKind};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use std::io::Write;
+use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Write};
+use std::path::Path;
+use std::time::Instant;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-#[path = "danmaku_process.rs"]
-mod process;
-
-#[derive(Debug)]
-struct WorkerOutput {
-    stats: ConvertStats,
-    ass: Vec<u8>,
-}
 
 use danmaku_factory::limits::{
     BoundedWriter, MAX_COMMENTS, MAX_XML_BYTES, NORMALIZED_FOOTER, NORMALIZED_HEADER,
@@ -34,11 +29,6 @@ const SELF_TEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// screen. Dropping them keeps every time the core sees within its `int`
 /// millisecond compatibility range; real recordings never get close.
 const MAX_COMMENT_OFFSET_MS: i64 = 250 * 3_600_000;
-/// File names inside the conversion's private work directory.
-const XML_FILE: &str = "danmaku.xml";
-const ASS_FILE: &str = "danmaku.ass";
-const REQUEST_FILE: &str = "danmaku-request.json";
-const RESULT_FILE: &str = "danmaku-result.json";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct XmlComment {
@@ -138,7 +128,16 @@ fn parse_xml_with_limit(
     if bytes.len() as u64 > byte_limit {
         return Err("弹幕 XML 超过处理上限".into());
     }
-    let mut reader = Reader::from_reader(bytes);
+    parse_xml_reader(Cursor::new(bytes), byte_limit, comment_limit)
+}
+
+fn parse_xml_reader(
+    input: impl BufRead,
+    byte_limit: u64,
+    comment_limit: usize,
+) -> Result<ParsedXml, String> {
+    let mut reader = Reader::from_reader(input);
+    let mut buffer = Vec::new();
     reader.config_mut().check_end_names = true;
     let mut result = ParsedXml::default();
     let mut depth = 0usize;
@@ -162,10 +161,13 @@ fn parse_xml_with_limit(
         Ok(())
     };
     loop {
-        match reader
-            .read_event()
-            .map_err(|e| format!("弹幕 XML 已损坏或未写完：{e}"))?
-        {
+        let event = reader
+            .read_event_into(&mut buffer)
+            .map_err(|e| format!("弹幕 XML 已损坏或未写完：{e}"))?;
+        if reader.buffer_position() > byte_limit {
+            return Err("弹幕 XML 超过处理上限".into());
+        }
+        match event {
             Event::Start(start) => {
                 let attrs = attributes(&start)?;
                 if depth == 0 {
@@ -254,6 +256,7 @@ fn parse_xml_with_limit(
             Event::Eof => break,
             _ => {}
         }
+        buffer.clear();
     }
     if !root_seen || !root_closed || depth != 0 {
         return Err("弹幕 XML 已损坏或未写完".into());
@@ -380,132 +383,288 @@ pub fn empty_ass(width: u32, height: u32) -> String {
     )
 }
 
-/// Generates the same ASS used by browser preview and FFmpeg. Offsets are applied
-/// before layout; a negative earliest event shifts the *clock*, never truncates
-/// the event or restarts its motion at a cut boundary.
+/// Timing information shared by the preview response and file export.
+#[derive(Debug)]
+pub struct AssMetadata {
+    pub time_origin_ms: i64,
+    pub estimated_timing: bool,
+    pub comment_count: usize,
+}
+
+#[derive(Clone)]
+struct ConversionControl {
+    cancel: CancellationToken,
+    deadline: Instant,
+}
+
+impl ConversionControl {
+    fn new(cancel: &CancellationToken, timeout: Duration) -> Self {
+        Self { cancel: cancel.clone(), deadline: Instant::now() + timeout }
+    }
+
+    fn check(&self) -> io::Result<()> {
+        if self.cancel.is_cancelled() {
+            Err(io::Error::new(io::ErrorKind::Interrupted, "合成已取消"))
+        } else if Instant::now() >= self.deadline {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "弹幕转换超时"))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct CheckedReader<R> {
+    input: R,
+    control: ConversionControl,
+}
+
+impl<R: Read> Read for CheckedReader<R> {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        self.control.check()?;
+        self.input.read(bytes)
+    }
+}
+
+/// Serializes one decoded comment at a time. The complete normalized XML is
+/// never allocated or written to disk; consumed comment strings are released.
+struct NormalizedXml {
+    comments: std::vec::IntoIter<XmlComment>,
+    current: Cursor<Vec<u8>>,
+    correction: i64,
+    offset: i64,
+    origin: i64,
+    footer_written: bool,
+    control: ConversionControl,
+}
+
+impl Read for NormalizedXml {
+    fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+        if bytes.is_empty() { return Ok(0); }
+        loop {
+            self.control.check()?;
+            let count = self.current.read(bytes)?;
+            if count != 0 { return Ok(count); }
+            if let Some(comment) = self.comments.next() {
+                let at = corrected_time(comment.elapsed_ms, self.correction, self.offset)
+                    .map_err(io::Error::other)?;
+                if at.unsigned_abs() > MAX_COMMENT_OFFSET_MS as u64 { continue; }
+                self.current = Cursor::new(format!(
+                    "<d p=\"{:.3},{},{},{},0,0,0,0\">{}</d>\n",
+                    (at - self.origin) as f64 / 1000., comment.mode, comment.size,
+                    comment.color, escape(&comment.text),
+                ).into_bytes());
+            } else if !self.footer_written {
+                self.footer_written = true;
+                self.current = Cursor::new(NORMALIZED_FOOTER.as_bytes().to_vec());
+            } else {
+                return Ok(0);
+            }
+        }
+    }
+}
+
+/// Applies public style values and emoji fallback with a single-line buffer.
+/// Native ASS event timing and collision placement pass through unchanged.
+struct StyledAssWriter<W> {
+    output: W,
+    line: Vec<u8>,
+    first: bool,
+    settings: DanmakuSettings,
+    control: ConversionControl,
+}
+
+impl<W: Write> StyledAssWriter<W> {
+    fn line(&mut self) -> io::Result<()> {
+        self.control.check()?;
+        let text = std::str::from_utf8(&self.line).map_err(io::Error::other)?;
+        let text = text.trim_end_matches('\r');
+        let text = if self.first { text.trim_start_matches('\u{feff}') } else { text };
+        let mut styled = None;
+        if let Some(style) = text.strip_prefix("Style: ") {
+            let mut values: Vec<_> = style.split(',').map(str::to_owned).collect();
+            if values.len() >= 18 && matches!(values[0].as_str(), "R2L" | "L2R" | "TOP" | "BTM") {
+                values[2] = self.settings.font_size.to_string();
+                values[16] = self.settings.outline.to_string();
+                styled = Some(format!("Style: {}", values.join(",")));
+            }
+        }
+        if !self.first { self.output.write_all(b"\n")?; }
+        self.first = false;
+        self.output.write_all(add_emoji_font_fallback(styled.as_deref().unwrap_or(text)).as_bytes())?;
+        self.line.clear();
+        Ok(())
+    }
+}
+
+impl<W: Write> Write for StyledAssWriter<W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.control.check()?;
+        for part in bytes.split_inclusive(|&byte| byte == b'\n') {
+            if let Some(body) = part.strip_suffix(b"\n") {
+                self.line.extend_from_slice(body);
+                self.line()?;
+            } else {
+                self.line.extend_from_slice(part);
+            }
+        }
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if !self.line.is_empty() { self.line()?; }
+        self.output.flush()
+    }
+}
+
+struct PreparedConversion {
+    metadata: AssMetadata,
+    xml: Option<NormalizedXml>,
+}
+
+fn prepare_conversion(
+    source: &RenderSource,
+    settings: &DanmakuSettings,
+    control: &ConversionControl,
+) -> Result<PreparedConversion, String> {
+    control.check().map_err(|e| e.to_string())?;
+    let mut metadata = AssMetadata { time_origin_ms: 0, estimated_timing: false, comment_count: 0 };
+    if !settings.enabled { return Ok(PreparedConversion { metadata, xml: None }); }
+    if settings.font.contains(',') { return Err("弹幕字体名称不能包含逗号".into()); }
+    let path = source.danmaku_path.as_ref()
+        .ok_or("没有录制弹幕 XML，无法生成弹幕版；可以关闭弹幕后导出")?;
+    let file = std::fs::File::open(path).map_err(|e| format!("读取弹幕 XML 失败：{e}"))?;
+    let input = CheckedReader { input: file.take(MAX_XML_BYTES + 1), control: control.clone() };
+    let parsed = parse_xml_reader(BufReader::new(input), MAX_XML_BYTES, MAX_COMMENTS)?;
+    let (xml_origin, estimated) = timing_origin(&parsed);
+    metadata.estimated_timing = estimated;
+    metadata.comment_count = parsed.comments.len();
+    if parsed.comments.is_empty() || settings.opacity == 0. {
+        return Ok(PreparedConversion { metadata, xml: None });
+    }
+    let correction = match (xml_origin, source.source_origin_ms) {
+        (Some(xml), Some(video)) => xml.checked_sub(video).ok_or("弹幕录制起点差值超出范围")?,
+        _ => { metadata.estimated_timing = true; 0 }
+    };
+    let offset = settings.offset_ms.checked_add(
+        settings.segment_offsets.get(&source.segment_id).copied().unwrap_or(0)
+    ).ok_or("弹幕时间偏移超出范围")?;
+    let mut origin = 0;
+    let mut eligible = false;
+    for comment in &parsed.comments {
+        let at = corrected_time(comment.elapsed_ms, correction, offset)?;
+        if at.unsigned_abs() <= MAX_COMMENT_OFFSET_MS as u64 {
+            eligible = true;
+            origin = origin.min(at);
+        }
+    }
+    metadata.time_origin_ms = origin;
+    let xml = eligible.then(|| NormalizedXml {
+        comments: parsed.comments.into_iter(),
+        current: Cursor::new(NORMALIZED_HEADER.as_bytes().to_vec()),
+        correction, offset, origin, footer_written: false, control: control.clone(),
+    });
+    Ok(PreparedConversion { metadata, xml })
+}
+
+fn write_prepared(
+    prepared: PreparedConversion,
+    settings: &DanmakuSettings,
+    width: u32,
+    height: u32,
+    mut output: impl Write,
+    control: &ConversionControl,
+) -> Result<AssMetadata, String> {
+    if let Some(xml) = prepared.xml {
+        let mut writer = StyledAssWriter {
+            output: &mut output, line: Vec::new(), first: true,
+            settings: settings.clone(), control: control.clone(),
+        };
+        danmaku_factory::convert_normalized_xml_to_writer(
+            xml, &mut writer, &factory_options(settings, width, height),
+        ).map_err(|e| describe(&e))?;
+        writer.flush().map_err(|e| format!("写入弹幕 ASS 失败：{e}"))?;
+    } else {
+        control.check().map_err(|e| e.to_string())?;
+        output.write_all(empty_ass(width, height).as_bytes()).map_err(|e| e.to_string())?;
+    }
+    Ok(prepared.metadata)
+}
+
+/// Only browser preview collects the final ASS text, as required by its API.
 pub async fn generate(
     source: &RenderSource,
     settings: &DanmakuSettings,
     width: u32,
     height: u32,
-    work: &Arc<ManagedRoot>,
     cancel: &CancellationToken,
 ) -> Result<AssPreview, String> {
-    let mut preview = AssPreview {
-        ass: empty_ass(width, height),
-        width,
-        height,
-        time_origin_ms: 0,
-        estimated_timing: false,
-        comment_count: 0,
-    };
-    if !settings.enabled {
-        return Ok(preview);
-    }
-    if settings.font.contains(',') {
-        return Err("弹幕字体名称不能包含逗号".into());
-    }
-    let path = source
-        .danmaku_path
-        .as_ref()
-        .ok_or("没有录制弹幕 XML，无法生成弹幕版；可以关闭弹幕后导出")?;
-    let size = tokio::fs::metadata(path)
-        .await
-        .map_err(|e| format!("读取弹幕 XML 失败：{e}"))?
-        .len();
-    if size > MAX_XML_BYTES {
-        return Err("弹幕 XML 超过 128 MB".into());
-    }
-    use tokio::io::AsyncReadExt;
-    let file = tokio::fs::File::open(path)
-        .await
-        .map_err(|e| format!("读取弹幕 XML 失败：{e}"))?;
-    let mut bytes = Vec::new();
-    file.take(MAX_XML_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .await
-        .map_err(|e| format!("读取弹幕 XML 失败：{e}"))?;
-    let parsed = parse_xml(&bytes)?;
-    drop(bytes);
-    let (xml_origin, estimated) = timing_origin(&parsed);
-    preview.estimated_timing = estimated;
-    preview.comment_count = parsed.comments.len();
-    if parsed.comments.is_empty() || settings.opacity == 0. {
-        return Ok(preview);
-    }
-    let correction = match (xml_origin, source.source_origin_ms) {
-        (Some(xml), Some(video)) => xml.checked_sub(video).ok_or("弹幕录制起点差值超出范围")?,
-        _ => {
-            preview.estimated_timing = true;
-            0
-        }
-    };
-    let offset = settings
-        .offset_ms
-        .checked_add(
-            settings
-                .segment_offsets
-                .get(&source.segment_id)
-                .copied()
-                .unwrap_or(0),
-        )
-        .ok_or("弹幕时间偏移超出范围")?;
-    let mut comments = Vec::new();
-    for comment in &parsed.comments {
-        let at = corrected_time(comment.elapsed_ms, correction, offset)?;
-        if at.unsigned_abs() <= MAX_COMMENT_OFFSET_MS as u64 {
-            comments.push((comment, at));
-        }
-    }
-    if comments.is_empty() {
-        return Ok(preview);
-    }
-    let origin = comments.iter().map(|(_, at)| *at).min().unwrap_or(0).min(0);
-    preview.time_origin_ms = origin;
-    let normalized = normalize_xml(&comments, origin)?;
-    let expected = normalized.matches("<d p=").count();
-    drop(comments);
-    drop(parsed);
-    let output = convert_in_worker(
-        work,
-        normalized.into_bytes(),
-        &factory_options(settings, width, height),
-        cancel,
-    )
-    .await?;
-    let stats = output.stats;
-    if stats.danmaku_count as usize != expected {
-        tracing::warn!(
-            expected,
-            read = stats.danmaku_count,
-            "DanmakuFactory read a different number of danmaku than were written"
-        );
-    }
-    preview.ass = decode_ass(&output.ass);
-    if !preview.ass.contains("[Events]") || !preview.ass.contains("PlayResX:") {
-        return Err("弹幕转换生成的 ASS 无效".into());
-    }
-    // Factory accepts outline <= 4, while our public style allows wider borders.
-    // Change style values after layout without touching cue times or motion.
-    preview.ass = preview
-        .ass
-        .lines()
-        .map(|line| {
-            if let Some(style) = line.strip_prefix("Style: ") {
-                let mut values: Vec<String> = style.split(',').map(str::to_owned).collect();
-                if values.len() >= 18 && matches!(values[0].as_str(), "R2L" | "L2R" | "TOP" | "BTM")
-                {
-                    values[2] = settings.font_size.to_string();
-                    values[16] = settings.outline.to_string();
-                    return format!("Style: {}", values.join(","));
-                }
-            }
-            line.to_owned()
+    let (source, settings) = (source.clone(), settings.clone());
+    let control = ConversionControl::new(cancel, CONVERT_TIMEOUT);
+    supervised(CONVERT_TIMEOUT, cancel, move || {
+        let prepared = prepare_conversion(&source, &settings, &control)?;
+        let mut output = Vec::new();
+        let metadata = write_prepared(prepared, &settings, width, height, &mut output, &control)?;
+        Ok(AssPreview {
+            ass: String::from_utf8(output).map_err(|e| e.to_string())?, width, height,
+            time_origin_ms: metadata.time_origin_ms,
+            estimated_timing: metadata.estimated_timing,
+            comment_count: metadata.comment_count,
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-    preview.ass = add_emoji_font_fallback(&preview.ass);
-    Ok(preview)
+    }).await
+}
+
+/// Stream an export directly beside its destination, without a conversion
+/// directory. Unique `.part` names isolate concurrent attempts; failed writes
+/// never replace a complete ASS file.
+pub async fn generate_file(
+    source: &RenderSource,
+    settings: &DanmakuSettings,
+    width: u32,
+    height: u32,
+    output: &Path,
+    work: &Arc<ManagedRoot>,
+    cancel: &CancellationToken,
+) -> Result<AssMetadata, String> {
+    let (source, settings, output, owner) = (source.clone(), settings.clone(), output.to_owned(), work.clone());
+    let control = ConversionControl::new(cancel, CONVERT_TIMEOUT);
+    supervised(CONVERT_TIMEOUT, cancel, move || {
+        let _owner = owner;
+        let prepared = prepare_conversion(&source, &settings, &control)?;
+        publish_ass(&output, &control, |writer| {
+            write_prepared(prepared, &settings, width, height, writer, &control)
+        })
+    }).await
+}
+
+fn publish_ass<T>(
+    output: &Path,
+    control: &ConversionControl,
+    write: impl FnOnce(&mut BufWriter<&mut std::fs::File>) -> Result<T, String>,
+) -> Result<T, String> {
+    control.check().map_err(|e| e.to_string())?;
+    if std::fs::symlink_metadata(output).is_ok() { return Err("弹幕 ASS 文件已经存在，拒绝覆盖".into()); }
+    let parent = output.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let prefix = format!(".{}-", output.file_name().ok_or("弹幕 ASS 文件名无效")?.to_string_lossy());
+    let mut part = tempfile::Builder::new().prefix(&prefix).suffix(".part")
+        .tempfile_in(parent).map_err(|e| format!("创建弹幕 ASS .part 文件失败：{e}"))?;
+    let result = (|| {
+        let mut writer = BufWriter::new(part.as_file_mut());
+        let result = write(&mut writer)?;
+        writer.flush().map_err(|e| format!("写入弹幕 ASS 失败：{e}"))?;
+        drop(writer);
+        control.check().map_err(|e| e.to_string())?;
+        part.as_file().sync_all().map_err(|e| format!("保存弹幕 ASS 失败：{e}"))?;
+        control.check().map_err(|e| e.to_string())?;
+        Ok(result)
+    })();
+    match result {
+        Ok(value) => part.persist_noclobber(output)
+            .map(|_| value).map_err(|e| format!("发布弹幕 ASS 失败：{}", e.error)),
+        Err(primary) => match part.close() {
+            Ok(()) => Err(primary),
+            Err(error) => Err(format!("{primary}; cleanup .part: {error}")),
+        }
+    }
 }
 
 /// The DanmakuFactory options biliup has always used: those of the former
@@ -535,34 +694,35 @@ pub(super) fn factory_options(
     }
 }
 
-/// Each worker owns an exclusive attempt directory under a shared root owner.
-/// The detached supervisor reaps the child before reclaiming its files.
-async fn convert_in_worker(
-    work: &Arc<ManagedRoot>,
-    xml: Vec<u8>,
-    options: &ConvertOptions,
-    cancel: &CancellationToken,
-) -> Result<WorkerOutput, String> {
-    let request = Request {
-        protocol: PROTOCOL,
-        input: XML_FILE.into(),
-        output: ASS_FILE.into(),
-        result: RESULT_FILE.into(),
-        options: options.clone(),
-        #[cfg(test)]
-        test_hook: None,
-    };
-    run_worker(work, xml, &request, cancel, CONVERT_TIMEOUT).await
-}
-
-async fn run_worker(
-    work: &Arc<ManagedRoot>,
-    xml: Vec<u8>,
-    request: &Request,
-    cancel: &CancellationToken,
-    timeout: Duration,
-) -> Result<WorkerOutput, String> {
-    process::run(work, xml, request, cancel, timeout).await
+/// Runs one blocking operation under a bounded lifetime.
+///
+/// The core cannot be interrupted once it starts, so a cancellation or a
+/// timeout answers its caller at once and lets the operation finish on its own
+/// thread. The closure owns the root's `Arc`, so its attempt directory
+/// survives until the core has really stopped writing; dropping the last
+/// reference reclaims the root through the same checked path as a normal
+/// return.
+async fn supervised<T, F>(timeout: Duration, cancel: &CancellationToken, op: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    if cancel.is_cancelled() { return Err("合成已取消".into()); }
+    // Dropping the handle of a still-running blocking task never cancels it,
+    // which is exactly the lifetime this function promises.
+    let mut task = tokio::task::spawn_blocking(op);
+    tokio::select! {
+        biased;
+        _ = cancel.cancelled() => Err("合成已取消".into()),
+        _ = tokio::time::sleep(timeout) => Err(format!(
+            "弹幕转换失败：转换超过 {} 秒，任务已超时；可重试",
+            timeout.as_secs()
+        )),
+        joined = &mut task => match joined {
+            Ok(result) => result,
+            Err(error) => Err(format!("弹幕转换任务失败：{error}")),
+        },
+    }
 }
 
 fn describe(error: &ConvertError) -> String {
@@ -579,7 +739,7 @@ fn describe(error: &ConvertError) -> String {
         ErrorKind::NoDanmaku => "弹幕转换没有读到弹幕".into(),
         ErrorKind::UnsupportedInput => format!("弹幕 XML 含有无法转换的弹幕：{error}"),
         ErrorKind::OutOfMemory => "弹幕转换内存不足".into(),
-        ErrorKind::Locale => "弹幕转换进程的数字格式（LC_NUMERIC）不受支持".into(),
+        ErrorKind::Locale => "弹幕转换的数字格式（LC_NUMERIC）不受支持".into(),
         ErrorKind::Internal => format!("弹幕转换内部错误：{error}"),
     }
 }
@@ -597,43 +757,20 @@ pub(super) fn decode_ass(bytes: &[u8]) -> String {
 
 const SELF_TEST_XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><i>\n<d p=\"0.000,1,25,16777215,0,0,0,0\">biliup 弹幕</d>\n</i>\n";
 
-/// Converts a one-comment XML in a worker, which proves that this
-/// installation can start the worker and that the linked core works.
+/// Check the linked core using streams, without creating any files.
 pub async fn check_converter(cancel: &CancellationToken) -> Result<(), String> {
-    let temp = Arc::new(
-        ManagedRoot::new(
-            crate::danmaku_worker::managed_preview_root()
-                .map_err(|e| format!("无法创建弹幕转换检查目录：{e}"))?,
-        )
-        .map_err(|e| format!("无法登记弹幕转换检查目录：{e}"))?,
-    );
-    let request = Request {
-        protocol: PROTOCOL,
-        input: XML_FILE.into(),
-        output: ASS_FILE.into(),
-        result: RESULT_FILE.into(),
-        options: ConvertOptions {
-            width: 64,
-            height: 36,
-            font_size: 16,
-            ..ConvertOptions::default()
-        },
-        #[cfg(test)]
-        test_hook: None,
-    };
-    let output = run_worker(
-        &temp,
-        SELF_TEST_XML.as_bytes().to_vec(),
-        &request,
-        cancel,
-        SELF_TEST_TIMEOUT,
-    )
-    .await?;
-    let ass = decode_ass(&output.ass);
-    if output.stats.danmaku_count != 1 || !ass.contains("biliup\\h弹幕") {
-        return Err("弹幕转换检查的结果不正确".into());
-    }
-    ManagedRoot::finish(temp, Ok(()))
+    let control = ConversionControl::new(cancel, SELF_TEST_TIMEOUT);
+    supervised(SELF_TEST_TIMEOUT, cancel, move || {
+        let options = ConvertOptions { width: 64, height: 36, font_size: 16, ..Default::default() };
+        let mut output = Vec::new();
+        let stats = danmaku_factory::convert_normalized_xml_to_writer(
+            CheckedReader { input: SELF_TEST_XML.as_bytes(), control }, &mut output, &options,
+        ).map_err(|e| describe(&e))?;
+        if stats.danmaku_count != 1 || !decode_ass(&output).contains("biliup\\h弹幕") {
+            return Err("弹幕转换检查的结果不正确".into());
+        }
+        Ok(())
+    }).await
 }
 
 #[cfg(test)]

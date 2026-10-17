@@ -1,5 +1,4 @@
 pub mod cli;
-pub mod danmaku_worker;
 pub mod downloader;
 pub mod entry;
 pub mod node_cli;

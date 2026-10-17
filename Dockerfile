@@ -29,7 +29,8 @@ COPY . /biliup
 RUN set -eux; \
 	\
 	apt-get update; \
-	apt-get install -y --no-install-recommends python3-pip g++ patchelf git curl; \
+	apt-get install -y --no-install-recommends python3-pip g++ patchelf git git-lfs curl; \
+	git lfs install --system; \
 	pip3 install maturin --break-system-packages; \
 	if [ ! -f /biliup/crates/stream-gears/pyproject.toml ]; then \
 	rm -rf /biliup; \

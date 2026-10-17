@@ -373,8 +373,8 @@ graph TB
 | `crates/biliup` | 核心库：直播解析、下载器、B 站投稿与凭据管理 |
 | `crates/biliup-cli` | 命令行与 Web 服务：REST API、WebUI 托管、录制调度 |
 | `crates/biliup-cli/src/server/{api,fleet,auto_clip}` | 分别是 Web API 路由、Fleet 控制面与节点、自动切片 |
-| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–14） |
-| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–4） |
+| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–15） |
+| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–7） |
 | `crates/danmaku` | 弹幕客户端：多平台协议解析与 XML 输出 |
 | `crates/stream-gears` | PyO3 绑定，暴露给 `python -m biliup` |
 | `app`、`public` | Next.js WebUI 源码；`npm run build` 产物输出到 `out/` 并由后端内嵌 |
@@ -404,6 +404,8 @@ graph TB
 
 > [!NOTE]
 > `biliup-cli` 通过 `rust-embed` 内嵌前端产物目录 `out/`，因此在 `cargo build` / `cargo test` 之前必须先执行 `npm run build`，否则编译会因 `out/` 不存在而失败。
+>
+> 字体资产 `crates/biliup-cli/src/assets/*.otf`、`*.ttf` 通过 Git LFS 存储，会被内嵌进二进制。克隆后需要 `git lfs install`（并 `git lfs pull`），否则检出到的是 LFS 指针文件，编出来的程序字体是坏的。CI 已在 `actions/checkout` 上开启 `lfs: true`。
 
 ### 测试
 

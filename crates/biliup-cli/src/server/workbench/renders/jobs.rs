@@ -43,9 +43,9 @@ fn recovery_marker(file: &mut std::fs::File) -> std::io::Result<Option<RecoveryM
     file.rewind()?;
     let mut bytes = Vec::new();
     (&mut *file)
-        .take(crate::danmaku_worker::ROOT_LEASE_MAX_BYTES + 1)
+        .take(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_MAX_BYTES + 1)
         .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > crate::danmaku_worker::ROOT_LEASE_MAX_BYTES {
+    if bytes.len() as u64 > crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_MAX_BYTES {
         return Ok(None);
     }
     let marker: RecoveryMarker = match serde_json::from_slice(&bytes) {
@@ -204,7 +204,7 @@ fn cleanup_danmaku_root_with(
                 return Ok(false);
             }
             Ok(_) => {
-                let lease_path = tombstone.join(crate::danmaku_worker::ROOT_LEASE_FILE);
+                let lease_path = tombstone.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE);
                 if std::fs::symlink_metadata(&lease_path).is_ok_and(|m| !m.file_type().is_file()) {
                     return Ok(false);
                 }
@@ -223,7 +223,7 @@ fn cleanup_danmaku_root_with(
     if !metadata.is_dir() {
         return Ok(false);
     }
-    let lease_path = canonical.join(crate::danmaku_worker::ROOT_LEASE_FILE);
+    let lease_path = canonical.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE);
     if std::fs::symlink_metadata(&lease_path).is_ok_and(|m| !m.file_type().is_file()) {
         return Ok(false);
     }
@@ -269,7 +269,7 @@ fn cleanup_danmaku_root_with(
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(canonical.join(crate::danmaku_worker::ROOT_RETIRED_FILE))
+        .open(canonical.join(crate::server::workbench::renders::danmaku_directory::ROOT_RETIRED_FILE))
     {
         Ok(file) => file.sync_all()?,
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -359,7 +359,7 @@ impl RenderJobs {
         // Preview/self-check workers use this application-owned cache root,
         // so they participate in the same lease-guarded crash recovery.
         if let Ok(mut entries) =
-            tokio::fs::read_dir(crate::danmaku_worker::managed_preview_root_dir()).await
+            tokio::fs::read_dir(crate::server::workbench::renders::danmaku_directory::managed_preview_root_dir()).await
         {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if entry
@@ -1057,7 +1057,7 @@ mod progress_tests {
         assert!(unmanaged.join("keep").exists());
         let managed = directory.path().join(".render-owned");
         std::fs::create_dir(&managed).unwrap();
-        let lease = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
+        let lease = crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).unwrap();
         std::fs::write(managed.join("out.ass"), b"complete but unconfirmed").unwrap();
         assert!(!cleanup_inactive_danmaku_root(&managed).unwrap());
         assert!(managed.join("out.ass").exists());
@@ -1067,10 +1067,10 @@ mod progress_tests {
 
         let managed = directory.path().join(".render-interrupted-cleanup");
         std::fs::create_dir(&managed).unwrap();
-        let lease = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
+        let lease = crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).unwrap();
         drop(lease);
         let marker: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(managed.join(crate::danmaku_worker::ROOT_LEASE_FILE)).unwrap(),
+            &std::fs::read(managed.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE)).unwrap(),
         )
         .unwrap();
         let pending = directory.path().join(format!(
@@ -1089,15 +1089,15 @@ mod progress_tests {
         let second = directory.path().join(".render-second");
         std::fs::create_dir(&first).unwrap();
         std::fs::create_dir(&second).unwrap();
-        drop(crate::danmaku_worker::acquire_root_lease(&first).unwrap());
+        drop(crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&first).unwrap());
         std::fs::copy(
-            first.join(crate::danmaku_worker::ROOT_LEASE_FILE),
-            second.join(crate::danmaku_worker::ROOT_LEASE_FILE),
+            first.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE),
+            second.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE),
         )
         .unwrap();
         assert!(!cleanup_inactive_danmaku_root(&second).unwrap());
         std::fs::write(
-            second.join(crate::danmaku_worker::ROOT_LEASE_FILE),
+            second.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE),
             b"broken",
         )
         .unwrap();
@@ -1110,12 +1110,12 @@ mod progress_tests {
         let directory = tempfile::tempdir().unwrap();
         let managed = directory.path().join(".render-partially-deleted");
         std::fs::create_dir(&managed).unwrap();
-        drop(crate::danmaku_worker::acquire_root_lease(&managed).unwrap());
+        drop(crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).unwrap());
         std::fs::write(managed.join("unconfirmed.ass"), b"complete but unconfirmed").unwrap();
         let mut tombstone = PathBuf::new();
         let error = cleanup_danmaku_root_with(&managed, &mut |path| {
             tombstone = path.to_owned();
-            std::fs::remove_file(path.join(crate::danmaku_worker::ROOT_LEASE_FILE))?;
+            std::fs::remove_file(path.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE))?;
             Err(std::io::Error::new(
                 std::io::ErrorKind::PermissionDenied,
                 "injected failure after marker deletion",
@@ -1126,7 +1126,7 @@ mod progress_tests {
         assert!(tombstone.join("unconfirmed.ass").exists());
         assert!(
             !tombstone
-                .join(crate::danmaku_worker::ROOT_LEASE_FILE)
+                .join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE)
                 .exists()
         );
         let mut manifest_path = tombstone.as_os_str().to_owned();
@@ -1145,7 +1145,7 @@ mod progress_tests {
         let directory = tempfile::tempdir().unwrap();
         let managed = directory.path().join(".render-permission-failure");
         std::fs::create_dir(&managed).unwrap();
-        drop(crate::danmaku_worker::acquire_root_lease(&managed).unwrap());
+        drop(crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).unwrap());
         let blocked = managed.join("blocked");
         std::fs::create_dir(&blocked).unwrap();
         std::fs::write(blocked.join("retained"), b"must retry").unwrap();
@@ -1155,7 +1155,7 @@ mod progress_tests {
         let result = cleanup_danmaku_root_with(&managed, &mut |path| {
             tombstone = path.to_owned();
             // Force the exact partial-deletion state independently of readdir order.
-            std::fs::remove_file(path.join(crate::danmaku_worker::ROOT_LEASE_FILE))?;
+            std::fs::remove_file(path.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE))?;
             std::fs::remove_dir_all(path)
         });
         let restored = tombstone.join("blocked");
@@ -1185,8 +1185,8 @@ mod progress_tests {
         let directory = tempfile::tempdir().unwrap();
         let managed = directory.path().join(".render-manifest-stages");
         std::fs::create_dir(&managed).unwrap();
-        let active = crate::danmaku_worker::acquire_root_lease(&managed).unwrap();
-        let mut lease = recovery_file(&managed.join(crate::danmaku_worker::ROOT_LEASE_FILE))
+        let active = crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).unwrap();
+        let mut lease = recovery_file(&managed.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE))
             .unwrap()
             .unwrap();
         let marker = recovery_marker(&mut lease).unwrap().unwrap();
@@ -1197,11 +1197,11 @@ mod progress_tests {
         assert!(managed.exists() && manifest.exists());
         drop(active);
         // A crash after retirement but before rename must still be recoverable.
-        std::fs::File::create_new(managed.join(crate::danmaku_worker::ROOT_RETIRED_FILE))
+        std::fs::File::create_new(managed.join(crate::server::workbench::renders::danmaku_directory::ROOT_RETIRED_FILE))
             .unwrap()
             .sync_all()
             .unwrap();
-        assert!(crate::danmaku_worker::acquire_root_lease(&managed).is_err());
+        assert!(crate::server::workbench::renders::danmaku_directory::acquire_root_lease(&managed).is_err());
         assert!(cleanup_inactive_danmaku_root(&manifest).unwrap());
         assert!(!managed.exists() && !manifest.exists());
         let private = tempfile::tempdir_in(directory.path()).unwrap();

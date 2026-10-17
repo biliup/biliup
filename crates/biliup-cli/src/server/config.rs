@@ -949,11 +949,22 @@ mod tests {
 
     #[tokio::test]
     async fn segment_time_migration_removes_legacy_null_and_preserves_custom_duration() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query("CREATE TABLE livestreamers (id INTEGER PRIMARY KEY, override TEXT)")
-            .execute(&pool)
+        // The cleanup is part of the schema migration, so the database has to
+        // start at the schema from before it and bring the legacy rows along.
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
             .await
             .unwrap();
+        let mut through_14 = sqlx::migrate!();
+        through_14.migrations = through_14
+            .migrations
+            .iter()
+            .filter(|migration| migration.version <= 14)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into();
+        through_14.run(&pool).await.unwrap();
         for (id, value) in [
             (
                 1,
@@ -962,19 +973,20 @@ mod tests {
             (2, r#"{"segment_time":"00:07:30","file_size":456}"#),
             (3, r#"{"downloader":"ffmpeg"}"#),
         ] {
-            sqlx::query("INSERT INTO livestreamers VALUES (?, ?)")
-                .bind(id)
-                .bind(value)
-                .execute(&pool)
-                .await
-                .unwrap();
+            sqlx::query(
+                "INSERT INTO livestreamers (id, url, remark, \"override\") VALUES (?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(format!("https://live.bilibili.com/{id}"))
+            .bind(format!("streamer-{id}"))
+            .bind(value)
+            .execute(&pool)
+            .await
+            .unwrap();
         }
-        sqlx::raw_sql(include_str!(
-            "../../migrations/16_override_segment_time_placeholder_null.sql"
-        ))
-        .execute(&pool)
-        .await
-        .unwrap();
+        // Still the same in-memory database, still at the pre-squash schema:
+        // the full migrator now applies the merged migration to it.
+        sqlx::migrate!().run(&pool).await.unwrap();
         let rows: Vec<String> =
             sqlx::query_scalar("SELECT override FROM livestreamers ORDER BY id")
                 .fetch_all(&pool)

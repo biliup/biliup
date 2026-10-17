@@ -71,8 +71,9 @@ pub struct RenderCapabilities {
     pub ffmpeg: bool,
     pub libass: bool,
     pub libx264: bool,
-    /// The built-in DanmakuFactory converter ran in a worker process. The
-    /// name is kept for API compatibility; no external program is involved.
+    /// The built-in DanmakuFactory-derived converter, checked by converting a
+    /// one-comment XML in this process. The name is kept for API
+    /// compatibility; no external program is involved.
     pub danmaku_factory: bool,
     pub font: bool,
     pub encoders: Vec<EncoderCapability>,
@@ -478,7 +479,7 @@ pub async fn preview_on_canvas(
     let height = media.height.div_ceil(2) * 2;
     let temp = Arc::new(
         super::danmaku::ManagedRoot::new(
-            crate::danmaku_worker::managed_preview_root()
+            crate::server::workbench::renders::danmaku_directory::managed_preview_root()
                 .map_err(|e| format!("无法创建预览目录：{e}"))?,
         )
         .map_err(|e| format!("无法登记预览工作目录：{e}"))?,
@@ -1967,7 +1968,11 @@ pub async fn render(
     if bytes == 0 {
         return Err("FFmpeg 没有生成视频".into());
     }
-    tokio::fs::File::open(&result)
+    // `sync_all` flushes through the handle, and on Windows that needs write
+    // access: a read-only handle fails with ERROR_ACCESS_DENIED.
+    tokio::fs::OpenOptions::new()
+        .write(true)
+        .open(&result)
         .await
         .map_err(|e| e.to_string())?
         .sync_all()
@@ -2048,7 +2053,7 @@ mod danmaku_cleanup_tests {
         assert!(failure.contains("denied"));
         assert!(!output.exists());
         assert_eq!(std::fs::read(&earlier).unwrap(), b"keep");
-        assert!(path.join(crate::danmaku_worker::ROOT_LEASE_FILE).exists());
+        assert!(path.join(crate::server::workbench::renders::danmaku_directory::ROOT_LEASE_FILE).exists());
         assert!(super::super::jobs::cleanup_inactive_danmaku_root(&path).unwrap());
         assert!(!path.exists());
     }

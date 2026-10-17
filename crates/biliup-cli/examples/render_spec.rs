@@ -5,10 +5,8 @@
 //!
 //! `render-spec.json` is a job snapshot (`RenderSpec`); its relative paths are
 //! resolved against BASE_DIR. OUT_DIR receives `result.mp4` and, for every
-//! segment, the `danmaku-<n>.ass` the export burnt in. This program is also
-//! its own danmaku worker, as every biliup host is.
+//! segment, the `danmaku-<n>.ass` the export burnt in.
 
-use biliup_cli::danmaku_worker;
 use biliup_cli::server::workbench::renders::engine::{self, EngineRequest};
 use biliup_cli::server::workbench::renders::model::RenderSpec;
 use std::collections::HashMap;
@@ -16,9 +14,6 @@ use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
 fn main() {
-    if let Some(code) = danmaku_worker::run_if_requested(std::env::args_os()) {
-        std::process::exit(code);
-    }
     let args: Vec<PathBuf> = std::env::args_os().skip(1).map(PathBuf::from).collect();
     let [spec, base, out] = args.as_slice() else {
         eprintln!("usage: render_spec render-spec.json BASE_DIR OUT_DIR");

@@ -4,8 +4,8 @@
 //! the embedding host ships (the desktop app passes the ffmpeg bundled in its
 //! installer through `ServeOptions::ffmpeg`), then `ffmpeg` on `PATH`.
 //!
-//! Danmaku XML -> ASS conversion uses the native Rust converter built into
-//! biliup (see `crate::danmaku_worker`). The render tools
+//! Danmaku XML -> ASS conversion uses the native Rust converter linked into
+//! biliup (`crates/danmaku-factory`). The render tools
 //! directory only provides the font shared by the browser preview and FFmpeg.
 
 use serde::Serialize;
@@ -465,6 +465,21 @@ mod tests {
         let tools = embedded_render_tools().expect("embedded CJK font should be extractable");
         let font = tools.join("fonts").join(RENDER_FONT);
         assert_eq!(std::fs::read(font).unwrap().as_slice(), RENDER_FONT_BYTES);
+    }
+
+    /// The fonts are Git LFS objects: a checkout without LFS inlines an ASCII
+    /// pointer instead of a font, which is only visible at run time.
+    #[test]
+    fn embedded_fonts_are_real_sfnt_files() {
+        assert!(RENDER_FONT_BYTES.len() > 1_000_000);
+        assert!(
+            RENDER_FONT_BYTES.starts_with(b"OTTO"),
+            "the embedded CJK font is not an OpenType file; was it checked out without git-lfs?"
+        );
+        assert!(
+            RENDER_EMOJI_FONT.starts_with(b"\0\x01\0\0"),
+            "the embedded emoji font is not a TrueType file; was it checked out without git-lfs?"
+        );
     }
 
     #[test]

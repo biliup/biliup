@@ -77,16 +77,9 @@ async fn fixture() -> (
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../migrations/15_douyu_cookie_keeper.sql"
-    ))
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query("CREATE TABLE livestreamers (id INTEGER PRIMARY KEY, \"override\" TEXT)")
-        .execute(&pool)
-        .await
-        .unwrap();
+    // The keeper tables come from the real migrations, so this fixture also
+    // fails if the schema it reads drifts from the one that ships.
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
     let config = Arc::new(RwLock::new(config()));
     let fake = Arc::new(Fake::default());
     let keeper = DouyuCookieKeeper::with_backend(pool.clone(), config.clone(), fake.clone());
@@ -224,7 +217,10 @@ async fn in_flight_account_switch_discards_old_result() {
 #[tokio::test]
 async fn room_override_refresh_never_uses_global_ticket() {
     let (pool, _, fake, keeper) = fixture().await;
-    sqlx::query("INSERT INTO livestreamers(id,\"override\") VALUES(1,?)")
+    sqlx::query(
+        "INSERT INTO livestreamers(id,url,remark,\"override\") \
+         VALUES(1,'https://www.douyu.com/1','room',?)",
+    )
         .bind(r#"{"douyu_cookie":"acf_uid=99; acf_auth=other"}"#)
         .execute(&pool)
         .await
@@ -560,8 +556,10 @@ async fn enabled_room_scope_renews_shared_global_credentials_once_when_global_is
     config.write().unwrap().douyu_auto_refresh = Some(false);
     // Both rooms reuse the global account, but enable its maintenance locally.
     for id in [1_i64, 2] {
-        sqlx::query("INSERT INTO livestreamers(id,\"override\") VALUES(?,?)")
+        sqlx::query("INSERT INTO livestreamers(id,url,remark,\"override\") VALUES(?,?,?,?)")
             .bind(id)
+            .bind(format!("https://www.douyu.com/{id}"))
+            .bind(format!("room-{id}"))
             .bind(r#"{"douyu_auto_refresh":true}"#)
             .execute(&pool)
             .await

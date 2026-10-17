@@ -6,3 +6,8 @@
 # Golden and fixed reference assets retain their source bytes on Windows.
 /crates/danmaku-factory/tests/golden/** -text
 /crates/danmaku-factory/tests/fixtures/*.ass -text
+
+# 大体积字体资产走 Git LFS：18 MB 的二进制字体内嵌进 biliup 二进制，
+# 放进普通 blob 会让每次 clone/fetch 都拖上它们。检出后需要 git-lfs（CI 用 actions/checkout 的 lfs: true）。
+/crates/biliup-cli/src/assets/*.otf filter=lfs diff=lfs merge=lfs -text
+/crates/biliup-cli/src/assets/*.ttf filter=lfs diff=lfs merge=lfs -text
