@@ -1,7 +1,0 @@
-# Cargo config overrides Cargo.toml. Keep these in sync with the manifest so
-# user-level opt-level=1 cannot re-enable optimized incremental dev builds
-# (the configuration associated with earlier undefined hidden anon.* failures).
-[profile.dev]
-opt-level = 0
-debug = 2
-incremental = true

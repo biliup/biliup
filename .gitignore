@@ -54,7 +54,6 @@ cookies.json
 .cunzhi-memory/
 .serena/
 .cargo/*
-!.cargo/config.toml
 logs/
 .claude/
 /public/jassub/
