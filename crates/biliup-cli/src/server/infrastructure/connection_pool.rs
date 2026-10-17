@@ -505,7 +505,7 @@ mod tests {
             ),
             (
                 15,
-                "089a149864809ba41fc1bcf164af1b02021f994d9211a94765a51d25b658e056fa72e35bc4e781f25479e2ba198b7630",
+                "3531e4a28e713dd9ddd10441c40996856253839cfa8b7a936e9ad221ac01255fa10c1f0a544f086fc978fdb9d64e0dae",
             ),
         ];
         let embedded = sqlx::migrate!();

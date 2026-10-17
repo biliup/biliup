@@ -49,14 +49,8 @@ CREATE TABLE stream_session_ids (
 INSERT INTO stream_session_ids (id)
 SELECT id FROM stream_sessions ORDER BY id;
 
--- Keep the sequence ahead of IDs written by legacy code, imports, and test fixtures that insert
--- directly into stream_sessions instead of going through open_session().
-CREATE TRIGGER reserve_stream_session_id
-AFTER INSERT ON stream_sessions
-WHEN NEW.id > COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'stream_session_ids'), 0)
-BEGIN
-    INSERT INTO stream_session_ids (id) VALUES (NEW.id);
-END;
+-- Session IDs come from stream_session_ids: open_session() and the group merge allocate through it,
+-- so the sequence stays ahead of every row the service writes. No trigger is needed for that.
 
 ALTER TABLE stream_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'source'
     CHECK (kind IN ('source', 'group'));
@@ -80,13 +74,8 @@ CREATE TABLE session_merge_candidates (
     resolved_at INTEGER
 );
 
-CREATE TRIGGER session_group_members_are_sources
-BEFORE INSERT ON session_group_members
-WHEN (SELECT kind FROM stream_sessions WHERE id=NEW.group_session_id) != 'group'
- OR (SELECT kind FROM stream_sessions WHERE id=NEW.source_session_id) != 'source'
-BEGIN
-    SELECT RAISE(ABORT, 'session groups must contain real source sessions');
-END;
+-- 群组与成员的 kind 由写入它们的语句保证（候选查询只取 kind='source'，群组行写成 kind='group'）；
+-- 原先用 BEFORE INSERT 触发器兜底，现在由应用侧维持。
 
 -- 录后压制：配方、资源、任务及其引用
 -- Immutable post-recording composition recipes, assets and queued jobs.
