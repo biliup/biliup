@@ -6,6 +6,7 @@
 
 use axum::Router;
 use axum::body::Bytes;
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -112,6 +113,7 @@ impl FakeServer {
         let app = Router::new()
             .route("/v1/chat/completions", post(chat))
             .route("/v1/audio/transcriptions", post(transcriptions))
+            .layer(DefaultBodyLimit::disable())
             .with_state(Shared {
                 scenario,
                 seen: seen.clone(),
@@ -202,6 +204,9 @@ impl Drop for FakeServer {
 }
 
 async fn chat(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
+    if let Some(too_large) = oversized(&body) {
+        return too_large;
+    }
     let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let model = body["model"].as_str().unwrap_or_default().to_string();
     let has_image = body["messages"]
@@ -293,6 +298,9 @@ async fn chat(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> 
 }
 
 async fn transcriptions(State(shared): State<Shared>, headers: HeaderMap, body: Bytes) -> Response {
+    if let Some(too_large) = oversized(&body) {
+        return too_large;
+    }
     let form = parse_multipart(&headers, &body);
     let model = form.get("model").cloned().unwrap_or_default();
     let verbose = form.get("response_format").map(String::as_str) == Some("verbose_json");
@@ -331,6 +339,23 @@ async fn transcriptions(State(shared): State<Shared>, headers: HeaderMap, body: 
         .into_response(),
         _ => axum::Json(json!({"text": "测试"})).into_response(),
     }
+}
+
+/// axum 给 `Bytes` 的默认上限是 2 MiB。这里等整个请求体读完再拒，避免在客户端还在上传时
+/// 就回 413 并关闭连接——那样客户端拿到的是「你的主机中的软件中止了一个已建立的连接」
+/// （os error 10053），偶发地让自动切片的用例判成失败。
+fn oversized(body: &[u8]) -> Option<Response> {
+    const AXUM_DEFAULT_BODY_LIMIT: usize = 2 * 1024 * 1024;
+    if body.len() > AXUM_DEFAULT_BODY_LIMIT {
+        return Some(
+            (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "Failed to buffer the request body",
+            )
+                .into_response(),
+        );
+    }
+    None
 }
 
 /// 记下请求，返回这次生效的场景和这是同一场景的第几次请求（从 0 数）。
