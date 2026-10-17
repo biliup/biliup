@@ -29,8 +29,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Get PR number, repo URL, and branch name
         run: |
@@ -96,8 +94,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          lfs: true
 
       - name: Generate artifact name
         id: artifact-name

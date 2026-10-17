@@ -53,7 +53,7 @@ top = false
 弹幕 XML 到 ASS 的转换已经内置在 biliup 中：使用原生 Rust 实现，排版算法派生自 [DanmakuFactory](https://github.com/hihkm/DanmakuFactory)，随 biliup 本体和桌面版提供，不需要再安装 DanmakuFactory，也不再读取 `danmaku_factory_path` 配置（旧配置仍可正常加载，但该项会被忽略并在日志中提示）。预览和导出使用同一个转换流程和同一份字体：
 
 - CLI 发布包、桌面安装包和 Docker 镜像均随包提供 Noto Sans CJK SC 和 Noto Emoji，字体作为独立资源文件分发，不内嵌进可执行文件或 Python 扩展模块；
-- CLI 使用可执行文件旁的 `render-tools/fonts/`；Python 包仅提供基础 API，不携带字体或录制服务。需要自定义字体时，把 `BILIUP_RENDER_TOOLS_DIR` 指向包含 `fonts/` 的资源目录。
+- CLI 使用可执行文件旁的 `render-tools/fonts/`；Python 包仅提供基础 API，不携带字体或录制服务。中文字体不进仓库，构建与 CI 按固定 SHA-256 取回（命令见 `crates/biliup-cli/assets/render-tools/README.txt`）。需要自定义字体时，在配置里把 `render_fonts_dir` 指向包含字体文件的目录。
 
 工具页面的弹幕转换检测会真正启动一次转换来确认它可用。合成任务会显示排队、进度、失败和重试状态；取消或失败不会删除原视频、XML 或图片资源。
 

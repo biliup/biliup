@@ -12,6 +12,7 @@ pub const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "downloader",
     "sync_save_dir",
     "ffmpeg_path",
+    "render_fonts_dir",
     "file_size",
     "segment_time",
     "filtering_threshold",

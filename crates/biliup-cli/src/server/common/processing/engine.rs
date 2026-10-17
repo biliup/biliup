@@ -431,7 +431,7 @@ pub async fn capabilities() -> RenderCapabilities {
     }
     status.available = status.ffmpeg && status.libass && status.danmaku_factory && status.font;
     if status.error.is_none() && !status.available {
-        status.error = Some("未找到弹幕字体，请安装随包字体或设置 BILIUP_RENDER_TOOLS_DIR".into());
+        status.error = Some("未找到弹幕字体：请在配置里填写 render_fonts_dir，或安装随包字体".into());
     }
     status
 }

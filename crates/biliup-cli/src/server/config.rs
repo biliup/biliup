@@ -37,6 +37,12 @@ pub struct Config {
     #[serde(default)]
     pub ffmpeg_path: Option<String>,
 
+    /// 弹幕字体目录：浏览器预览与合成（FFmpeg/libass）共用这里的字体。不填时用随包的
+    /// Noto Sans CJK SC 与 Noto Emoji。填目录本身或它下面的 `fonts/` 都可以。
+    #[patch(skip)]
+    #[serde(default)]
+    pub render_fonts_dir: Option<String>,
+
     /// Legacy, ignored: XML to ASS conversion is built into biliup and no
     /// longer runs a DanmakuFactory executable. Still read so that existing
     /// configurations load; a non-empty value only logs a warning, and it is

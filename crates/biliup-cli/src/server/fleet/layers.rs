@@ -2,12 +2,12 @@
 //!
 //! - **可下发的键**只有 [`redact::VISIBLE_CONFIG_KEYS`] 里的那些（D11）。Cookie、密码、主播列表
 //!   这些名单外的键不进控制面的库、不上连接，节点合并时一律保留本机的值。
-//! - **按节点的键**（[`PER_NODE_KEYS`]：池大小、ffmpeg 路径、边录边传目录、最低可用空间、日志级别）
+//! - **按节点的键**（[`PER_NODE_KEYS`]：池大小、ffmpeg 路径、弹幕字体目录、边录边传目录、最低可用空间、日志级别）
 //!   跟机器走，全局配置不管它们；只有写进节点覆盖才下发，否则节点保留自己的值。
 //! - **全局配置**存全部共享键（白名单减按节点的键），`null` 就是「未设置」，同样会下发、覆盖节点。
 //! - **节点覆盖**是 `ConfigPatch` 语义：只存设置了的键，`null` 与空字符串都当没设置；
 //!   `file_size` 与 `segment_time` 可以写 `null` 显式清空。其余字段覆盖不能清空（沿用 WEB-23）。
-//!   与 `ConfigPatch` 不同的是 `ffmpeg_path` / `preview_max_minutes` 也能覆盖（`ConfigPatch` 跳过它们）。
+//!   与 `ConfigPatch` 不同的是 `ffmpeg_path` / `render_fonts_dir` / `preview_max_minutes` 也能覆盖（`ConfigPatch` 跳过它们）。
 //!
 //! 节点收到的是「全局 ⊕ 覆盖」（[`delivered`]），自己再按 [`merge`] 叠到本机配置上：
 //! 下发里有的键用下发的值，没有的用接入时记下的本机原值（`base`），白名单外的键保持本机现值。
@@ -22,6 +22,7 @@ pub const PER_NODE_KEYS: &[&str] = &[
     "pool1_size",
     "pool2_size",
     "ffmpeg_path",
+    "render_fonts_dir",
     "sync_save_dir",
     "min_free_space",
     "loggers_level",

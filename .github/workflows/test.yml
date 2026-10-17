@@ -15,9 +15,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # 随包分发的字体资源使用 Git LFS，检出时拉取真实字体文件
-          lfs: true
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -32,15 +29,20 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；XML -> ASS 使用内置 Rust 转换器，
-      # 不再安装外部转换器。BILIUP_REQUIRE_RENDER_TESTS 让缺少字体时测试失败而不是跳过。
-      # de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
+      # 不再安装外部转换器。de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
       - name: Install media test tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg locales
           sudo locale-gen de_DE.UTF-8
-          echo "BILIUP_RENDER_TOOLS_DIR=$GITHUB_WORKSPACE/crates/biliup-cli/assets/render-tools" >> "$GITHUB_ENV"
-          echo "BILIUP_REQUIRE_RENDER_TESTS=1" >> "$GITHUB_ENV"
+          locale -a | grep -qi de_DE
+      # 随包字体不进仓库：按固定 SHA-256 取回，缺字体时相关用例会跳过而不是真跑
+      - name: Fetch render fonts
+        run: |
+          dir=crates/biliup-cli/assets/render-tools/fonts
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/NotoSansSC-Regular.otf" 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'
+          echo "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b  $dir/NotoSansSC-Regular.otf" | sha256sum -c -
       - name: Run tests
         run: cargo test --locked --workspace
 

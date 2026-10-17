@@ -400,7 +400,7 @@ graph TB
 > [!NOTE]
 > `biliup-cli` 通过 `rust-embed` 内嵌前端产物目录 `out/`，因此在 `cargo build` / `cargo test` 之前必须先执行 `npm run build`，否则编译会因 `out/` 不存在而失败。
 >
-> 字体位于 `crates/biliup-cli/assets/render-tools/fonts/`，通过 Git LFS 存储，作为独立文件随 CLI 发布包、桌面版和 Docker 镜像分发，不内嵌进二进制。克隆后执行 `git lfs install` 和 `git lfs pull` 获取真实字体。自行部署时，将 `render-tools/` 放在可执行文件旁，或设置 `BILIUP_RENDER_TOOLS_DIR` 指向该目录。
+> 字体位于 `crates/biliup-cli/assets/render-tools/fonts/`，作为独立文件随 CLI 发布包、桌面版和 Docker 镜像分发，不内嵌进二进制。中文字体 `NotoSansSC-Regular.otf` 不进仓库：CI 与各发布流程按固定 SHA-256 取回（命令见 `crates/biliup-cli/assets/render-tools/README.txt`），本地跑依赖字体的测试前也执行同一条命令。自行部署时，将 `render-tools/` 放在可执行文件旁，或把配置里的 `render_fonts_dir` 指向该目录。
 
 ### 测试
 

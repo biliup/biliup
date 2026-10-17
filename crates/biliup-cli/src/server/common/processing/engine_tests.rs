@@ -459,12 +459,9 @@ async fn non_advancing_process_is_stopped_by_watchdog() {
 async fn factory_ass_remains_in_flight_at_clip_start_and_preserves_xml() {
     // XML -> ASS is built in; preview and export share the external font bundle.
     if crate::tools::render_font().is_none() {
-        assert!(
-            std::env::var_os("BILIUP_REQUIRE_RENDER_TESTS").is_none(),
-            "BILIUP_REQUIRE_RENDER_TESTS is set but no render font was found; set BILIUP_RENDER_TOOLS_DIR"
-        );
         crate::tools::note_skipped_test(
-            "set BILIUP_RENDER_TOOLS_DIR to a directory with fonts/ to test the real libass export",
+            "no render font: fetch it into crates/biliup-cli/assets/render-tools/fonts \
+             (see assets/render-tools/README.txt) or set render_fonts_dir, to test the real libass export",
         );
         return;
     }

@@ -25,6 +25,9 @@ cookies.json
 .env
 .env.*
 
+# 随包字体在镜像里按固定 SHA-256 取回，不进构建上下文
+crates/biliup-cli/assets/render-tools/fonts/*.otf
+
 # 文档站与桌面端与镜像无关
 docs
 tauri-app

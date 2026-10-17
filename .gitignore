@@ -59,6 +59,8 @@ logs/
 .claude/
 /public/jassub/
 /tauri-app/src-tauri/render-tools/
+# 随包中文字体按固定 SHA-256 获取，见 crates/biliup-cli/assets/render-tools/README.txt
+/crates/biliup-cli/assets/render-tools/fonts/*.otf
 /renders/
 /crates/stream-gears/stream_gears/*.so
 /crates/stream-gears/stream_gears/*.pyd

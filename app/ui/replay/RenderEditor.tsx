@@ -131,7 +131,7 @@ export default function RenderEditor({ state: s, canEdit, canDownload, recording
         : !s.settings.data ? <p>正在读取合成配置…</p> : null}
       {!canEdit && <p className={styles.renderHint}>需要 clip.edit 权限才能修改配置和创建合成任务。</p>}
       <p className={styles.renderHint}>在纯净画面上编辑，导出依次应用遮挡和弹幕。配置中的位置以视频画面百分比计；正偏移表示弹幕延后。原素材会保留。</p>
-      {capabilityReason && <p className={styles.renderError}>{capabilityReason}。安装随包字体或配置 ffmpeg_path / BILIUP_RENDER_TOOLS_DIR 后，<button onClick={() => s.capabilities.mutate()}>重新检查</button>。</p>}
+      {capabilityReason && <p className={styles.renderError}>{capabilityReason}。安装随包字体，或配置 ffmpeg_path / render_fonts_dir 后，<button onClick={() => s.capabilities.mutate()}>重新检查</button>。</p>}
       <div className={styles.renderColumns}>
         <div>
           <fieldset disabled={disabled || busy} className={styles.renderFields}>

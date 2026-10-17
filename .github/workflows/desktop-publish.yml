@@ -21,8 +21,14 @@ jobs:
     runs-on: 'windows-latest'
     steps:
     - uses: actions/checkout@v7
-      with:
-        lfs: true
+    # 随包字体不进仓库：按固定 SHA-256 取回，再由 Tauri 打进安装包
+    - name: Fetch render fonts
+      shell: bash
+      run: |
+        dir=crates/biliup-cli/assets/render-tools/fonts
+        mkdir -p "$dir"
+        curl -fsSL --retry 3 -o "$dir/NotoSansSC-Regular.otf" 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'
+        echo "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b  $dir/NotoSansSC-Regular.otf" | sha256sum -c -
     - uses: actions/setup-node@v7
       with:
         node-version: lts/*

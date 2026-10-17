@@ -232,15 +232,26 @@ function ConfigForm({
             <div className={dashboard.pane}>
               <Developer />
               {withFfmpegPath ? (
-                <Form.Input
-                  field="ffmpeg_path"
-                  label="ffmpeg 路径（ffmpeg_path）"
-                  placeholder="留空则用节点自己的设置"
-                  extraText="这台节点上 ffmpeg 可执行文件的路径，保存后节点立即换用"
-                  style={{ width: '100%' }}
-                  fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
-                  showClear
-                />
+                <>
+                  <Form.Input
+                    field="ffmpeg_path"
+                    label="ffmpeg 路径（ffmpeg_path）"
+                    placeholder="留空则用节点自己的设置"
+                    extraText="这台节点上 ffmpeg 可执行文件的路径，保存后节点立即换用"
+                    style={{ width: '100%' }}
+                    fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
+                    showClear
+                  />
+                  <Form.Input
+                    field="render_fonts_dir"
+                    label="弹幕字体目录（render_fonts_dir）"
+                    placeholder="留空则用随包字体"
+                    extraText="预览与合成共用这里的字体；填目录本身或它下面的 fonts/ 都可以"
+                    style={{ width: '100%' }}
+                    fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
+                    showClear
+                  />
+                </>
               ) : null}
             </div>
           </TabPane>

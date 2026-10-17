@@ -35,116 +35,121 @@ function newStep(cmd: string): PostprocessorFormStep {
 }
 
 function summary(step: PostprocessorFormStep): string {
-  if (step.cmd !== 'render') return step.value ?? ''
+  if (step.cmd !== 'render') return step.value || (step.cmd === 'rm' ? '按保留规则清理' : '尚未填写')
   try {
-    const recipe = JSON.parse(step.value || '{}')
-    const parts = [
-      recipe.danmaku?.enabled ? '压制弹幕' : '',
-      recipe.regions?.length ? `${recipe.regions.length} 个遮挡区域` : '',
-    ].filter(Boolean)
-    return parts.join(' · ') || '未启用画面效果'
-  } catch {
-    return '配置待修正'
-  }
+    const r = JSON.parse(step.value || '{}')
+    return [r.danmaku?.enabled ? '压制弹幕' : '', r.regions?.length ? `${r.regions.length} 个遮挡区域` : '']
+      .filter(Boolean).join(' · ') || '未启用画面效果'
+  } catch { return '配置格式需要修正' }
 }
 
 export function ProcessingFlowEditor({ value = {}, onChange, disabled, id }: Props) {
   const [selection, setSelection] = useState<Selection>({ stage: 'segment_processor', index: null })
-  const [dragging, setDragging] = useState<{ stage: ProcessingStage; index: number } | null>(null)
+  const [dragging, setDragging] = useState<Selection | null>(null)
   const stage = PROCESSING_STAGES.find(s => s.key === selection.stage)!
   const steps = stageSteps(value, stage.key)
   const index = selection.index
   const step = index === null ? undefined : steps[index]
-  const replace = (next: PostprocessorFormStep[]) => onChange?.({ ...value, [stage.key]: next })
+  const replaceSteps = (key: ProcessingStage, next: PostprocessorFormStep[]) => onChange?.({ ...value, [key]: next })
+  const replace = (next: PostprocessorFormStep[]) => replaceSteps(stage.key, next)
   const change = (next: PostprocessorFormStep) => {
     if (index !== null) replace(steps.map((s, i) => i === index ? next : s))
   }
-  const add = (cmd: string) => {
-    replace([...steps, newStep(cmd)])
-    setSelection({ stage: stage.key, index: steps.length })
+  const add = (key: ProcessingStage, cmd: string) => {
+    const list = stageSteps(value, key)
+    replaceSteps(key, [...list, newStep(cmd)])
+    setSelection({ stage: key, index: list.length })
   }
-  const move = (from: number, to: number) => {
+  const move = (key: ProcessingStage, from: number, to: number) => {
     if (from === to) return
-    onChange?.(moveProcessingStep(value, stage.key, from, to))
-    setSelection({ stage: stage.key, index: to })
+    onChange?.(moveProcessingStep(value, key, from, to))
+    setSelection({ stage: key, index: to })
+  }
+  const renderStage = (key: ProcessingStage) => {
+    const s = PROCESSING_STAGES.find(s => s.key === key)!
+    const list = stageSteps(value, key)
+    return <div className={`${styles.stage} ${selection.stage === key ? styles.activeStage : ''}`}>
+      <button type="button" className={styles.stageTitle} onClick={() => setSelection({ stage: key, index: null })}>
+        <span>{s.title}</span><small>{list.length} 步</small>
+      </button>
+      <div className={styles.stepList}>
+        {list.map((item, i) => <button type="button" key={i}
+          aria-label={`${s.title}步骤 ${i + 1}：${COMMANDS[item.cmd || '']?.title ?? item.cmd}`}
+          aria-pressed={selection.stage === key && index === i}
+          draggable={!disabled}
+          onDragStart={e => { e.dataTransfer.setData('text/plain', `${key}:${i}`); e.dataTransfer.effectAllowed = 'move'; setDragging({ stage: key, index: i }) }}
+          onDragEnd={() => setDragging(null)}
+          onDragOver={e => { if (dragging?.stage === key) e.preventDefault() }}
+          onDrop={e => {
+            e.preventDefault()
+            if (!disabled && dragging?.stage === key && dragging.index !== null) move(key, dragging.index, i)
+            setDragging(null)
+          }}
+          className={`${styles.node} ${selection.stage === key && index === i ? styles.selected : ''}`}
+          onClick={() => setSelection({ stage: key, index: i })}>
+          <span className={`${styles.nodeIcon} ${item.cmd === 'rm' ? styles.dangerIcon : ''}`} aria-hidden>{COMMANDS[item.cmd || '']?.icon ?? '?'}</span>
+          <span className={styles.nodeText}><strong>{COMMANDS[item.cmd || '']?.title ?? item.cmd}</strong><small>{summary(item)}</small></span>
+          <span className={styles.nodeNumber}>{i + 1}</span>
+        </button>)}
+        {!list.length && <span className={styles.empty}>无处理步骤</span>}
+      </div>
+      <button type="button" disabled={disabled} className={styles.addNode} aria-label={`在${s.title}添加步骤`}
+        onClick={() => setSelection({ stage: key, index: null })}>＋ 添加步骤</button>
+      {key === 'postprocessor' && value[key] == null && <small className={styles.defaultHint}>使用默认清理</small>}
+    </div>
   }
 
-  return <div id={id} className={styles.flow} aria-label="处理流程">
-    <div className={styles.stages}>
-      {PROCESSING_STAGES.map(s => {
-        const list = stageSteps(value, s.key)
-        return <section key={s.key} className={`${styles.stage} ${selection.stage === s.key ? styles.active : ''}`}>
-          <h4 className={styles.stageTitle}>{s.title}</h4>
-          <ol className={styles.steps}>
-            {list.map((item, i) => <li key={i}>
-              <button type="button"
-                className={`${styles.step} ${selection.stage === s.key && index === i ? styles.selected : ''}`}
-                aria-pressed={selection.stage === s.key && index === i}
-                aria-label={`${s.title} 步骤 ${i + 1}：${COMMANDS[item.cmd || '']?.title ?? item.cmd}`}
-                draggable={!disabled}
-                onDragStart={e => { e.dataTransfer.setData('text/plain', String(i)); e.dataTransfer.effectAllowed = 'move'; setDragging({ stage: s.key, index: i }) }}
-                onDragEnd={() => setDragging(null)}
-                onDragOver={e => { if (dragging?.stage === s.key) e.preventDefault() }}
-                onDrop={e => {
-                  e.preventDefault()
-                  if (!disabled && dragging?.stage === s.key) move(dragging.index, i)
-                  setDragging(null)
-                }}
-                onClick={() => setSelection({ stage: s.key, index: i })}>
-                <span className={`${styles.icon} ${item.cmd === 'rm' ? styles.danger : ''}`} aria-hidden>{COMMANDS[item.cmd || '']?.icon ?? '?'}</span>
-                <strong>{COMMANDS[item.cmd || '']?.title ?? item.cmd}</strong>
-                <span className={styles.summary} title={summary(item)}>{summary(item)}</span>
-              </button>
-            </li>)}
-            {s.key === 'postprocessor' && value[s.key] == null && <li>
-              <span className={styles.defaultStep} title="未配置上传后步骤时，服务按保留规则删除文件">
-                <span className={`${styles.icon} ${styles.danger}`} aria-hidden>−</span><strong>默认清理</strong>
-              </span>
-            </li>}
-          </ol>
-          <button type="button" className={styles.add} disabled={disabled}
-            aria-label={`在${s.title}添加步骤`} onClick={() => setSelection({ stage: s.key, index: null })}>＋</button>
-        </section>
-      })}
+  return <section id={id} className={styles.flow} aria-label="处理流程编排">
+    <header className={styles.heading}><strong>处理流程</strong></header>
+    <div className={styles.canvas}>
+      <div className={styles.graph}>
+        <div className={styles.mainPhase}>{renderStage('preprocessor')}</div>
+        <div className={styles.mainPhase}><div className={styles.builtin}><span aria-hidden>●</span><strong>录制直播</strong><small>持续产生分段</small></div></div>
+        <div className={styles.mainPhase}>{renderStage('segment_processor')}</div>
+        <div className={styles.mainPhase}><div className={styles.builtin}><span aria-hidden>↑</span><strong>上传视频</strong><small>使用所选投稿模板</small></div></div>
+        <div className={styles.mainPhase}>{renderStage('postprocessor')}</div>
+        <div className={styles.downloadBranch}><span className={styles.branchLabel}>整场下载结束时触发</span>{renderStage('downloaded_processor')}</div>
+      </div>
     </div>
     <div className={styles.details}>
+      <header className={styles.detailHeader}>
+        <div><small>{stage.title}{step ? ` / 步骤 ${index! + 1}` : ''}</small>
+          <h3>{step ? COMMANDS[step.cmd || '']?.title ?? step.cmd : '添加处理步骤'}</h3></div>
+        {step && <div className={styles.actions}>
+          <button type="button" aria-label="步骤上移" disabled={disabled || index === 0} onClick={() => move(stage.key, index!, index! - 1)}>↑</button>
+          <button type="button" aria-label="步骤下移" disabled={disabled || index === steps.length - 1} onClick={() => move(stage.key, index!, index! + 1)}>↓</button>
+          <button type="button" disabled={disabled} className={styles.delete} onClick={() => {
+            replace(steps.filter((_, i) => i !== index)); setSelection({ stage: stage.key, index: null })
+          }}>删除</button>
+        </div>}
+      </header>
       {step ? <>
-        <header className={styles.detailHead}>
-          <strong>{stage.title}</strong>
-          <div className={styles.actions}>
-            <button type="button" aria-label="步骤上移" disabled={disabled || index === 0} onClick={() => move(index!, index! - 1)}>↑</button>
-            <button type="button" aria-label="步骤下移" disabled={disabled || index === steps.length - 1} onClick={() => move(index!, index! + 1)}>↓</button>
-            <button type="button" className={styles.delete} disabled={disabled}
-              onClick={() => { replace(steps.filter((_, i) => i !== index)); setSelection({ stage: stage.key, index: null }) }}>删除</button>
-          </div>
-        </header>
-        <label>操作类型<select value={step.cmd} onChange={e => change(newStep(e.target.value))}>
-          {!(stage.commands as readonly string[]).includes(step.cmd || '') && <option value={step.cmd}>{step.cmd}（此阶段不支持）</option>}
-          {stage.commands.map(cmd => <option key={cmd} value={cmd}>{COMMANDS[cmd].title}</option>)}
-        </select></label>
-        {COMMANDS[step.cmd || '']?.hint && <p className={styles.hint}>{COMMANDS[step.cmd || '']?.hint}</p>}
-        {step.cmd === 'run' && <label>Shell 命令
-          <textarea rows={3} value={step.value ?? ''} placeholder="输入要执行的命令" onChange={e => change({ ...step, value: e.target.value })} />
-        </label>}
-        {step.cmd === 'mv' && <label>目标目录
-          <input value={step.value ?? ''} placeholder="backup/" onChange={e => change({ ...step, value: e.target.value })} />
-        </label>}
-        {step.cmd === 'remux' && <label>目标容器
-          <select value={step.value ?? 'mp4'} onChange={e => change({ ...step, value: e.target.value })}>
-            <option value="mp4">MP4</option>
-          </select>
-        </label>}
-        {step.cmd === 'render' && <RecipeFields step={step} onChange={change} />}
+        {COMMANDS[step.cmd || '']?.hint && <p className={styles.help}>{COMMANDS[step.cmd || '']?.hint}</p>}
+        <fieldset disabled={disabled} className={styles.fields}>
+          <label>操作类型<select value={step.cmd} onChange={e => change(newStep(e.target.value))}>
+            {!(stage.commands as readonly string[]).includes(step.cmd || '') && <option value={step.cmd}>{step.cmd}（此阶段不支持）</option>}
+            {stage.commands.map(cmd => <option key={cmd} value={cmd}>{COMMANDS[cmd].title}</option>)}
+          </select></label>
+          {step.cmd === 'run' && <label>Shell 命令
+            <textarea rows={3} value={step.value ?? ''} placeholder="输入要执行的命令" onChange={e => change({ ...step, value: e.target.value })} />
+          </label>}
+          {step.cmd === 'mv' && <label>目标目录
+            <input value={step.value ?? ''} placeholder="backup/" onChange={e => change({ ...step, value: e.target.value })} />
+          </label>}
+          {step.cmd === 'remux' && <label>目标容器
+            <select value={step.value ?? 'mp4'} onChange={e => change({ ...step, value: e.target.value })}><option value="mp4">MP4</option></select>
+          </label>}
+          {step.cmd === 'render' && <RecipeFields step={step} onChange={change} />}
+        </fieldset>
       </> : <>
-        <header className={styles.detailHead}><strong>{stage.title}</strong><span className={styles.count}>{steps.length} 步</span></header>
-        <div className={styles.catalog}>
-          {stage.commands.map(cmd => <button type="button" disabled={disabled} key={cmd} onClick={() => add(cmd)}>
-            <span className={styles.icon} aria-hidden>{COMMANDS[cmd].icon}</span><strong>{COMMANDS[cmd].title}</strong>
-          </button>)}
-        </div>
+        <div className={styles.catalog}>{stage.commands.map(cmd => <button type="button" disabled={disabled} key={cmd} onClick={() => add(stage.key, cmd)}>
+          <span className={styles.nodeIcon} aria-hidden>{COMMANDS[cmd].icon}</span><strong>{COMMANDS[cmd].title}</strong>
+        </button>)}</div>
+        {stage.key === 'segment_processor' && <p className={styles.help}>弹幕需同时开启录制；把弹幕和遮挡放在同一步骤可以只编码一次。</p>}
+        {stage.key === 'postprocessor' && !steps.length && <p className={styles.keepHint}>已保留文件：上传成功后不执行清理。</p>}
       </>}
     </div>
-  </div>
+  </section>
 }
 
 function RecipeFields({ step, onChange }: { step: PostprocessorFormStep; onChange: (step: PostprocessorFormStep) => void }) {
@@ -201,7 +206,7 @@ function RecipeFields({ step, onChange }: { step: PostprocessorFormStep; onChang
         <NumberField title={`区域 ${i + 1} 不透明度 %`} value={(r.opacity ?? 1) * 100} min={0} max={100} change={v => region(i, { opacity: v / 100 })} />
         {r.effect_type === 'solid' && <label>遮挡颜色<input type="color" value={r.color ?? '#000000'} onChange={e => region(i, { color: e.target.value })} /></label>}
       </div>
-      {!!r.intervals?.length && <p className={styles.hint}>含 {r.intervals.length} 个限定时段，在回看编辑器里调整。</p>}
+      {!!r.intervals?.length && <p className={styles.help}>含 {r.intervals.length} 个限定时段，在回看编辑器里调整。</p>}
     </div>)}
     <div className={styles.groupTitle}><strong>视频编码</strong></div>
     <div className={styles.grid}>
