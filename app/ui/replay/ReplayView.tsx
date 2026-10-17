@@ -1,6 +1,7 @@
 'use client'
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import useSWR from 'swr'
 import { Button, Empty, Spin, Switch, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import {
@@ -49,13 +50,16 @@ import {
   segmentAt,
   type SessionDetail,
   segmentEnd,
+  replayHref,
   sessionUrl,
   unavailableIn,
+  timeForOwner,
 } from '@/app/lib/sessions'
 import {
   type Clip,
   type ClipMode,
   clipModeText,
+  canonicalPublishClips,
   createClip,
   exportClip,
   updateClip,
@@ -82,6 +86,8 @@ import DvrPlayer, { type DvrHandle, type DvrPhase } from './DvrPlayer'
 import { DetailBar, OverviewBar, type Selection, type SuggestionBand } from './Timeline'
 import { type PanelTab, PRECISE_TIP, QUICK_TIP, SidePanel } from './SidePanel'
 import { SuggestionsPanel } from './SuggestionsPanel'
+import RenderEditor, { useRenderEditor } from './RenderEditor'
+import RenderEditorOverlay from './RenderEditorOverlay'
 import styles from './replay.module.scss'
 
 /** 细节条的范围：当前位置前后各 5 分钟 */
@@ -118,6 +124,13 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  const element = target instanceof Element ? target : null
+  return !!element?.closest(
+    'button, a[href], input, textarea, select, summary, [role="button"], [role="link"], [role="slider"], [contenteditable="true"]',
+  )
+}
+
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
     <kbd className={styles.kbd} aria-hidden="true">
@@ -145,6 +158,14 @@ export default function ReplayView({
   const canEdit = can('clip.edit')
   const canDownload = can('file.view')
   const canSubmit = can('upload.submit')
+  const renderEditor = useRenderEditor(sessionId, canDownload)
+  const [editorVideo, setEditorVideo] = useState<HTMLVideoElement | null>(null)
+  const [editorSnapshot, setEditorSnapshot] = useState<HTMLCanvasElement | null>(null)
+  const [editorDimensions, setEditorDimensions] = useState<{ width: number; height: number } | null>(null)
+  const receiveEditorVideo = useCallback((video: HTMLVideoElement | null) => {
+    setEditorVideo(video)
+    if (video) setEditorSnapshot(null)
+  }, [])
   const ffmpeg = useFfmpeg()
   const editReason = meLoading
     ? '正在读取权限…'
@@ -177,12 +198,12 @@ export default function ReplayView({
     fetcher,
     { refreshInterval: 10_000 }
   )
-  const { data: clipData, error: clipsError, isLoading: clipsLoading } = useSessionClips(notFound ? null : sessionId)
+  const { data: clipData, error: clipsError, isLoading: clipsLoading, mutate: reloadClips } = useSessionClips(notFound ? null : sessionId)
   const clips = useMemo(() => clipData?.clips ?? [], [clipData])
   // 自动切片没配置过（没填接口也没开）时不出现「候选」，也不请求场次级的接口
   const autoClip = useAutoClip()
   const autoClipOn = autoClip.visible && !notFound
-  const { data: autoClipData } = useSessionAutoClip(autoClipOn ? sessionId : null)
+  const { data: autoClipData } = useSessionAutoClip(autoClipOn && detail && detail.kind !== 'group' ? sessionId : null)
   const {
     data: suggestionData,
     error: suggestionsError,
@@ -202,9 +223,10 @@ export default function ReplayView({
   const readableSegments = segments.filter(isReadable)
   const onlyFmp4 = readableSegments.length > 0 && readableSegments.every(isFragmentedMp4)
 
+  const liveSourceId = detail?.kind === 'group' ? detail.members?.at(-1)?.source_session_id : detail?.id
   const liveStreamer = useMemo(
-    () => (detail ? streamers?.find((s) => s.id === detail.streamer_id && s.session_id === detail.id) : undefined),
-    [detail, streamers]
+    () => (detail ? streamers?.find((s) => s.id === detail.streamer_id && s.session_id === liveSourceId) : undefined),
+    [detail, streamers, liveSourceId]
   )
   const liveReason: string | null = !detail
     ? '正在加载'
@@ -395,10 +417,19 @@ export default function ReplayView({
     if (modeKind !== 'dvr' || phase !== 'paused') return
     const timer = setTimeout(() => {
       const at = dvrRef.current?.position()
-      if (at !== undefined) setMode({ kind: 'detached', at })
+      if (at !== undefined) {
+        // Keep a real raw frame for paused visual editing while releasing the streaming buffer.
+        const video = dvrRef.current?.video()
+        if (renderEditor.open && video?.videoWidth && video.videoHeight) {
+          const snapshot = document.createElement('canvas')
+          snapshot.width = video.videoWidth; snapshot.height = video.videoHeight
+          try { snapshot.getContext('2d')?.drawImage(video, 0, 0); setEditorSnapshot(snapshot) } catch { /* Browser media restrictions: detached state explains resuming. */ }
+        }
+        setMode({ kind: 'detached', at })
+      }
     }, DETACH_AFTER_PAUSE_MS)
     return () => clearTimeout(timer)
-  }, [modeKind, phase])
+  }, [modeKind, phase, renderEditor.open])
 
   // 连不上、连接中途断掉或服务端 5xx 时从停下的地方自动重开几次；服务端明确拒绝（404、415 等）不重试
   const retryable = errorStatus !== null && (errorStatus === 0 || errorStatus >= 500)
@@ -512,6 +543,10 @@ export default function ReplayView({
   const loadedClip = clips.find((c) => c.id === activeClip) ?? null
   const clipChanged = !!loadedClip && (loadedClip.in_ms !== selection.in || loadedClip.out_ms !== selection.out)
   const canSave = canEdit && selection.in !== null && selection.out !== null && !selProblem
+  const ownerRangeProblem = loadedClip && detail && loadedClip.session_id !== sessionId && selection.in !== null && selection.out !== null &&
+    (timeForOwner(detail, loadedClip.session_id, selection.in) === null || timeForOwner(detail, loadedClip.session_id, selection.out) === null)
+      ? '这个切片属于原场次。跨来源的选段请另存为新切片'
+      : null
 
   /** 存为新切片（草稿），或把选段改动写回载入的切片 */
   const saveClip = async (asNew: boolean) => {
@@ -527,6 +562,7 @@ export default function ReplayView({
     setSaving(true)
     try {
       if (!asNew && loadedClip) {
+        if (ownerRangeProblem) { Toast.warning(ownerRangeProblem); return }
         const updated = await updateClip(loadedClip, { in_ms: selection.in, out_ms: selection.out })
         Toast.success({
           content: loadedClip.file_name && !updated.file_name ? '切片范围已更新，之前导出的文件已作废，请重新导出' : '切片范围已更新',
@@ -570,13 +606,14 @@ export default function ReplayView({
     setExporting(mode)
     try {
       if (loadedClip && !clipChanged) {
-        await exportClip(loadedClip, mode)
+        await exportClip(loadedClip, mode, undefined, mode === 'precise' ? renderEditor.recipe.encoding?.quality ?? 'balanced' : undefined)
       } else {
         const created = await createClip(sessionId, {
           in_ms: selection.in,
           out_ms: selection.out,
           marker_id: selectionMarker,
           export: mode,
+          ...(mode === 'precise' ? { quality: renderEditor.recipe.encoding?.quality ?? 'balanced' } : {}),
         })
         setActiveClip(created.id)
       }
@@ -598,6 +635,21 @@ export default function ReplayView({
     return null
   }
   const exportTarget = loadedClip && !clipChanged ? '导出载入的这个切片' : '按入点、出点存成新切片并立即导出'
+
+  const exportComposedSelection = async () => {
+    if (selection.in === null || selection.out === null || !canEdit || selProblem || loadedBusy) return
+    setExporting('precise')
+    try {
+      await renderEditor.save()
+      const clip = loadedClip && !clipChanged && loadedClip.session_id === sessionId ? loadedClip : await createClip(sessionId, {
+        in_ms: selection.in, out_ms: selection.out, marker_id: selectionMarker,
+      })
+      setActiveClip(clip.id)
+      await exportClip(clip, 'precise', renderEditor.recipe)
+      setTab('clips')
+      Toast.info('合成导出已加入队列，完成后可在切片列表下载和投稿')
+    } finally { setExporting(null) }
+  }
 
   const loadClip = (c: Clip) => {
     setActiveClip(c.id)
@@ -667,6 +719,17 @@ export default function ReplayView({
       seek(c.in_ms)
     } else loadClip(c)
   }
+  const publishRequest = useRef(0)
+  const openPublish = async (target: PublishTarget) => {
+    const request = ++publishRequest.current
+    try {
+      // 投稿按真实归属操作。旧切片的封面与缩图需要原场次时间，不能把合并坐标传到原场次接口。
+      const canonical = await canonicalPublishClips(target.clips)
+      if (publishRequest.current === request) setPublishTarget({ ...target, clips: canonical })
+    } catch (e) {
+      if (!(e instanceof ReportedError)) Toast.error({ content: `读取投稿切片失败：${errorText(e)}`, duration: 4 })
+    }
+  }
   const bands: SuggestionBand[] = useMemo(
     () =>
       suggestions
@@ -719,7 +782,7 @@ export default function ReplayView({
   // ---------- 快捷键（都有对应的按钮，快捷键只是加速） ----------
   const keyActions = useRef<(e: KeyboardEvent) => void>(() => {})
   const onKey = (e: KeyboardEvent) => {
-    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return
+    if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target) || isInteractiveTarget(e.target)) return
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key
     const actions: Record<string, () => void> = {
       ' ': togglePlay,
@@ -758,6 +821,7 @@ export default function ReplayView({
       description={
         detail ? (
           <span className={styles.headMeta}>
+            {detail.kind === 'group' ? <Tag size="small" color="blue">合并场次 · {detail.members?.length ?? 0} 场</Tag> : null}
             {detail.recording ? (
               <Tag size="small" color="red">
                 录制中
@@ -898,6 +962,7 @@ export default function ReplayView({
           onPhase={onPhase}
           onEnded={onEnded}
           onMutedChange={setMuted}
+          onVideo={receiveEditorVideo}
         />
         {overlay ? (
           <div className={styles.stageOverlay} data-kind={phase}>
@@ -936,15 +1001,36 @@ export default function ReplayView({
       </span>
     </Tooltip>
   )
+  const coverOwner = publishTarget?.clips[0].session_id
+  const coverMember = detail.members?.find(member => member.source_session_id === coverOwner)
+  const coverOffset = coverMember?.offset_ms ?? 0
+  const currentForPublish = mode && playable && (coverOwner === undefined || timeForOwner(detail, coverOwner, playhead ?? 0) !== null)
+    ? () => current() - coverOffset : null
 
   return (
     <>
       {header}
+      {detail.kind === 'group' ? <details className={styles.groupSources}>
+        <summary>来源场次 · {detail.members?.length ?? 0} 场 · 原始记录保留</summary>
+        <div className={styles.groupMemberList}>
+          {detail.members?.map((member, index) => <div className={styles.groupMember} key={member.source_session_id}>
+            <button type="button" onClick={() => seek(member.offset_ms)} className={styles.sgLink}>{index + 1}. {formatPrecise(member.offset_ms)}</button>
+            <span>{member.title || '无标题'}</span>
+            <span className={styles.rowMeta}>{new Date(member.started_at).toLocaleString()}{member.gap_before_ms > 0 ? ` · 前有 ${formatSpan(member.gap_before_ms)} 停录缺口` : ''}</span>
+            <Link href={replayHref(member.source_session_id)} className={styles.sgLink}>打开原场次 #{member.source_session_id}</Link>
+          </div>)}
+        </div>
+      </details> : detail.group_session_id ? <div className={styles.groupSources}>
+        <Link href={replayHref(detail.group_session_id)} className={styles.sgLink}>进入所属合并场次 #{detail.group_session_id}</Link>
+      </div> : null}
       <QueueBanner paused={publishQueue.data?.paused} canSubmit={canSubmit} page />
       <div className={styles.page} data-compact={compact || undefined}>
         <div className={styles.main}>
           <div className={styles.stage} ref={liveRootRef} data-mode={mode?.kind ?? 'none'}>
             {stage}
+            {canDownload && <RenderEditorOverlay state={renderEditor} video={mode?.kind === 'dvr' ? editorVideo : mode?.kind === 'detached' ? editorSnapshot : null}
+              current={current} segments={segments} canEdit={canEdit} onDimensions={setEditorDimensions}
+              canvasSegmentId={segments.find(segment => isReadable(segment) && (selection.in === null || segmentEnd(segment) > selection.in))?.id} />}
             {live ? <span className={styles.liveBadge}>直播</span> : null}
           </div>
 
@@ -1112,9 +1198,9 @@ export default function ReplayView({
                 </label>
                 <span className={styles.selActions}>
                   {clipChanged ? (
-                    <Tooltip content={canEdit ? '把新的入点、出点写回载入的切片；已导出的文件会作废' : editReason}>
+                    <Tooltip content={canEdit ? ownerRangeProblem ?? '把新的入点、出点写回载入的切片；已导出的文件会作废' : editReason}>
                       <span className={styles.inlineWrap}>
-                        <Button onClick={() => saveClip(false)} disabled={!!selProblem || !canEdit || saving}>
+                        <Button onClick={() => saveClip(false)} disabled={!!selProblem || !!ownerRangeProblem || !canEdit || saving}>
                           更新这个切片
                         </Button>
                       </span>
@@ -1175,6 +1261,10 @@ export default function ReplayView({
               </div>
             </>
           )}
+          {canDownload && <RenderEditor state={renderEditor} canEdit={canEdit} canDownload={canDownload}
+            recording={detail.recording} segments={segments} duration={duration} current={current}
+            dimensions={editorDimensions} onExportClip={exportComposedSelection} exportReason={exportReason('precise')}
+            exporting={exporting !== null} />}
         </div>
         <aside className={styles.aside}>
           <SidePanel
@@ -1193,13 +1283,14 @@ export default function ReplayView({
             editReason={editReason}
             canDownload={canDownload}
             ffmpeg={ffmpeg}
+            quality={renderEditor.recipe.encoding?.quality ?? 'balanced'}
             onSeekMarker={pickMarker}
             onSelectMarker={selectFromMarker}
             onLoadClip={loadClip}
             compact={compact}
             canSubmit={canSubmit}
             jobs={publishQueue.byClip}
-            onPublish={setPublishTarget}
+            onPublish={openPublish}
             suggestions={
               autoClipOn
                 ? {
@@ -1213,6 +1304,7 @@ export default function ReplayView({
                         job={autoClipData?.job ?? null}
                         availability={autoClip}
                         recording={detail.recording}
+                        sources={detail.kind === 'group' ? detail.members?.map((member, index, members) => ({ session_id: member.source_session_id, recording: detail.recording && index === members.length - 1 })) : undefined}
                         activeSuggestion={activeSuggestion}
                         selection={selection}
                         canEdit={canEdit}
@@ -1232,8 +1324,8 @@ export default function ReplayView({
       </div>
       <PublishDrawer
         target={publishTarget}
-        onClose={() => setPublishTarget(null)}
-        currentMs={mode && playable ? current : null}
+        onClose={() => { ++publishRequest.current; setPublishTarget(null); void reloadClips() }}
+        currentMs={currentForPublish}
       />
     </>
   )

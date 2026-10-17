@@ -10,7 +10,8 @@
   },
   "license": "MIT",
   "files": [
-    "bin"
+    "bin",
+    "THIRD-PARTY-NOTICES.txt"
   ],
   "os": [
     "darwin"

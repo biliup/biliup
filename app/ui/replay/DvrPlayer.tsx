@@ -1,7 +1,7 @@
 'use client'
 import React, { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import mpegts from 'mpegts.js'
-import { describeMpegtsError, destroyMpegts, type LoaderHooks, mpegtsLiveConfig } from '@/app/ui/Player'
+import { attachMpegtsDiagnostics, describeMpegtsError, destroyMpegts, type LoaderHooks, mpegtsLiveConfig } from '@/app/ui/Player'
 import { mediaUrl } from '@/app/lib/sessions'
 import styles from './replay.module.scss'
 
@@ -16,6 +16,7 @@ export interface DvrHandle {
   position(): number
   paused(): boolean
   setMuted(muted: boolean): void
+  video(): HTMLVideoElement | null
 }
 
 /** 缓冲区判断的容差（秒）：MSE 的 buffered 边界和帧时间有几十毫秒的出入 */
@@ -59,8 +60,9 @@ const DvrPlayer = forwardRef<
     onPhase: (phase: DvrPhase, message?: string, status?: number) => void
     onEnded: (lastMs: number) => void
     onMutedChange: (muted: boolean) => void
+    onVideo?: (video: HTMLVideoElement | null) => void
   }
->(function DvrPlayer({ sessionId, from, type, muted, onPosition, onPhase, onEnded, onMutedChange }, ref) {
+>(function DvrPlayer({ sessionId, from, type, muted, onPosition, onPhase, onEnded, onMutedChange, onVideo }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const callbacks = useRef({ onPosition, onPhase, onEnded, onMutedChange })
   useEffect(() => {
@@ -105,7 +107,13 @@ const DvrPlayer = forwardRef<
     setMuted(value: boolean) {
       if (videoRef.current) videoRef.current.muted = value
     },
+    video() { return videoRef.current },
   }))
+
+  useEffect(() => {
+    onVideo?.(videoRef.current)
+    return () => onVideo?.(null)
+  }, [onVideo])
 
   useEffect(() => {
     const video = videoRef.current
@@ -117,6 +125,7 @@ const DvrPlayer = forwardRef<
     video.muted = initialMuted.current
     let serverError = false
     let disposed = false
+    let terminal = false
     const cb = () => callbacks.current
 
     if (!mpegts.isSupported()) {
@@ -133,6 +142,7 @@ const DvrPlayer = forwardRef<
           return
         }
         serverError = true
+        terminal = true
         const status = res.status
         res
           .clone()
@@ -149,7 +159,8 @@ const DvrPlayer = forwardRef<
       { ...mpegtsLiveConfig('relay'), ...hooks } as mpegts.Config
     )
     player.on(mpegts.Events.ERROR, (errorType: string, detail: string, info?: { code?: number; msg?: string }) => {
-      if (serverError || disposed) return
+      if (serverError || disposed || terminal) return
+      terminal = true
       const network = errorType === mpegts.ErrorTypes.NETWORK_ERROR
       cb().onPhase('error', describeMpegtsError(errorType, detail, info), network ? 0 : undefined)
     })
@@ -169,15 +180,23 @@ const DvrPlayer = forwardRef<
       alignToFrom()
       cb().onPosition(positionOf(video, t, from))
     }
-    const onPlaying = () => cb().onPhase('playing')
+    const onPlaying = () => { if (!terminal) cb().onPhase('playing') }
     const onPause = () => {
-      if (!video.ended) cb().onPhase('paused')
+      if (!terminal && !video.ended) cb().onPhase('paused')
     }
-    const onWaiting = () => cb().onPhase('waiting')
+    const onWaiting = () => { if (!terminal) cb().onPhase('waiting') }
     const onEnded = () => {
+      if (disposed || serverError || terminal) return
+      terminal = true
       cb().onPhase('ended')
       cb().onEnded(positionOf(video, t, from))
     }
+    const detachDiagnostics = attachMpegtsDiagnostics(video, player, onEnded, (message) => {
+      if (!disposed && !serverError && !terminal) {
+        terminal = true
+        cb().onPhase('error', message)
+      }
+    })
     const onVolume = () => cb().onMutedChange(video.muted)
     video.addEventListener('progress', onProgress)
     video.addEventListener('loadeddata', onProgress)
@@ -206,6 +225,7 @@ const DvrPlayer = forwardRef<
 
     return () => {
       disposed = true
+      detachDiagnostics()
       video.removeEventListener('progress', onProgress)
       video.removeEventListener('loadeddata', onProgress)
       video.removeEventListener('timeupdate', onTime)

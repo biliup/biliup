@@ -75,3 +75,57 @@ async fn danmaku_density_is_read_from_the_xml() {
     .await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn group_density_aligns_legacy_xml_against_each_real_source_origin() {
+    let f = fixture(None).await;
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let first = add_session(&f.pool).await;
+    let second = add_session(&f.pool).await;
+    sqlx::query("UPDATE stream_sessions SET streamer_id=1 WHERE id IN (?,?)")
+        .bind(first)
+        .bind(second)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE stream_sessions SET started_at=700000,ended_at=1300000 WHERE id=?")
+        .bind(second)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    for (id, name, unix) in [(first, "first", 2), (second, "second", 701)] {
+        let video = f._dir.path().join(format!("{name}.flv"));
+        std::fs::write(
+            video.with_extension("xml"),
+            format!("<i><d p=\"1.0,1,25,0,{unix},0,0,0\">comment</d></i>"),
+        )
+        .unwrap();
+        sqlx::query("UPDATE segments SET path=? WHERE session_id=?")
+            .bind(video.to_string_lossy().into_owned())
+            .bind(id)
+            .execute(&f.pool)
+            .await
+            .unwrap();
+    }
+    let group = crate::server::workbench::session_groups::create(&f.pool, &[first, second])
+        .await
+        .unwrap();
+    let body = json_of(
+        call(
+            &f.app,
+            Some(&f.viewer),
+            "GET",
+            &format!("/v1/sessions/{group}/danmaku-density"),
+            None,
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(body["density"]["total"], 2);
+    assert_eq!(body["density"]["counts"][0], 1);
+    assert_eq!(body["density"]["counts"][70], 1);
+}

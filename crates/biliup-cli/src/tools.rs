@@ -3,17 +3,26 @@
 //! ffmpeg is looked up in this order: the `ffmpeg_path` setting, then the one
 //! the embedding host ships (the desktop app passes the ffmpeg bundled in its
 //! installer through `ServeOptions::ffmpeg`), then `ffmpeg` on `PATH`.
+//!
+//! Danmaku XML -> ASS conversion uses the native Rust converter linked into
+//! biliup (`crates/danmaku-factory`). The render tools directory only provides
+//! the fonts shared by the browser preview and FFmpeg. It is looked up in the
+//! same order as ffmpeg: the `render_fonts_dir` setting, the one the embedding
+//! host ships (the desktop app passes the `render-tools` in its installer),
+//! then `render-tools` beside the executable.
 
 use serde::Serialize;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, PoisonError, RwLock};
+use std::sync::{Mutex, Once, PoisonError, RwLock};
 use std::time::Duration;
 
 pub use biliup::tools::{command, std_command};
 
 const FFMPEG: &str = "ffmpeg";
+const RENDER_TOOLS_DIR: &str = "render-tools";
+const RENDER_FONT: &str = "NotoSansSC-Regular.otf";
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -30,11 +39,15 @@ pub enum FfmpegSource {
 struct Locations {
     configured: Option<PathBuf>,
     bundled: Option<PathBuf>,
+    configured_fonts: Option<PathBuf>,
+    bundled_render_tools: Option<PathBuf>,
 }
 
 static LOCATIONS: RwLock<Locations> = RwLock::new(Locations {
     configured: None,
     bundled: None,
+    configured_fonts: None,
+    bundled_render_tools: None,
 });
 
 /// Successful `ffmpeg -version` results, keyed by the program that was run.
@@ -52,12 +65,162 @@ pub fn set_configured_ffmpeg(path: Option<&str>) {
         .configured = path;
 }
 
+/// Applies the `render_fonts_dir` setting; blank means unset. The path may be
+/// the font directory itself or a `render-tools` directory that holds it.
+pub fn set_configured_render_fonts(dir: Option<&str>) {
+    let dir = dir
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from);
+    LOCATIONS
+        .write()
+        .unwrap_or_else(PoisonError::into_inner)
+        .configured_fonts = dir;
+}
+
 /// Sets the ffmpeg shipped with the embedding host.
 pub fn set_bundled_ffmpeg(path: Option<PathBuf>) {
     LOCATIONS
         .write()
         .unwrap_or_else(PoisonError::into_inner)
         .bundled = path;
+}
+
+/// The legacy `danmaku_factory_path` setting is accepted but ignored: the
+/// converter is built in, and a failing built-in conversion is reported
+/// rather than silently handed to an external program.
+pub fn warn_legacy_danmaku_factory_path(path: Option<&str>) {
+    static WARNED: Once = Once::new();
+    if path.is_some_and(|p| !p.trim().is_empty()) {
+        WARNED.call_once(|| {
+            tracing::warn!(
+                "danmaku_factory_path is no longer used: XML to ASS conversion is built in; \
+                 remove the setting"
+            );
+        });
+    }
+}
+
+/// Sets the directory shipped by an embedding host. It contains a `fonts/`
+/// directory.
+pub fn set_bundled_render_tools(path: Option<PathBuf>) {
+    LOCATIONS
+        .write()
+        .unwrap_or_else(PoisonError::into_inner)
+        .bundled_render_tools = path;
+}
+
+fn bundled_render_tools() -> Option<PathBuf> {
+    let locations = LOCATIONS.read().unwrap_or_else(PoisonError::into_inner);
+    if let Some(path) = &locations.bundled_render_tools {
+        return Some(path.clone());
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.parent().map(|parent| parent.join(RENDER_TOOLS_DIR)))
+}
+
+fn render_font_files_in(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.is_file()
+                && matches!(
+                    path.extension()
+                        .and_then(|e| e.to_str())
+                        .map(str::to_ascii_lowercase)
+                        .as_deref(),
+                    Some("ttf" | "otf" | "ttc")
+                )
+        })
+        .collect();
+    files.sort_by_key(|path| {
+        let name = path.file_name().and_then(OsStr::to_str).unwrap_or_default();
+        if name == RENDER_FONT { 0 } else { 1 }
+    });
+    files
+}
+
+/// External fonts shared by FFmpeg/libass and the browser preview: the
+/// `render_fonts_dir` setting, the `fonts/` of the directory shipped with the
+/// host or beside the executable, then (in development) the checked-out
+/// resource directory.
+pub fn render_fonts_dir() -> Option<PathBuf> {
+    let configured = LOCATIONS
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .configured_fonts
+        .clone();
+    if let Some(dir) = configured {
+        return Some(configured_fonts_dir(&dir));
+    }
+    bundled_render_tools()
+        .map(|dir| dir.join("fonts"))
+        .filter(|path| !render_font_files_in(path).is_empty())
+        .or_else(development_fonts_dir)
+}
+
+/// The setting may name the font directory itself or a `render-tools`
+/// directory that holds `fonts/`.
+fn configured_fonts_dir(dir: &Path) -> PathBuf {
+    let nested = dir.join("fonts");
+    if render_font_files_in(dir).is_empty() && !render_font_files_in(&nested).is_empty() {
+        nested
+    } else {
+        dir.to_path_buf()
+    }
+}
+
+/// Development builds read the resource directory of the checkout. The fonts
+/// are fetched into it rather than committed, so this is only a fallback and a
+/// missing directory simply means the test that needs a font is skipped.
+fn development_fonts_dir() -> Option<PathBuf> {
+    #[cfg(debug_assertions)]
+    {
+        let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/render-tools/fonts");
+        (!render_font_files_in(&fonts).is_empty()).then_some(fonts)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
+fn render_font_in(dir: &Path) -> Option<PathBuf> {
+    let preferred = dir.join(RENDER_FONT);
+    if preferred.is_file() {
+        return Some(preferred);
+    }
+    render_font_files_in(dir)
+        .into_iter()
+        .find(|path| path.file_name().and_then(OsStr::to_str) != Some("NotoEmoji.ttf"))
+}
+
+pub fn render_font() -> Option<PathBuf> {
+    render_font_in(&render_fonts_dir()?)
+}
+
+pub fn render_emoji_font() -> Option<PathBuf> {
+    let font = render_fonts_dir()?.join("NotoEmoji.ttf");
+    font.is_file().then_some(font)
+}
+
+pub fn render_font_path() -> Result<PathBuf, String> {
+    render_font()
+        .ok_or_else(|| "找不到弹幕字体：请在配置里填写 render_fonts_dir，或安装随包字体".into())
+}
+
+/// Font files exposed to the browser font endpoint. Paths are always under
+/// the shared bundled font directory.
+pub fn render_font_files() -> Vec<PathBuf> {
+    let Some(dir) = render_fonts_dir() else {
+        return Vec::new();
+    };
+    render_font_files_in(&dir)
 }
 
 /// The ffmpeg program to run and where it came from.
@@ -283,6 +446,35 @@ fn find_in_path(program: &str, path_var: Option<&OsStr>) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_font_inventory_prefers_cjk_and_does_not_treat_emoji_as_cjk() {
+        let fonts = tempfile::tempdir().unwrap();
+        std::fs::write(fonts.path().join("NotoEmoji.ttf"), b"emoji").unwrap();
+        assert_eq!(render_font_in(fonts.path()), None);
+        let custom = fonts.path().join("custom.ttf");
+        std::fs::write(&custom, b"custom").unwrap();
+        assert_eq!(render_font_in(fonts.path()), Some(custom));
+        let preferred = fonts.path().join(RENDER_FONT);
+        std::fs::write(&preferred, b"cjk").unwrap();
+        assert_eq!(render_font_in(fonts.path()), Some(preferred.clone()));
+        assert_eq!(render_font_files_in(fonts.path())[0], preferred);
+    }
+
+    #[test]
+    fn the_fonts_setting_takes_the_directory_or_a_render_tools_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("fonts");
+        std::fs::create_dir_all(&nested).unwrap();
+        let font = nested.join("custom.ttf");
+        std::fs::write(&font, b"custom").unwrap();
+        assert_eq!(configured_fonts_dir(root.path()), nested);
+        assert_eq!(configured_fonts_dir(&nested), nested);
+        // A path with no font below it is kept: the failure then names the setting.
+        let empty = root.path().join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(configured_fonts_dir(&empty), empty);
+    }
 
     const BTBN_WIN64: &str = "ffmpeg version n8.1.2-50-g1a748fe2cd-20260831 Copyright (c) 2000-2026 the FFmpeg developers\n\
 built with gcc 15.2.0 (crosstool-NG 1.28.0.21_3c5cc17)\n\

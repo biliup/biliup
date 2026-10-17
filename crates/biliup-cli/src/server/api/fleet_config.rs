@@ -10,7 +10,9 @@
 use crate::server::api::access::Caller;
 use crate::server::config::Config;
 use crate::server::errors::{ApiError, report_to_response};
-use crate::server::fleet::config_store::{self, ConfigVersion, KEEP_VERSIONS};
+use crate::server::fleet::config_store::{
+    self, ConditionalGlobal, ConditionalOverride, ConfigVersion, KEEP_VERSIONS,
+};
 use crate::server::fleet::controller::Controller;
 use crate::server::fleet::layers::{self, LayerError, Object, PER_NODE_KEYS};
 use crate::server::fleet::{now_ms, store};
@@ -36,6 +38,55 @@ fn not_found() -> Response {
 
 fn parse_body(body: &[u8]) -> Result<Object, String> {
     serde_json::from_slice(body).map_err(|e| format!("请求体必须是 JSON 对象：{e}"))
+}
+
+fn conditional_global(body: Object) -> Result<(Option<i64>, Object), String> {
+    // Bare configuration objects stay accepted for older clients, but remain
+    // unconditional; the current editor sends this versioned envelope.
+    let Some(expected) = body.get("expected_version") else {
+        return Ok((None, body));
+    };
+    let expected = expected
+        .as_i64()
+        .filter(|version| *version >= 0)
+        .ok_or_else(|| "expected_version 必须是非负整数".to_owned())?;
+    let config = body
+        .get("config")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "条件配置请求必须包含 JSON 对象 config".to_owned())?;
+    Ok((Some(expected), config))
+}
+
+fn conditional_override(body: Object) -> Result<(Option<(Object, i64)>, Object), String> {
+    // Keep the historical bare override contract for older clients. New
+    // editors send both the override snapshot and global version they read.
+    let Some(expected) = body.get("expected_override") else {
+        return Ok((None, body));
+    };
+    let expected = expected
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "expected_override 必须是 JSON 对象".to_owned())?;
+    let patch = body
+        .get("override")
+        .and_then(Value::as_object)
+        .cloned()
+        .ok_or_else(|| "条件节点配置请求必须包含 JSON 对象 override".to_owned())?;
+    let expected_global_version = body
+        .get("expected_global_version")
+        .and_then(Value::as_i64)
+        .filter(|version| *version >= 0)
+        .ok_or_else(|| "expected_global_version 必须是非负整数".to_owned())?;
+    Ok((Some((expected, expected_global_version)), patch))
+}
+
+fn conflict(message: &str, current: Value) -> Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({ "errors": [], "message": message, "current": current })),
+    )
+        .into_response()
 }
 
 fn layer_error(error: LayerError) -> Response {
@@ -82,6 +133,10 @@ pub async fn put_configuration(
         Ok(body) => body,
         Err(message) => return bad_request(message),
     };
+    let (expected_version, body) = match conditional_global(body) {
+        Ok(body) => body,
+        Err(message) => return bad_request(message),
+    };
     let normalized = match layers::normalize_global(body) {
         Ok(normalized) => normalized,
         Err(e) => return layer_error(e),
@@ -92,10 +147,35 @@ pub async fn put_configuration(
         Err(e) => return report_to_response(e),
     };
     // 内容没变就不记新版本、不重新下发
-    let (saved, changed) = match latest {
-        Some(latest) if latest.config == normalized.config => (latest, false),
-        _ => {
-            match config_store::save_config(
+    let (saved, changed) = match expected_version {
+        Some(expected) => {
+            match config_store::save_config_if_version(
+                pool,
+                expected,
+                &normalized.config,
+                caller.subject.user_id,
+                now_ms(),
+            )
+            .await
+            {
+                Ok(ConditionalGlobal::Saved(saved)) => (saved, true),
+                Ok(ConditionalGlobal::Unchanged(saved)) => (saved, false),
+                Ok(ConditionalGlobal::Conflict) => {
+                    let current = match config_store::latest_config(pool).await {
+                        Ok(current) => current,
+                        Err(e) => return report_to_response(e),
+                    };
+                    return conflict(
+                        "全局配置已被其他管理员更新，请刷新后合并草稿再保存",
+                        global_view(current),
+                    );
+                }
+                Err(e) => return report_to_response(e),
+            }
+        }
+        None => match latest {
+            Some(latest) if latest.config == normalized.config => (latest, false),
+            _ => match config_store::save_config(
                 pool,
                 &normalized.config,
                 caller.subject.user_id,
@@ -105,8 +185,8 @@ pub async fn put_configuration(
             {
                 Ok(saved) => (saved, true),
                 Err(e) => return report_to_response(e),
-            }
-        }
+            },
+        },
     };
     if changed {
         controller.push_all().await;
@@ -169,14 +249,48 @@ pub async fn put_node_config(
         Ok(body) => body,
         Err(message) => return bad_request(message),
     };
+    let (expected_override, body) = match conditional_override(body) {
+        Ok(body) => body,
+        Err(message) => return bad_request(message),
+    };
     let normalized = match layers::normalize_override(body) {
         Ok(normalized) => normalized,
         Err(e) => return layer_error(e),
     };
-    match config_store::set_node_override(controller.pool(), id, &normalized.config).await {
-        Ok(true) => {}
-        Ok(false) => return not_found(),
-        Err(e) => return report_to_response(e),
+    match expected_override {
+        Some((expected, expected_global_version)) => {
+            match config_store::set_node_override_if_current(
+                controller.pool(),
+                id,
+                &expected,
+                expected_global_version,
+                &normalized.config,
+            )
+            .await
+            {
+                Ok(ConditionalOverride::Saved) => {}
+                Ok(ConditionalOverride::NotFound) => return not_found(),
+                Ok(ConditionalOverride::Conflict) => {
+                    let current = match config_store::node_override(controller.pool(), id).await {
+                        Ok(Some(current)) => current,
+                        Ok(None) => return not_found(),
+                        Err(e) => return report_to_response(e),
+                    };
+                    return conflict(
+                        "节点覆盖已被其他管理员更新，请刷新后合并草稿再保存",
+                        json!({ "node_id": id, "override": current }),
+                    );
+                }
+                Err(e) => return report_to_response(e),
+            }
+        }
+        None => {
+            match config_store::set_node_override(controller.pool(), id, &normalized.config).await {
+                Ok(true) => {}
+                Ok(false) => return not_found(),
+                Err(e) => return report_to_response(e),
+            }
+        }
     }
     controller.push(id).await;
     Json(json!({

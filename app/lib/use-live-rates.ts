@@ -57,6 +57,8 @@ class RateRing {
   private readonly bps = new Float64Array(RING_CAPACITY)
   private start = 0
   private len = 0
+  /** 房间最后出现在服务端帧里的时刻；补空样本不延长保留期 */
+  lastSeen = 0
 
   push(ts: number, value: number | null) {
     const i = (this.start + this.len) % RING_CAPACITY
@@ -64,12 +66,6 @@ class RateRing {
     this.bps[i] = value === null ? NaN : value
     if (this.len < RING_CAPACITY) this.len += 1
     else this.start = (this.start + 1) % RING_CAPACITY
-  }
-
-  /** 最后一次写入的时刻（毫秒）；空缓冲为 0 */
-  lastTs(): number {
-    if (this.len === 0) return 0
-    return this.ts[(this.start + this.len - 1) % RING_CAPACITY]
   }
 
   /** 读出 `[sinceMs, +∞)` 的样本 */
@@ -149,12 +145,13 @@ export function ingestFrames(frames: LiveRateFrame[], receivedAt = Date.now()) {
       ring = new RateRing()
       rings.set(f.id, ring)
     }
+    ring.lastSeen = receivedAt
     ring.push(receivedAt, f.bytes_per_sec)
     latest.set(f.id, f.bytes_per_sec)
   }
   for (const [id, ring] of rings) {
     if (latest.has(id)) continue
-    if (receivedAt - ring.lastTs() > LIVE_RATES_HISTORY_MS) {
+    if (receivedAt - ring.lastSeen > LIVE_RATES_HISTORY_MS) {
       rings.delete(id)
     } else {
       ring.push(receivedAt, null)
@@ -262,6 +259,7 @@ async function pollOnce() {
     const res = await fetch(`${API_BASE}/v1/live-rates?session=${previewSessionId()}`, {
       cache: 'no-store',
       signal: controller.signal,
+      credentials: 'include',
     })
     // 与其它接口同一套处理：会话失效（401）跳登录页，失去权限（403）刷新权限点、页面随之收起
     await handleResponse(res)

@@ -46,6 +46,7 @@ impl SegmentState {
 pub fn container_of(path: &Path) -> Option<&'static str> {
     let name = path.file_name()?.to_str()?.to_ascii_lowercase();
     let name = name.strip_suffix(".part").unwrap_or(&name);
+    let name = name.strip_suffix(".unmasked").unwrap_or(name);
     match name.rsplit_once('.')?.1 {
         "flv" => Some("flv"),
         "ts" => Some("ts"),
@@ -58,6 +59,7 @@ pub fn container_of(path: &Path) -> Option<&'static str> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRow {
     pub id: i64,
+    pub kind: String,
     pub streamer_id: Option<i64>,
     pub title: String,
     /// 时间轴 0 点的 Unix 毫秒；还没有分段时为 `None`。
@@ -112,11 +114,39 @@ pub struct OpenedSession {
     pub resumed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteSessionOutcome {
+    Deleted,
+    NotFound,
+    NotEnded,
+    Busy,
+    GroupMember,
+}
+
 /// 开播检测到时取这一场的行：同一主播最近一场已经结束、且 `now_ms - ended_at <= merge_window_ms`
 /// 就复用那一行（`merge_window_ms <= 0` 表示从不合并），否则插一行新的。
 ///
 /// 复用时不改标题和开播时间（直播历史里仍显示第一次开播），`ended_at` 由这次录制的
 /// [`begin_recording`] 清空。最近一场还没结束（另一个任务在录，或上次崩溃还没收尾）时不去抢它。
+/// 取下一个场次 id：在持久序列和现有最大 id 之间取大者再加一。
+///
+/// 直接写进 `stream_sessions` 的行（导入、测试夹具、旧代码）也算数，所以删掉最大的场次之后它的 id
+/// 不会被复用 —— id 同时是录像与合成产物的文件命名空间。原先靠 `reserve_stream_session_id` 触发器把
+/// 序列顶上去，现在由分配本身保证。
+pub async fn allocate_session_id<'e, E>(executor: E) -> sqlx::Result<i64>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query_scalar(
+        "INSERT INTO stream_session_ids(id)
+         SELECT MAX(COALESCE((SELECT MAX(id) FROM stream_session_ids), 0),
+                    COALESCE((SELECT MAX(id) FROM stream_sessions), 0)) + 1
+         RETURNING id",
+    )
+    .fetch_one(executor)
+    .await
+}
+
 pub async fn open_session(
     pool: &ConnectionPool,
     streamer_id: i64,
@@ -126,7 +156,9 @@ pub async fn open_session(
 ) -> sqlx::Result<OpenedSession> {
     let mut tx = pool.begin().await?;
     let previous: Option<(i64, Option<i64>)> = sqlx::query_as(
-        "SELECT id, ended_at FROM stream_sessions WHERE streamer_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT id,ended_at FROM stream_sessions s WHERE streamer_id=? AND kind='source'
+         AND NOT EXISTS(SELECT 1 FROM session_group_members m WHERE m.source_session_id=s.id)
+         ORDER BY id DESC LIMIT 1",
     )
     .bind(streamer_id)
     .fetch_optional(&mut *tx)
@@ -138,23 +170,133 @@ pub async fn open_session(
     let opened = match reusable {
         Some(id) => OpenedSession { id, resumed: true },
         None => {
-            let id = sqlx::query_scalar(
-                "INSERT INTO stream_sessions (name, url, title, date, live_cover_path, streamer_id)
-                 VALUES (?, ?, ?, ?, ?, ?) RETURNING id",
+            // Session rows may be deleted while their media remains on disk. Allocate IDs from a
+            // durable AUTOINCREMENT sequence so a later scene cannot reuse an old file namespace.
+            let id = allocate_session_id(&mut *tx).await?;
+            sqlx::query(
+                "INSERT INTO stream_sessions (id, name, url, title, date, live_cover_path, streamer_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
+            .bind(id)
             .bind(&info.name)
             .bind(&info.url)
             .bind(&info.title)
             .bind(info.date)
             .bind(&info.live_cover_path)
             .bind(streamer_id)
-            .fetch_one(&mut *tx)
+            .execute(&mut *tx)
             .await?;
             OpenedSession { id, resumed: false }
         }
     };
     tx.commit().await?;
     Ok(opened)
+}
+
+/// 删除已结束场次的数据库记录及其工作台关联数据；原始录像、切片和合成文件保留。
+/// 活跃后台任务返回 `Busy`，避免任务完成时写回已删除的场次。
+pub async fn delete_session(pool: &ConnectionPool, id: i64) -> sqlx::Result<DeleteSessionOutcome> {
+    let _lifecycle = super::retention::MEDIA_LIFECYCLE.read().await;
+    if sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM session_group_members WHERE source_session_id=?)",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?
+    {
+        return Ok(DeleteSessionOutcome::GroupMember);
+    }
+    if session(pool, id)
+        .await?
+        .is_some_and(|s| s.ended_at.is_none())
+    {
+        return Ok(DeleteSessionOutcome::NotEnded);
+    }
+    let mut tx = pool.begin().await?;
+    let ended_at: Option<Option<i64>> =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT ended_at FROM stream_sessions WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    match ended_at {
+        None => {
+            tx.rollback().await?;
+            return Ok(DeleteSessionOutcome::NotFound);
+        }
+        Some(None) => {}
+        Some(Some(_)) => {}
+    }
+
+    let busy: bool = sqlx::query_scalar(
+        "SELECT
+            EXISTS (SELECT 1 FROM clips WHERE session_id = ? AND
+                    (state = 'exporting' OR submit_state IS NOT NULL))
+            OR EXISTS (SELECT 1 FROM auto_clip_jobs WHERE session_id = ? AND state IN ('queued','running'))
+            OR EXISTS (SELECT 1 FROM render_jobs WHERE session_id = ? AND state IN ('queued','running'))",
+    )
+    .bind(id)
+    .bind(id)
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if busy {
+        tx.rollback().await?;
+        return Ok(DeleteSessionOutcome::Busy);
+    }
+
+    // These join tables use ON DELETE RESTRICT so explicitly remove them before the cascaded
+    // render jobs, source segments, and assets are deleted.
+    sqlx::query(
+        "DELETE FROM render_sources WHERE job_id IN
+         (SELECT id FROM render_jobs WHERE session_id = ?)",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM render_job_assets WHERE job_id IN
+         (SELECT id FROM render_jobs WHERE session_id = ?)",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("DELETE FROM render_recipe_assets WHERE session_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+    let sources: Vec<i64> = sqlx::query_scalar(
+        "SELECT source_session_id FROM session_group_members WHERE group_session_id=?",
+    )
+    .bind(id)
+    .fetch_all(&mut *tx)
+    .await?;
+    // 删掉的 id 不再复用：它的文件命名空间可能还被录像或合成产物引用着。直接写进
+    // stream_sessions 的 id 没经过序列，这里按需补一次预留。
+    sqlx::query(
+        "INSERT INTO stream_session_ids(id)
+         SELECT ? + 1 WHERE ? >= COALESCE((SELECT MAX(id) FROM stream_session_ids), 0)",
+    )
+    .bind(id)
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
+    let deleted = sqlx::query("DELETE FROM stream_sessions WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected()
+        > 0;
+    if !deleted {
+        tx.rollback().await?;
+        return Ok(DeleteSessionOutcome::NotEnded);
+    }
+    for source in sources {
+        super::retention::refresh_pin_counts(&mut *tx, source).await?;
+    }
+    tx.commit().await?;
+    Ok(DeleteSessionOutcome::Deleted)
 }
 
 /// [`begin_recording`] 的结果。
@@ -171,11 +313,12 @@ pub struct RecordingStart {
 /// 下载任务开始录这一场：读出已有的时间轴，并清空 `ended_at`（标记为正在录）。
 pub async fn begin_recording(pool: &ConnectionPool, id: i64) -> sqlx::Result<RecordingStart> {
     let mut tx = pool.begin().await?;
-    let row: Option<(Option<i64>, Option<i64>)> =
-        sqlx::query_as("SELECT started_at, ended_at FROM stream_sessions WHERE id = ?")
-            .bind(id)
-            .fetch_optional(&mut *tx)
-            .await?;
+    let row: Option<(Option<i64>, Option<i64>)> = sqlx::query_as(
+        "SELECT started_at, ended_at FROM stream_sessions WHERE id = ? AND kind='source'",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await?;
     let Some((started_at, ended_at)) = row else {
         return Ok(RecordingStart::default());
     };
@@ -185,7 +328,7 @@ pub async fn begin_recording(pool: &ConnectionPool, id: i64) -> sqlx::Result<Rec
     .bind(id)
     .fetch_one(&mut *tx)
     .await?;
-    sqlx::query("UPDATE stream_sessions SET ended_at = NULL WHERE id = ?")
+    sqlx::query("UPDATE stream_sessions SET ended_at = NULL WHERE id = ? AND kind='source'")
         .bind(id)
         .execute(&mut *tx)
         .await?;
@@ -200,7 +343,7 @@ pub async fn begin_recording(pool: &ConnectionPool, id: i64) -> sqlx::Result<Rec
 /// 定下时间轴 0 点（已经有了就不动），返回实际的 0 点。
 pub async fn set_started_at(pool: &ConnectionPool, id: i64, at: i64) -> sqlx::Result<i64> {
     sqlx::query_scalar(
-        "UPDATE stream_sessions SET started_at = COALESCE(started_at, ?) WHERE id = ?
+        "UPDATE stream_sessions SET started_at = COALESCE(started_at, ?) WHERE id = ? AND kind='source'
          RETURNING started_at",
     )
     .bind(at)
@@ -211,7 +354,7 @@ pub async fn set_started_at(pool: &ConnectionPool, id: i64, at: i64) -> sqlx::Re
 }
 
 pub async fn close_session(pool: &ConnectionPool, id: i64, ended_at: i64) -> sqlx::Result<()> {
-    sqlx::query("UPDATE stream_sessions SET ended_at = ? WHERE id = ?")
+    sqlx::query("UPDATE stream_sessions SET ended_at = ? WHERE id = ? AND kind='source'")
         .bind(ended_at)
         .bind(id)
         .execute(pool)
@@ -220,16 +363,21 @@ pub async fn close_session(pool: &ConnectionPool, id: i64, ended_at: i64) -> sql
 }
 
 pub async fn session(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<SessionRow>> {
-    sqlx::query_as::<_, (i64, Option<i64>, String, Option<i64>, Option<i64>)>(
-        "SELECT id, streamer_id, title, started_at, ended_at FROM stream_sessions WHERE id = ?",
+    sqlx::query_as::<_, (i64, String, Option<i64>, String, Option<i64>, Option<i64>)>(
+        "SELECT id,kind,streamer_id,title,started_at,
+         CASE WHEN kind='group' THEN (SELECT s.ended_at FROM session_group_members m
+           JOIN stream_sessions s ON s.id=m.source_session_id WHERE m.group_session_id=stream_sessions.id
+           ORDER BY m.ordinal DESC LIMIT 1) ELSE ended_at END
+         FROM stream_sessions WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(pool)
     .await
     .map(|row| {
         row.map(
-            |(id, streamer_id, title, started_at, ended_at)| SessionRow {
+            |(id, kind, streamer_id, title, started_at, ended_at)| SessionRow {
                 id,
+                kind,
                 streamer_id,
                 title,
                 started_at,
@@ -246,7 +394,7 @@ pub async fn unended_sessions(pool: &ConnectionPool) -> sqlx::Result<Vec<(i64, O
         "SELECT s.id, (SELECT g.path FROM segments g
                        WHERE g.session_id = s.id AND g.state IN ('recording', 'finished')
                        ORDER BY g.start_ms DESC, g.id DESC LIMIT 1)
-         FROM stream_sessions s WHERE s.ended_at IS NULL",
+         FROM stream_sessions s WHERE s.ended_at IS NULL AND s.kind='source'",
     )
     .fetch_all(pool)
     .await
@@ -260,7 +408,7 @@ pub async fn close_unended_sessions(pool: &ConnectionPool) -> sqlx::Result<u64> 
              started_at + (SELECT MAX(COALESCE(end_ms, start_ms)) FROM segments
                            WHERE session_id = stream_sessions.id),
              {DATE_MS}, 0)
-         WHERE ended_at IS NULL"
+         WHERE ended_at IS NULL AND kind='source'"
     );
     Ok(sqlx::query(&sql).execute(pool).await?.rows_affected())
 }
@@ -274,8 +422,8 @@ pub async fn insert_segment(
     gap_before_ms: i64,
 ) -> sqlx::Result<i64> {
     let id = sqlx::query_scalar(
-        "INSERT INTO segments (session_id, path, container, state, start_ms, gap_before_ms)
-         VALUES (?, ?, ?, 'recording', ?, ?) RETURNING id",
+        "INSERT INTO segments(session_id,path,container,state,start_ms,gap_before_ms)
+         SELECT ?1,?2,?3,'recording',?4,?5 FROM stream_sessions WHERE id=?1 AND kind='source' RETURNING id",
     )
     .bind(session_id)
     .bind(path)
@@ -385,6 +533,7 @@ pub(crate) const READABLE_STATES: &str = "('recording', 'finished', 'pending_del
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct SessionListRow {
     pub id: i64,
+    pub kind: String,
     pub streamer_id: Option<i64>,
     pub streamer_name: String,
     pub title: String,
@@ -399,19 +548,22 @@ pub struct SessionListRow {
 
 fn session_list_select() -> String {
     format!(
-        "SELECT s.id, s.streamer_id, s.name AS streamer_name, s.title,
-            s.started_at, s.ended_at, s.retain_until,
+        "SELECT s.id,s.kind,s.streamer_id,s.name AS streamer_name,s.title,
+            s.started_at,CASE WHEN s.kind='group' THEN
+             (SELECT tail.ended_at FROM session_group_members t JOIN stream_sessions tail ON tail.id=t.source_session_id
+              WHERE t.group_session_id=s.id ORDER BY t.ordinal DESC LIMIT 1) ELSE s.ended_at END AS ended_at,s.retain_until,
             COUNT(g.id) AS segment_count,
             COALESCE(SUM(g.bytes), 0) AS bytes,
-            COALESCE(MAX(COALESCE(g.end_ms, g.start_ms)), 0) AS end_ms
+            COALESCE(MAX(COALESCE(g.end_ms,g.start_ms)+COALESCE(m.offset_ms,0)),0) AS end_ms
          FROM stream_sessions s
-         LEFT JOIN segments g ON g.session_id = s.id AND g.state IN {READABLE_STATES}"
+         LEFT JOIN session_group_members m ON m.group_session_id=s.id
+         LEFT JOIN segments g ON g.session_id=COALESCE(m.source_session_id,s.id) AND g.state IN {READABLE_STATES}"
     )
 }
 
 /// 只列有时间轴的场次：老版本留下的行、开播后还没写出分段的行都没有分段，不是切片工作台的场次。
 const HAS_TIMELINE: &str = "s.started_at IS NOT NULL
-     AND EXISTS (SELECT 1 FROM segments x WHERE x.session_id = s.id)";
+     AND (s.kind='group' OR EXISTS (SELECT 1 FROM segments x WHERE x.session_id = s.id))";
 
 /// 场次列表，新的在前；`streamer_id` 为 `None` 时不过滤。返回 `(这一页, 总数)`。
 pub async fn list_sessions(
@@ -420,15 +572,30 @@ pub async fn list_sessions(
     limit: i64,
     offset: i64,
 ) -> sqlx::Result<(Vec<SessionListRow>, i64)> {
+    list_sessions_including_sources(pool, streamer_id, limit, offset, false).await
+}
+
+pub async fn list_sessions_including_sources(
+    pool: &ConnectionPool,
+    streamer_id: Option<i64>,
+    limit: i64,
+    offset: i64,
+    include_sources: bool,
+) -> sqlx::Result<(Vec<SessionListRow>, i64)> {
+    let visible = if include_sources {
+        "1=1"
+    } else {
+        "NOT EXISTS(SELECT 1 FROM session_group_members members WHERE members.source_session_id=s.id)"
+    };
     let total: i64 = sqlx::query_scalar(&format!(
         "SELECT COUNT(*) FROM stream_sessions s
-         WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE}"
+         WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible}"
     ))
     .bind(streamer_id)
     .fetch_one(pool)
     .await?;
     let sql = format!(
-        "{} WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE}
+        "{} WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible}
          GROUP BY s.id ORDER BY s.id DESC LIMIT ?2 OFFSET ?3",
         session_list_select()
     );
@@ -465,6 +632,47 @@ pub async fn segment(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<Segm
 
 /// 场次的全部分段，按时间轴排序。
 pub async fn session_segments(
+    pool: &ConnectionPool,
+    session_id: i64,
+) -> sqlx::Result<Vec<SegmentRow>> {
+    let mut result = Vec::new();
+    let mut previous_end: Option<i64> = None;
+    for member in super::session_groups::timeline(pool, session_id).await? {
+        let mut segments = source_segments(pool, member.source_session_id).await?;
+        for (i, segment) in segments.iter_mut().enumerate() {
+            segment.start_ms += member.offset_ms;
+            segment.end_ms = segment.end_ms.map(|t| t + member.offset_ms);
+            if i == 0 && member.source_session_id != session_id {
+                if let Some(end) = previous_end {
+                    segment.gap_before_ms = (segment.start_ms - end).max(0);
+                }
+            }
+        }
+        previous_end = segments.last().map(|s| s.end_ms.unwrap_or(s.start_ms));
+        result.extend(segments);
+    }
+    result.sort_by_key(|s| (s.start_ms, s.id));
+    Ok(result)
+}
+
+pub async fn timeline_segment(
+    pool: &ConnectionPool,
+    session_id: i64,
+    id: i64,
+) -> sqlx::Result<Option<SegmentRow>> {
+    let Some(mut row) = segment(pool, id).await? else {
+        return Ok(None);
+    };
+    let Some(offset) = super::session_groups::view_offset(pool, session_id, row.session_id).await?
+    else {
+        return Ok(None);
+    };
+    row.start_ms += offset;
+    row.end_ms = row.end_ms.map(|t| t + offset);
+    Ok(Some(row))
+}
+
+pub async fn source_segments(
     pool: &ConnectionPool,
     session_id: i64,
 ) -> sqlx::Result<Vec<SegmentRow>> {

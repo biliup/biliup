@@ -143,6 +143,7 @@ docker compose up -d
 - **回看**：「剪辑台」（`/workbench`）→「直播场次」→ 回看页（`/replay`），直播中也能回看已落盘部分。
 - **剪**：快速剪按关键帧切、不转码，入点取不晚于它的最近关键帧，保持源格式（FLV / TS / fMP4）；精确剪由 FFmpeg 重新编码为 MP4。**没装 FFmpeg 时只能快速剪、不能下载 MP4。**
 - **发布**：切片按投稿模板投稿，可多选集中发布，一律按转载。队列单并发，B 站返回 601（上传太频繁）时暂停，等手动「继续」。
+- **录后合成**：需要本地保留纯净录像和弹幕 XML 时，在直播间「配置覆写」里使用本地素材录制预设；下播后可在回看工作台拖拽缩放图片遮挡、调整弹幕并一次导出合成 MP4。详见[录后弹幕合成与本地素材工作流](https://biliup.github.io/biliup/docs/tutorials/post-recording-render/)。
 - **保留**：被标记、被切片引用的分段推迟到引用释放后再删。「空间配置」可设 `retention_hours`（投稿后保留小时数，默认 0）与 `min_free_space`（磁盘水位，默认关；低于阈值时先删未引用的最旧分段，不够再删被引用的，正在录的不删）。
 
 ## 🖧 多机录制 Fleet
@@ -322,12 +323,11 @@ graph TB
         AUTOCLIP[自动切片<br/>biliup-cli auto_clip<br/>OpenAI 兼容客户端]
         CORE[核心库<br/>biliup<br/>直播解析 / 下载 / 上传]
         DANMAKU[弹幕库<br/>danmaku<br/>多平台协议 / XML输出]
-        GEARS[Python绑定<br/>stream-gears<br/>python -m biliup 入口]
+        GEARS[Python绑定<br/>stream-gears<br/>上传 / 下载 / 登录 API]
     end
 
     subgraph "🐍 Python包"
-        PYENTRY[最小入口<br/>biliup.__main__<br/>调用 stream_gears.main_loop]
-        PYUPLOAD[投稿库<br/>bili_webup / bili_webup_sync<br/>供外部项目调用]
+        PYAPI[stream_gears<br/>上传 / 直链下载 / 登录]
     end
 
     subgraph "🗄️ 数据层"
@@ -349,9 +349,8 @@ graph TB
     AUTOCLIP --> LLM
     CORE --> STREAMS & BILI
     DANMAKU --> STREAMS & FILES
-    GEARS --> CLI
-    PYENTRY --> GEARS
-    PYUPLOAD --> BILI
+    GEARS --> CORE
+    PYAPI --> GEARS
 
     classDef ui fill:#e1f5fe
     classDef rust fill:#f3e5f5
@@ -360,7 +359,7 @@ graph TB
     classDef ext fill:#ffebee
     class UI ui
     class CLI,FLEET,AUTOCLIP,CORE,DANMAKU,GEARS rust
-    class PYENTRY,PYUPLOAD py
+    class PYAPI py
     class DB,FLEETDB,FILES data
     class BILI,STREAMS,LLM ext
 ```
@@ -372,12 +371,11 @@ graph TB
 | `crates/biliup` | 核心库：直播解析、下载器、B 站投稿与凭据管理 |
 | `crates/biliup-cli` | 命令行与 Web 服务：REST API、WebUI 托管、录制调度 |
 | `crates/biliup-cli/src/server/{api,fleet,auto_clip}` | 分别是 Web API 路由、Fleet 控制面与节点、自动切片 |
-| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–14） |
-| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–4） |
+| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–15） |
+| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–7） |
 | `crates/danmaku` | 弹幕客户端：多平台协议解析与 XML 输出 |
-| `crates/stream-gears` | PyO3 绑定，暴露给 `python -m biliup` |
+| `crates/stream-gears` | PyO3 基础 API 绑定，不依赖服务端 |
 | `app`、`public` | Next.js WebUI 源码；`npm run build` 产物输出到 `out/` 并由后端内嵌 |
-| `crates/stream-gears/biliup` | 精简 Python 包：最小入口与可供外部调用的投稿库 |
 | `tauri-app` | Windows 桌面端（Tauri，进程内运行 biliup 服务） |
 
 </details>
@@ -391,9 +389,7 @@ graph TB
 
 ### Python
 
-1. 安装依赖 `maturin develop -m crates/stream-gears/Cargo.toml`
-2. `npm run build` 
-3. 启动 Biliup：`python3 -m biliup`
+安装绑定：`maturin develop -m crates/stream-gears/Cargo.toml`，然后 `import stream_gears` 使用上传、直链下载和登录 API。Python 包不含录制服务、前端、字体或命令行入口；运行完整应用请使用原生 CLI、桌面版或 Docker。构建 Python 包无需构建前端。
 
 ### Rust-cli
 
@@ -403,6 +399,8 @@ graph TB
 
 > [!NOTE]
 > `biliup-cli` 通过 `rust-embed` 内嵌前端产物目录 `out/`，因此在 `cargo build` / `cargo test` 之前必须先执行 `npm run build`，否则编译会因 `out/` 不存在而失败。
+>
+> 字体位于 `crates/biliup-cli/assets/render-tools/fonts/`，作为独立文件随 CLI 发布包、桌面版和 Docker 镜像分发，不内嵌进二进制。字体文件一律不进仓库：CI 与各发布流程按固定 commit 与 SHA-256 取回（两个文件的命令见 `crates/biliup-cli/assets/render-tools/README.txt`），本地跑依赖字体的测试前也执行同一组命令。自行部署时，将 `render-tools/` 放在可执行文件旁，或把配置里的 `render_fonts_dir` 指向该目录。
 
 ### 测试
 

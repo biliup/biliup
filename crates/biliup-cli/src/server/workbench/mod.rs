@@ -16,8 +16,11 @@ pub mod index;
 pub mod live;
 pub mod markers;
 pub mod recorder;
+pub mod renders;
 pub mod retention;
+pub mod session_groups;
 pub mod store;
+pub use crate::server::common::processing::transcode;
 
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use index::Container;

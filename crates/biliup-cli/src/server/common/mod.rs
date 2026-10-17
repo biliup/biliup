@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 pub mod download;
+pub mod processing;
 /// 直播间封面 / 主播头像的抓取与落盘
 pub mod live_image;
 /// 录制准入策略
 pub mod recording_policy;
+pub mod room_metadata;
 /// 边录边传（ffmpeg stdout → 流式投稿）
 pub mod sync;
 /// 控制台首页的系统状态采样
@@ -16,6 +18,7 @@ pub mod throughput;
 /// 录制时间范围判定
 pub mod timerange;
 pub mod upload;
+pub mod upload_observation;
 /// 通用工具函数
 pub mod util;
 

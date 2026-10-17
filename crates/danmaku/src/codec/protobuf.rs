@@ -89,6 +89,9 @@ impl<'a> ProtoReader<'a> {
             let byte = self.data[self.pos];
             self.pos += 1;
 
+            if shift == 63 && byte > 1 {
+                return None;
+            }
             result |= ((byte & 0x7F) as u64) << shift;
 
             if byte & 0x80 == 0 {
@@ -107,19 +110,24 @@ impl<'a> ProtoReader<'a> {
     /// Read a field tag (field number + wire type).
     pub fn read_tag(&mut self) -> Option<(u32, WireType)> {
         let v = self.read_varint()?;
-        let field_num = (v >> 3) as u32;
+        let field_num = u32::try_from(v >> 3).ok()?;
+        if field_num == 0 || field_num > 0x1fff_ffff {
+            return None;
+        }
         let wire_type = WireType::from_u8((v & 0x07) as u8)?;
         Some((field_num, wire_type))
     }
 
     /// Read bytes (length-delimited).
     pub fn read_bytes(&mut self) -> Option<Vec<u8>> {
-        let len = self.read_varint()? as usize;
-        if self.pos + len > self.data.len() {
+        // 长度来自对端，可达 u64::MAX：`pos + len` 必须做溢出检查
+        let len = usize::try_from(self.read_varint()?).ok()?;
+        let end = self.pos.checked_add(len)?;
+        if end > self.data.len() {
             return None;
         }
-        let bytes = self.data[self.pos..self.pos + len].to_vec();
-        self.pos += len;
+        let bytes = self.data[self.pos..end].to_vec();
+        self.pos = end;
         Some(bytes)
     }
 
@@ -184,12 +192,14 @@ impl<'a> ProtoReader<'a> {
                 }
             }
             WireType::LengthDelimited => {
-                if let Some(len) = self.read_varint() {
-                    let len = len as usize;
-                    if self.pos + len <= self.data.len() {
-                        self.pos += len;
-                        return true;
-                    }
+                if let Some(end) = self
+                    .read_varint()
+                    .and_then(|len| usize::try_from(len).ok())
+                    .and_then(|len| self.pos.checked_add(len))
+                    && end <= self.data.len()
+                {
+                    self.pos = end;
+                    return true;
                 }
                 false
             }
@@ -230,6 +240,42 @@ impl<'a> ProtoReader<'a> {
         }
 
         fields
+    }
+
+    /// Parse all fields and fail if the message contains a truncated or
+    /// otherwise invalid field.  `parse_all` is intentionally lenient for a
+    /// few legacy callers, but protocol decoders should use this variant so a
+    /// damaged frame is not mistaken for an empty/partial message.
+    pub fn parse_all_strict(&mut self) -> Option<HashMap<u32, Vec<ProtoValue>>> {
+        let mut fields: HashMap<u32, Vec<ProtoValue>> = HashMap::new();
+
+        while !self.is_empty() {
+            let (field_num, wire_type) = self.read_tag()?;
+            if field_num == 0 {
+                return None;
+            }
+
+            let value = match wire_type {
+                WireType::Varint => ProtoValue::Varint(self.read_varint()?),
+                WireType::Fixed64 => ProtoValue::Fixed64(self.read_fixed64()?),
+                WireType::Fixed32 => ProtoValue::Fixed32(self.read_fixed32()?),
+                WireType::LengthDelimited => {
+                    let bytes = self.read_bytes()?;
+                    if let Ok(s) = String::from_utf8(bytes.clone())
+                        && s.chars()
+                            .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
+                    {
+                        ProtoValue::String(s)
+                    } else {
+                        ProtoValue::Bytes(bytes)
+                    }
+                }
+            };
+
+            fields.entry(field_num).or_default().push(value);
+        }
+
+        Some(fields)
     }
 }
 
@@ -322,5 +368,41 @@ mod tests {
 
         assert!(fields.contains_key(&1));
         assert_eq!(fields[&1][0].as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn strict_parser_rejects_truncated_length_delimited_field() {
+        let mut reader = ProtoReader::new(&[0x0a, 0x02, b'x']);
+        assert!(reader.parse_all_strict().is_none());
+    }
+
+    #[test]
+    fn overflowing_varints_and_field_tags_are_rejected() {
+        let mut data = vec![0xff; 9];
+        data.push(2);
+        assert!(ProtoReader::new(&data).read_varint().is_none());
+        data[9] = 1;
+        assert_eq!(ProtoReader::new(&data).read_varint(), Some(u64::MAX));
+
+        let mut writer = ProtoWriter::new();
+        writer.write_varint((u32::MAX as u64 + 2) << 3);
+        writer.write_varint(1);
+        assert!(
+            ProtoReader::new(writer.get_buffer())
+                .parse_all_strict()
+                .is_none()
+        );
+    }
+
+    /// 长度前缀为 u64::MAX（10 字节 varint）：修复前 `pos + len` 溢出（debug）
+    /// 或回绕后以 end < start 切片（release），两种构建都会 panic。
+    #[test]
+    fn huge_length_prefix_is_rejected_without_panicking() {
+        let data = [
+            0x0a, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01,
+        ];
+        assert!(ProtoReader::new(&data).parse_all_strict().is_none());
+        assert!(ProtoReader::new(&data[1..]).read_bytes().is_none());
+        assert!(!ProtoReader::new(&data[1..]).skip_field(WireType::LengthDelimited));
     }
 }

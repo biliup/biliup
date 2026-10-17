@@ -1,5 +1,4 @@
-//! Shared entry point for the native `biliup` binary and the Python
-//! `stream_gears.main_loop` wrapper, so both parse, log and dispatch the same way.
+//! Native CLI entry point: argument parsing, logging and command dispatch.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -89,7 +88,7 @@ pub fn init_tracing(cli: &Cli) -> Logging {
 }
 
 /// Installs the global subscriber on the first call. Later calls in the same
-/// process (e.g. `main_loop` called twice) keep the existing layers and only
+/// process keep the existing layers and only
 /// swap the filter.
 pub fn init_tracing_with(filter: &str, log_file: bool) -> Logging {
     if let Some(handle) = LOG_HANDLE.get() {
@@ -232,6 +231,7 @@ pub async fn dispatch(cli: Cli, log_handle: LogHandle) -> AppResult<()> {
                 listener: None,
                 shutdown: None,
                 ffmpeg: None,
+                render_tools_dir: None,
                 fleet: FleetOptions {
                     controller,
                     relay_listen,
@@ -287,6 +287,9 @@ pub struct ServeOptions {
     /// An ffmpeg shipped with the host (the desktop app passes the one in its
     /// installer). Used when the `ffmpeg_path` setting is empty, before `PATH`.
     pub ffmpeg: Option<PathBuf>,
+    /// Render tools directory shipped with the host: the `fonts/` shared by
+    /// the danmaku preview and FFmpeg. (Danmaku conversion is built in.)
+    pub render_tools_dir: Option<PathBuf>,
     /// Fleet controller options (`--controller`, `--relay-listen`, `--relay-url`).
     /// The default runs standalone, or as a node when `data/node.json` exists.
     pub fleet: FleetOptions,
@@ -303,6 +306,7 @@ pub async fn serve(opts: ServeOptions) -> AppResult<()> {
             .attach_with(|| format!("could not switch to work dir {}", dir.display()))?;
     }
     crate::tools::set_bundled_ffmpeg(opts.ffmpeg);
+    crate::tools::set_bundled_render_tools(opts.render_tools_dir);
     let listener = match opts.listener {
         Some(listener) => listener
             .set_nonblocking(true)

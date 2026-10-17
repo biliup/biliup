@@ -12,7 +12,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::clips::MAX_CLIPS_PER_SESSION;
 use crate::server::workbench::clips::export::ClipExports;
 use crate::server::workbench::recorder::now_ms;
-use crate::server::workbench::store;
+use crate::server::workbench::{session_groups, store};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -63,7 +63,26 @@ pub async fn list_suggestions(
     Path(id): Path<i64>,
 ) -> Result<Json<SuggestionList>, Rejection> {
     require_session(&pool, id).await?;
-    let suggestions = suggestions::list(&pool, id).await.map_err(internal)?;
+    let mut owners = session_groups::timeline(&pool, id)
+        .await
+        .map_err(internal)?;
+    if !owners.iter().any(|m| m.source_session_id == id) {
+        owners.push(session_groups::TimelineMember {
+            source_session_id: id,
+            offset_ms: 0,
+        });
+    }
+    let mut suggestions = Vec::new();
+    for owner in owners {
+        suggestions.extend(
+            suggestions::list(&pool, owner.source_session_id)
+                .await
+                .map_err(internal)?
+                .into_iter()
+                .map(|s| s.in_view(id, owner.offset_ms)),
+        );
+    }
+    suggestions.sort_by_key(|s| (s.in_ms, s.id));
     Ok(Json(SuggestionList { suggestions }))
 }
 
@@ -95,8 +114,12 @@ pub async fn accept_suggestion(
     let current = suggestions::get(&pool, sid)
         .await
         .map_err(internal)?
-        .filter(|s| s.session_id == id)
         .ok_or_else(not_found)?;
+    let offset = session_groups::view_offset(&pool, id, current.session_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(not_found)?;
+    let current = current.in_view(id, offset);
     let title = body
         .title
         .as_deref()
@@ -146,11 +169,19 @@ pub async fn dismiss_suggestion(
     Path((id, sid)): Path<(i64, i64)>,
 ) -> Result<Json<Suggestion>, Rejection> {
     require_session(&pool, id).await?;
-    match suggestions::dismiss(&pool, id, sid, now_ms())
+    let current = suggestions::get(&pool, sid)
+        .await
+        .map_err(internal)?
+        .ok_or_else(not_found)?;
+    let offset = session_groups::view_offset(&pool, id, current.session_id)
+        .await
+        .map_err(internal)?
+        .ok_or_else(not_found)?;
+    match suggestions::dismiss(&pool, current.session_id, sid, now_ms())
         .await
         .map_err(internal)?
     {
-        DismissOutcome::Dismissed(suggestion) => Ok(Json(*suggestion)),
+        DismissOutcome::Dismissed(suggestion) => Ok(Json(suggestion.in_view(id, offset))),
         DismissOutcome::NotFound => Err(not_found()),
         DismissOutcome::NotPending(suggestion) => Err(not_pending(&suggestion)),
     }

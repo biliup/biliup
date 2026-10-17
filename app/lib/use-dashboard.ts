@@ -2,7 +2,6 @@
 import { useSyncExternalStore } from 'react'
 import useSWR from 'swr'
 import { API_BASE, fetcher, LiveStreamerEntity, StreamerInfo, FileList, LiveUrlInfo, PreviewTransport } from './api-streamer'
-import { platformName } from './status'
 
 /**
  * 控制台数据聚合 hook —— 纯前端实现,零后端改动。
@@ -22,13 +21,14 @@ export const LIVE_STATUS = 'Working'
 export const PAUSE_STATUS = 'Pause'
 
 export interface DashboardEvent {
-  /** Unix 秒 */
+  id: string | number
+  /** Unix 毫秒 */
   ts: number
-  kind: 'start' | 'file'
-  /** 主文本 */
+  kind: string
   text: string
-  /** 右侧小标签(平台 / 大小) */
-  sub?: string
+  sub: string | null
+  session_id: number | null
+  entity_id: string | number | null
 }
 
 export function formatSize(bytes: number): string {
@@ -98,7 +98,7 @@ export function formatRate(bytesPerSec: number | null | undefined): string | nul
 }
 
 /**
- * 录制中直播间的封面 / 头像同源代理地址。
+ * 直播间的封面 / 头像同源代理地址。封面在未开播时也尝试本地缓存与平台房间信息。
  * 带上原始地址的短哈希作查询参数:封面换了(新一场直播)浏览器就不会沿用旧缓存。
  */
 export function liveImageUrl(
@@ -106,7 +106,7 @@ export function liveImageUrl(
   kind: 'cover' | 'avatar',
   sourceUrl: string | null | undefined
 ): string | null {
-  if (!sourceUrl) return null
+  if (!sourceUrl) return kind === 'cover' ? `${API_BASE}/v1/streamers/${id}/cover?v=cached` : null
   let h = 5381
   for (let i = 0; i < sourceUrl.length; i++) h = ((h << 5) + h + sourceUrl.charCodeAt(i)) | 0
   return `${API_BASE}/v1/streamers/${id}/${kind}?v=${(h >>> 0).toString(36)}`
@@ -190,9 +190,6 @@ export function previewDisabledReason(streamer: LiveStreamerEntity): string | nu
   return null
 }
 
-const DAY = 86400
-const EVENT_WINDOW = DAY // 事件流只展示最近 24h
-
 /**
  * 轮询间隔。/v1/streamer-info 是全表查询、/v1/videos 每次扫一遍工作目录，
  * 长期运行的实例上这两个接口不便宜，所以只有主播状态走较快的节奏。
@@ -220,6 +217,11 @@ export function useDashboard() {
     '/v1/status',
     fetcher,
     { refreshInterval: SLOW_REFRESH_MS }
+  )
+  const { data: activity, error: e5 } = useSWR<{ events: DashboardEvent[] }>(
+    '/v1/activity-events?limit=12',
+    fetcher,
+    { refreshInterval: SLOW_REFRESH_MS, revalidateOnFocus: true }
   )
 
   // ---- KPI:主播与任务状态 ----
@@ -250,34 +252,6 @@ export function useDashboard() {
     if (!cur || i.date > cur.date) infoByUrl.set(i.url, i)
   }
 
-  // ---- 事件流:前端合成,零后端改动 ----
-  // 1) 开始录制:streamer-info 里 24h 内的直播开始时间(按 url 合并取最新)
-  // 2) 文件生成:/v1/videos 里 24h 内生成的录制文件
-  const events: DashboardEvent[] = []
-  const now = Math.floor(Date.now() / 1000)
-  for (const i of Array.from(infoByUrl.values())) {
-    if (i.date && now - i.date <= EVENT_WINDOW) {
-      events.push({
-        ts: i.date,
-        kind: 'start',
-        text: `${i.name || i.url} 开始录制`,
-        sub: i.url ? platformName(i.url) : undefined,
-      })
-    }
-  }
-  for (const v of videos ?? []) {
-    const t = v.updateTime || 0
-    if (t && now - t <= EVENT_WINDOW) {
-      events.push({
-        ts: t,
-        kind: 'file',
-        text: v.name || '录制文件',
-        sub: formatSize(v.size || 0),
-      })
-    }
-  }
-  events.sort((a, b) => b.ts - a.ts)
-
   // ---- 错误与可达性 ----
   // 只有四个接口全部失败才判定为「后端不可达」；单个接口失败（尤其是序列化整份配置的
   // /v1/status）只降级对应区块，不能把主播卡片整页替换成断连提示。
@@ -305,7 +279,8 @@ export function useDashboard() {
     totalSize,
     todaySize,
     infoByUrl,
-    events: events.slice(0, 12),
+    events: activity?.events ?? [],
+    activityFailed: !!e5,
     // 状态
     loading,
     connectError,

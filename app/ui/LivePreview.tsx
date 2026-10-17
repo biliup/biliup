@@ -97,6 +97,10 @@ export function LivePreviewPlayer({
   /** 当前连接开始播放的时刻；0 表示还没播起来 */
   const playingSinceRef = useRef(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const clearReconnectTimer = useCallback(() => {
+    if (timerRef.current !== null) clearTimeout(timerRef.current)
+    timerRef.current = null
+  }, [])
   const transport = usePreviewTransport()
   const directCapable = !!streamer.preview?.direct?.capable
   const directReason = streamer.preview?.direct?.reason ?? null
@@ -158,13 +162,14 @@ export function LivePreviewPlayer({
       stallsRef.current = [...stallsRef.current.filter((t) => now - t < ESCALATE_WINDOW_MS), now]
       if (info.seconds < ESCALATE_STALL_S && stallsRef.current.length < 2) return
       stallsRef.current = []
+      clearReconnectTimer()
       setEscalated(levelKey)
       setReconnectKey(null)
       setPhase('connecting')
       setMessage(null)
       setNonce((n) => n + 1)
     },
-    [level, levelKey]
+    [level, levelKey, clearReconnectTimer]
   )
 
   // 中转流挂在本页面的租约上：码率连接是心跳（播放期间一直连着），播放器销毁时释放这条连接
@@ -186,15 +191,11 @@ export function LivePreviewPlayer({
   // 出错 / 断开时把封面垫在说明文字后面，而不是一块黑
   const cover = liveImageUrl(streamer.id, 'cover', streamer.live_cover_url)
 
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current)
-    },
-    []
-  )
+  useEffect(() => clearReconnectTimer, [clearReconnectTimer])
 
   const scheduleReconnect = useCallback(
     (why: string) => {
+      if (timerRef.current !== null) return
       // 会话被收回时后端会截断预览流，表现为一次断流：刷新权限点，失效就跳登录页，降级就收起页面
       revalidateMe()
       if (playingSinceRef.current && Date.now() - playingSinceRef.current >= RESET_ATTEMPTS_AFTER_MS) {
@@ -211,6 +212,7 @@ export function LivePreviewPlayer({
       setPhase('reconnecting')
       setMessage(`${why}，${RECONNECT_DELAY_MS / 1000} 秒后重连（${attemptsRef.current}/${MAX_AUTO_RECONNECT}）`)
       timerRef.current = setTimeout(() => {
+        timerRef.current = null
         setReconnectKey(levelKey)
         setPhase('connecting')
         setMessage(null)
@@ -281,13 +283,15 @@ export function LivePreviewPlayer({
         scheduleReconnect(text)
         return
       }
+      clearReconnectTimer()
       setPhase('error')
       setMessage(text)
       onFatal?.(text)
     },
-    [source, handleDirectFailure, scheduleReconnect, onFatal]
+    [source, handleDirectFailure, scheduleReconnect, onFatal, clearReconnectTimer]
   )
   const retry = () => {
+    clearReconnectTimer()
     attemptsRef.current = 0
     setReconnectKey(null)
     setPhase('connecting')
@@ -295,17 +299,17 @@ export function LivePreviewPlayer({
     setNonce((n) => n + 1)
   }
 
-  // 播放器一旦起播就当作在放（mpegts.js 没有可靠的 first-frame 事件；错误会另行回调）
-  useEffect(() => {
-    if (phase !== 'connecting') return
-    const t = setTimeout(() => {
-      playingSinceRef.current = Date.now()
-      setPhase((p) => (p === 'connecting' ? 'playing' : p))
-    }, 1500)
-    return () => clearTimeout(t)
-  }, [phase, nonce])
+  const handlePlaying = useCallback(() => {
+    playingSinceRef.current = Date.now()
+    setMessage(null)
+    setPhase('playing')
+  }, [])
+  const handleConnecting = useCallback(() => {
+    playingSinceRef.current = 0
+    setPhase('connecting')
+  }, [])
 
-  const pending = source === null
+  const pending = source === null || (source.kind === 'relay' && (!format || (format === 'fmp4' && !codecs)))
   const showPlayer = (phase === 'connecting' || phase === 'playing') && !pending
   const badge =
     source?.kind === 'direct'
@@ -335,6 +339,8 @@ export function LivePreviewPlayer({
           autoplay
           onEnded={handleEnded}
           onError={handleError}
+          onConnecting={handleConnecting}
+          onPlaying={handlePlaying}
           onStall={handleStall}
           danmaku={danmakuLayer}
           lease={lease}
@@ -372,7 +378,7 @@ export function LivePreviewPlayer({
           ) : null}
           <div className={styles.overlayText}>
             {pending
-              ? '正在获取直链…'
+              ? source === null ? '正在获取直链…' : '正在等待媒体初始化…'
               : phase === 'connecting'
                 ? source.kind === 'direct'
                   ? '正在连接 CDN…'
@@ -421,7 +427,7 @@ export function useOpenLivePage(): (id: number, e?: React.MouseEvent | React.Key
 
 /**
  * 「预览」按钮：进入直播预览页。录制中且下载器能旁路时可点；否则禁用并用 tooltip 说明原因
- * （ffmpeg / streamlink 子进程落盘、fMP4、HEVC、容器尚未确定）。
+ * （ffmpeg / streamlink 子进程落盘、容器尚未确定）。
  */
 export function LivePreviewButton({
   streamer,

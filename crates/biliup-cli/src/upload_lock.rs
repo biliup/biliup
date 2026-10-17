@@ -10,6 +10,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
 
+/// 超过这个时间的锁文件视为异常退出（Ctrl+C、kill -9 不会运行 Drop）残留的僵尸锁。
+/// 持锁进程只在限流重试的几分钟内持有它。
+const STALE_AFTER: Duration = Duration::from_secs(30 * 60);
+
 /// 上传锁，用于账号级互斥
 pub struct UploadLock {
     lock_path: PathBuf,
@@ -55,7 +59,7 @@ impl UploadLock {
             if let Ok(metadata) = fs::metadata(&self.lock_path) {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                        if elapsed > Duration::from_secs(30 * 60) {
+                        if elapsed > STALE_AFTER {
                             warn!("检测到过期锁文件，自动清理: {:?}", self.lock_path);
                             let _ = fs::remove_file(&self.lock_path);
                         } else {
@@ -96,9 +100,15 @@ impl UploadLock {
         Ok(())
     }
 
-    /// 检查锁是否存在（不尝试获取）
+    /// 检查锁是否被持有（不尝试获取）。与 [`Self::try_acquire`] 一致，
+    /// 超过 [`STALE_AFTER`] 的残留锁不算被持有，否则它会让之后的每次上传都直接报错。
     pub fn is_locked(&self) -> bool {
-        self.lock_path.exists()
+        let stale = fs::metadata(&self.lock_path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| SystemTime::now().duration_since(modified).ok())
+            .is_some_and(|elapsed| elapsed > STALE_AFTER);
+        self.lock_path.exists() && !stale
     }
 
     /// 获取锁文件路径（用于提示用户手动清理残留锁文件）
@@ -135,6 +145,32 @@ mod tests {
         assert!(lock2.try_acquire().unwrap());
 
         lock2.release().unwrap();
+    }
+
+    /// 被强杀（Ctrl+C / kill -9）的进程不会运行 Drop，锁文件会残留；超过过期时间的
+    /// 残留锁不能让之后的每一次上传都直接报错退出。
+    #[test]
+    fn stale_lock_file_does_not_block_new_uploads() {
+        let lock = UploadLock::new(&format!("stale_test_{}", std::process::id())).unwrap();
+
+        let file = fs::File::create(lock.path()).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(31 * 60))
+            .unwrap();
+        drop(file);
+        let stale = lock.is_locked();
+
+        let file = fs::File::create(lock.path()).unwrap();
+        file.set_modified(SystemTime::now()).unwrap();
+        drop(file);
+        let fresh = lock.is_locked();
+
+        fs::remove_file(lock.path()).unwrap();
+        assert!(
+            !stale,
+            "a lock older than the stale threshold must be ignored"
+        );
+        assert!(fresh, "a recent lock must still block");
+        assert!(!lock.is_locked());
     }
 
     #[test]

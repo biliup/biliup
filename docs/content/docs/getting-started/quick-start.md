@@ -9,6 +9,7 @@ sort_by = "weight"
 template = "docs/page.html"
 
 [extra]
+language_code = "en-US"
 lead = "One page summary of how to start a new biliup project."
 toc = true
 top = false

@@ -944,8 +944,10 @@ impl PrimaryCore {
 enum Write {
     Save(SessionRecord),
     Delete(String),
-    #[cfg(test)]
+    /// 落盘屏障：写到它之前的都已经处理完。关主库之前用它保证不丢写入，测试也用它等写入
     Flush(tokio::sync::oneshot::Sender<()>),
+    /// 收工：写入任务处理到它就退出，之后排进来的写入不会再落库
+    Shutdown,
 }
 
 /// 控制面进程里的主机：钩子、`ha_sessions` 与备机连接都经它
@@ -957,10 +959,15 @@ pub struct Primary {
     keys: Mutex<HashMap<(String, i64), String>>,
     link: Mutex<Option<Link>>,
     writer: mpsc::UnboundedSender<Write>,
+    /// 写入任务的句柄：收工时要等它真的结束，之后才关主库（见 `stop_and_close`）
+    writer_task: Mutex<Option<JoinHandle<()>>>,
     gate: watch::Sender<bool>,
     /// 该停掉拉流的段（场次键）
     stop: watch::Sender<BTreeSet<String>>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
+    /// 主库（`ha_sessions`）的连接池。写盘走写入任务手里的克隆，这里留一份只为关闭：
+    /// Windows 上打开的文件删不掉，删 `ha-primary.sqlite3` 之前必须先把池关干净。
+    pool: ConnectionPool,
     /// 补投要用的房间、上传池与主库
     services: ServiceRegister,
     /// 本主机的启动时刻：之后才写盘的分段不属于上次中断的录制
@@ -987,15 +994,18 @@ impl Primary {
             keys: Mutex::default(),
             link: Mutex::default(),
             writer,
+            writer_task: Mutex::new(None),
             gate: watch::channel(false).0,
             stop: watch::channel(BTreeSet::new()).0,
             tasks: Mutex::default(),
+            pool: pool.clone(),
             services,
             started: now,
             me: me.clone(),
         });
-        // 写入任务不随 `stop` 中止：主机被换掉、解除配对时排着的写入照样落盘，最后一个引用放掉时结束
-        tokio::spawn(async move {
+        // 写入任务不随 `stop` 中止：主机被换掉、解除配对时排着的写入照样落盘；
+        // `stop_and_close` 会先用落盘屏障排空、再发 `Shutdown` 让它收工
+        let writer_task = tokio::spawn(async move {
             while let Some(item) = queue.recv().await {
                 match item {
                     Write::Save(record) => {
@@ -1008,13 +1018,14 @@ impl Primary {
                             warn!(key, error = ?e, "HA：没能删掉 ha_sessions 里的行");
                         }
                     }
-                    #[cfg(test)]
                     Write::Flush(done) => {
                         let _ = done.send(());
                     }
+                    Write::Shutdown => break,
                 }
             }
         });
+        *primary.writer_task.lock().unwrap() = Some(writer_task);
         let ticking = tokio::spawn(tick_loop(Arc::downgrade(&primary)));
         primary.tasks.lock().unwrap().push(ticking);
         primary.update(|_, _| ());
@@ -1028,6 +1039,30 @@ impl Primary {
             task.abort();
         }
         *self.link.lock().unwrap() = None;
+    }
+
+    /// 解除配对或节点代理停止时收工：停掉还在用主库的任务（abort 之后等它们真的结束），
+    /// 把排着的写入落盘，再让写入任务退出、关掉连接池 —— 删 `ha-primary.sqlite3` 之前必须做到
+    /// 这一步，因为 Windows 上打开的文件删不掉（POSIX 允许删除打开的文件，只有 Windows 会因为
+    /// 句柄还在而失败）。
+    ///
+    /// 走到这里之后没有任何东西能再写到这个库：任务已经结束，写入任务已经退出，之后排进来的写入
+    /// 只会被丢掉。收工前的那几条写入都落了盘；仍在跑的补投任务再报结果只会记警告，控制面那边
+    /// 留着它的结果，重连时会重新对齐。
+    pub(crate) async fn stop_and_close(&self) {
+        let tasks: Vec<_> = self.tasks.lock().unwrap().drain(..).collect();
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
+        }
+        *self.link.lock().unwrap() = None;
+        self.flush().await;
+        let _ = self.writer.send(Write::Shutdown);
+        let writer = self.writer_task.lock().unwrap().take();
+        if let Some(task) = writer {
+            let _ = task.await;
+        }
+        self.pool.close().await;
     }
 
     fn update<R>(&self, f: impl FnOnce(&mut PrimaryCore, i64) -> R) -> R {
@@ -1070,7 +1105,6 @@ impl Primary {
     }
 
     /// 等之前的 `ha_sessions` 写入都落盘
-    #[cfg(test)]
     pub(crate) async fn flush(&self) {
         let (done, wait) = tokio::sync::oneshot::channel();
         if self.writer.send(Write::Flush(done)).is_ok() {

@@ -940,6 +940,29 @@ fn fmp4_growing_file_is_scanned_incrementally() {
     assert_eq!(full.keyframes, expected(65_913_080, 1000, &frames));
 }
 
+/// 64 位 largesize 加上偏移溢出（坏掉或恶意的分段）：报数据错误，不能回绕到文件前面、倒退着无限重扫。
+#[test]
+fn fmp4_box_size_overflowing_the_offset_is_invalid_data() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut bytes, frames, _) = build_fmp4(3);
+    let bogus_at = bytes.len() as u64;
+    bytes.extend_from_slice(&1u32.to_be_bytes());
+    bytes.extend_from_slice(b"free");
+    // bogus_at + size 恰好回绕到 0：回绕后「末尾」落在文件开头
+    bytes.extend_from_slice(&0u64.wrapping_sub(bogus_at).to_be_bytes());
+    bytes.extend_from_slice(&[0; 32]);
+    let path = write(dir.path(), "a.mp4", &bytes);
+
+    let error = rescan(&path, None).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData, "{error}");
+    // 坏 box 之前的内容照常能扫
+    let good = write(dir.path(), "b.mp4", &bytes[..bogus_at as usize]);
+    assert_eq!(
+        rescan(&good, None).unwrap().keyframes,
+        expected(65_913_080, 1000, &frames)
+    );
+}
+
 #[test]
 fn non_fragmented_mp4_is_unsupported() {
     let dir = tempfile::tempdir().unwrap();

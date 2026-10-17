@@ -1,7 +1,7 @@
+use crate::server::common::util::redact_process_debug;
 use crate::server::core::downloader::{
     DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
-use crate::server::common::util::redact_process_debug;
 use crate::server::errors::{AppError, AppResult};
 use crate::tools;
 use error_stack::{ResultExt, bail};

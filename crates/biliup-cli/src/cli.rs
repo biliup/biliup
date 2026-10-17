@@ -266,6 +266,12 @@ fn human_size(s: &str) -> Result<u64, String> {
         [init @ .., b'G'] => parse_u8(init)? * 1000.0 * 1000.0 * 1000.0,
         init => parse_u8(init)?,
     };
+    if !ret.is_finite() || ret < 1.0 || ret >= u64::MAX as f64 {
+        return Err(format!(
+            "{s} must be a positive size below {} bytes",
+            u64::MAX
+        ));
+    }
     Ok(ret as u64)
 }
 
@@ -281,6 +287,32 @@ mod tests {
     use super::{Cli, Commands};
     use clap::Parser;
     use std::path::Path;
+
+    #[test]
+    fn download_rejects_sizes_that_would_silently_become_zero_or_overflow() {
+        for size in [
+            "NaN",
+            "inf",
+            "-1",
+            "0",
+            "0.5",
+            "1e100",
+            "18446744073709551616",
+        ] {
+            assert!(
+                Cli::try_parse_from([
+                    "biliup",
+                    "download",
+                    "https://example.invalid/live.flv",
+                    "--split-size",
+                    size,
+                ])
+                .is_err(),
+                "accepted size {size}"
+            );
+        }
+        assert_eq!(super::human_size("1.5M").unwrap(), 1_500_000);
+    }
 
     #[test]
     fn server_defaults_to_loopback_and_default_cookie_file() {

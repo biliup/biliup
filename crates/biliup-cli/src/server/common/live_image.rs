@@ -2,7 +2,7 @@
 //!
 //! 页面直接 `<img src="https://i0.hdslb.com/...">` 会带上 biliup 自己的 Referer，
 //! B 站等图片 CDN 对站外 Referer 返回 403，所以都由服务端以直播间页面地址作 Referer 去取。
-//! 封面每场直播都可能换，只在内存里短暂缓存（见 `api::live_media`）；
+//! 封面每场直播都可能换，按主播保存最近有效图片，离线和重启后仍可读取；
 //! 头像几乎不变，开播时下载一次存到 `data/avatar/`，地址变了才重新下载。
 
 use axum::http::{HeaderValue, header};
@@ -21,6 +21,8 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 /// 头像落盘目录，与 `use_live_cover` 的 `data/cover` 并列
 const AVATAR_DIR: &str = "data/avatar";
+const ROOM_COVER_DIR: &str = "data/room-cover";
+const COVER_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveImage {
@@ -88,7 +90,7 @@ pub async fn fetch_image(
     if let Ok(referer) = HeaderValue::from_str(referer) {
         request = request.header(header::REFERER, referer);
     }
-    let response = request.send().await.map_err(|e| e.to_string())?;
+    let mut response = request.send().await.map_err(|e| e.to_string())?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("上游返回 {status}"));
@@ -104,13 +106,19 @@ pub async fn fetch_image(
         .get(header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(|value| value.to_string());
-    let body = response.bytes().await.map_err(|e| e.to_string())?;
-    if body.len() > MAX_IMAGE_BYTES {
-        return Err(format!("图片超过 {MAX_IMAGE_BYTES} 字节"));
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
+        if body.len() + chunk.len() > MAX_IMAGE_BYTES {
+            return Err(format!("图片超过 {MAX_IMAGE_BYTES} 字节"));
+        }
+        body.extend_from_slice(&chunk);
     }
     let content_type = image_content_type(upstream_type.as_deref(), &body)
         .ok_or_else(|| "上游返回的不是图片".to_string())?;
-    Ok(FetchedImage { content_type, body })
+    Ok(FetchedImage {
+        content_type,
+        body: Bytes::from(body),
+    })
 }
 
 /// 上游标了 `image/*` 就用上游的；否则按文件头识别常见格式，都认不出就拒绝。
@@ -169,11 +177,22 @@ pub struct AvatarStore {
     client: Client,
     /// 同一时刻只让一个下载在写盘，避免开播时的预下载和页面首次请求撞车
     write_lock: Mutex<()>,
+    kind: LiveImage,
 }
 
 /// 进程内共用的头像存储，录制流程与 Web 接口都用它。
 pub fn avatar_store() -> &'static AvatarStore {
     static STORE: LazyLock<AvatarStore> = LazyLock::new(|| AvatarStore::new(AVATAR_DIR));
+    &STORE
+}
+
+/// 封面与头像共用落盘协议，但封面同一 URL 也定期刷新（部分 CDN 地址不随开播变化）。
+pub fn cover_store() -> &'static AvatarStore {
+    static STORE: LazyLock<AvatarStore> = LazyLock::new(|| {
+        let mut store = AvatarStore::new(ROOM_COVER_DIR);
+        store.kind = LiveImage::Cover;
+        store
+    });
     &STORE
 }
 
@@ -183,6 +202,7 @@ impl AvatarStore {
             dir: dir.into(),
             client: image_client(),
             write_lock: Mutex::new(()),
+            kind: LiveImage::Avatar,
         }
     }
 
@@ -205,6 +225,21 @@ impl AvatarStore {
         self.dir.join(&stored.file)
     }
 
+    async fn is_current(&self, id: i64, stored: &StoredAvatar, url: &str) -> bool {
+        if stored.url != url {
+            return false;
+        }
+        if self.kind == LiveImage::Avatar {
+            return true;
+        }
+        tokio::fs::metadata(self.meta_path(id))
+            .await
+            .ok()
+            .and_then(|meta| meta.modified().ok())
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|elapsed| elapsed < COVER_TTL)
+    }
+
     /// 确保本地有 `url` 对应的头像：已存且地址相同就直接用；否则带 Referer 下载后写盘。
     /// 下载失败时返回错误，磁盘上的旧文件原样保留。
     pub async fn ensure(&self, id: i64, url: &str, referer: &str) -> Result<StoredAvatar, String> {
@@ -212,19 +247,18 @@ impl AvatarStore {
             return Err("头像地址不是 http(s)".to_string());
         }
         if let Some(stored) = self.load(id).await
-            && stored.url == url
+            && self.is_current(id, &stored, url).await
         {
             return Ok(stored);
         }
         let _guard = self.write_lock.lock().await;
         // 拿到锁后再看一次，前一个持锁者可能刚刚下完同一张
         if let Some(stored) = self.load(id).await
-            && stored.url == url
+            && self.is_current(id, &stored, url).await
         {
             return Ok(stored);
         }
-        let image =
-            fetch_image(&self.client, &upstream_url(url, LiveImage::Avatar), referer).await?;
+        let image = fetch_image(&self.client, &upstream_url(url, self.kind), referer).await?;
         let stored = StoredAvatar {
             url: url.to_string(),
             content_type: image.content_type.clone(),
@@ -233,13 +267,13 @@ impl AvatarStore {
         let previous = self.load(id).await;
         self.write(id, &stored, &image.body)
             .await
-            .map_err(|e| format!("写入头像失败: {e}"))?;
+            .map_err(|e| format!("写入{}失败: {e}", self.kind.label()))?;
         if let Some(previous) = previous
             && previous.file != stored.file
         {
             let _ = tokio::fs::remove_file(self.dir.join(previous.file)).await;
         }
-        info!(id, url, file = %self.image_path(&stored).display(), "主播头像已保存到本地");
+        info!(id, kind = self.kind.label(), file = %self.image_path(&stored).display(), "直播间图片已保存到本地");
         Ok(stored)
     }
 
@@ -274,6 +308,15 @@ pub fn spawn_avatar_download(id: i64, url: Option<String>, referer: String) {
     tokio::spawn(async move {
         if let Err(reason) = avatar_store().ensure(id, &url, &referer).await {
             warn!(id, url, reason, "下载主播头像失败");
+        }
+    });
+}
+
+pub fn spawn_cover_download(id: i64, url: Option<String>, referer: String) {
+    let Some(url) = url else { return };
+    tokio::spawn(async move {
+        if let Err(reason) = cover_store().ensure(id, &url, &referer).await {
+            warn!(id, reason, "下载直播间封面失败，保留最近有效封面");
         }
     });
 }
@@ -473,6 +516,57 @@ mod tests {
                 .ensure(3, "data:image/png;base64,AAAA", "x")
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn covers_refresh_unchanged_urls_after_ttl_and_keep_valid_files_on_failure() {
+        let (base, seen) = image_server().await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = AvatarStore::new(dir.path());
+        store.kind = LiveImage::Cover;
+        let url = format!("{base}/a.jpg");
+        let first = store
+            .ensure(4, &url, "https://example.com/room")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .ensure(4, &url, "https://example.com/room")
+                .await
+                .unwrap(),
+            first
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        let old = std::time::SystemTime::now() - COVER_TTL - Duration::from_secs(1);
+        std::fs::File::options()
+            .write(true)
+            .open(store.meta_path(4))
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old))
+            .unwrap();
+        assert!(
+            store
+                .ensure(4, &url, "https://example.com/room")
+                .await
+                .is_ok()
+        );
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            2,
+            "same CDN URL must be refreshed after TTL"
+        );
+        assert!(
+            store
+                .ensure(4, &format!("{base}/broken"), "https://example.com/room")
+                .await
+                .is_err()
+        );
+        assert_eq!(store.load(4).await, Some(first));
+        let reopened = AvatarStore::new(dir.path());
+        assert!(
+            reopened.load(4).await.is_some(),
+            "offline file survives a restart"
         );
     }
 }

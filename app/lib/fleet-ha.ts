@@ -246,6 +246,25 @@ export interface Candidates {
   primary: RowsView | null
 }
 
+/** Pairing must stay blocked until both candidate lists were read successfully. */
+export function candidatesReadable(
+  data: Candidates | undefined,
+  error: unknown,
+  expectedStandby?: number,
+  expectedPrimary?: number | null,
+): data is Candidates {
+  return (
+    !!data &&
+    !error &&
+    !!data.primary &&
+    !!data.standby &&
+    !data.primary.error &&
+    !data.standby.error &&
+    (expectedStandby === undefined || data.standby.node === expectedStandby) &&
+    (expectedPrimary === undefined || data.primary.node === expectedPrimary)
+  )
+}
+
 export const FLEET_HA_KEY = '/v1/fleet/ha'
 export const NODE_HA_KEY = '/v1/node/ha'
 export const NODE_HA_CANDIDATES_KEY = '/v1/node/ha/candidates'

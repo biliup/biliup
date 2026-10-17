@@ -4,11 +4,12 @@ members = [
     "crates/biliup-cli",
     "crates/stream-gears",
     "crates/danmaku",
+    "crates/danmaku-factory",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "1.2.11"
+version = "1.3.0"
 
 [workspace.dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -40,10 +41,17 @@ reqwest = { version = "0.13.4", features = ["cookies", "form", "query"] }
 url = "2.5"
 
 
+[profile.dev]
+# Keep business code easy to step through, and reuse unaffected code after edits.
+opt-level = 0
+debug = 2
+incremental = true
+
 [profile.release]
 lto = true
 codegen-units = 1
 strip = true
+incremental = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [profile.minimal]

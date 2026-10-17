@@ -205,7 +205,8 @@ impl Platform for YouTube {
     ) -> Result<Vec<DanmakuEvent>> {
         let continuation = context
             .extra
-            .remove("continuation")
+            .get("continuation")
+            .cloned()
             .ok_or_else(|| DanmakuError::Decode("YouTube continuation missing".to_string()))?;
 
         let body = json!({

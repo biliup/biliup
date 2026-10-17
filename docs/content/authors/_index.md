@@ -11,6 +11,9 @@ draft = false
 # "author-name-in-url" = "the-full-path-of-the-author-page"
 #
 # Note: We use quoted keys here.
+[extra]
+language_code = "en-US"
+
 [extra.author_pages]
 "aaran-xu" = "authors/aaran-xu.md"
 +++

@@ -20,7 +20,7 @@ import {
   IconSendStroked,
   IconDeleteStroked,
 } from '@douyinfe/semi-icons'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { fetcher, FileList, requestDelete, sendRequest, StudioEntity } from '../../lib/api-streamer'
 import useSWR from 'swr'
@@ -32,6 +32,7 @@ import PageHeader from '../components/PageHeader'
 import { pairLabel, pairPeer, useMe } from '../../lib/use-me'
 import dc from '@/app/ui/data-card.module.scss'
 import { FormDialog } from '@/app/ui/shell'
+import { SubmissionLock } from '@/app/lib/submission-lock'
 
 export default function UploadManager() {
   const { Text } = Typography
@@ -84,13 +85,18 @@ export default function UploadManager() {
   }
 
   const [visibleModal, setVisibleModal] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const submissionLock = useRef(new SubmissionLock()).current
   const [selectFiles, setSelectFiles] = useState<(string | number)[]>([])
   const [selectEntity, setSelectEntity] = useState<StudioEntity>()
   const showDialog = (entity: StudioEntity) => {
+    if (submissionLock.isLocked) return
     setSelectEntity(entity)
     setVisibleModal(true)
   }
   const handleOk = async () => {
+    if (!submissionLock.acquire()) return
+    setSubmitting(true)
     try {
       await sendRequest('/v1/uploads', {
         arg: {
@@ -101,7 +107,14 @@ export default function UploadManager() {
     } catch (e: any) {
       Notification.error({ title: '投稿失败', content: e?.message ?? String(e) })
       throw e
+    } finally {
+      submissionLock.release()
+      setSubmitting(false)
     }
+    setVisibleModal(false)
+  }
+  const handleCancel = () => {
+    if (submissionLock.isLocked) return
     setVisibleModal(false)
   }
 
@@ -143,10 +156,11 @@ export default function UploadManager() {
         size="lg"
         title="选择要投稿的文件"
         visible={visibleModal}
+        closable={!submitting}
         okText={selectFiles.length > 0 ? `投稿 ${selectFiles.length} 个文件` : '投稿'}
-        okDisabled={selectFiles.length === 0}
+        okDisabled={selectFiles.length === 0 || submitting}
         onOk={handleOk}
-        onCancel={() => setVisibleModal(false)}
+        onCancel={handleCancel}
       >
         <Text type="tertiary" size="small" ellipsis={{ showTooltip: true }} style={{ display: 'block', marginBottom: 12 }}>
           投稿模板：{selectEntity?.template_name}

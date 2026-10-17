@@ -14,25 +14,9 @@ import styles from '../nodes/fleet-config.module.scss'
 
 const SCOPE = 'local-secrets'
 
-/** 「用户 Cookie」栏里的快手 Cookie 写的是 user.kuaishou_cookie，实际字段在顶层，这里单独给一个 */
-function Kuaishou() {
-  return (
-    <Form.Input
-      field="kuaishou_cookie"
-      label="快手 Cookie（kuaishou_cookie）"
-      style={{ width: '100%' }}
-      fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
-      showClear
-    />
-  )
-}
-
-const PLATFORMS = [
-  ...PlatformPanels.filter((p) =>
-    ['bilibili', 'douyin', 'douyu', 'twitcasting', 'twitch', 'youtube', 'user'].includes(p.key),
-  ),
-  { key: 'kuaishou', name: '快手', Component: Kuaishou },
-]
+const PLATFORMS = PlatformPanels.filter((p) =>
+  ['bilibili', 'douyin', 'douyu', 'twitcasting', 'twitch', 'youtube', 'user'].includes(p.key),
+)
 
 
 /** 空间配置页顶部：这台机器的配置由控制面管理 */

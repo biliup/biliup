@@ -4,6 +4,7 @@ use crate::server::api::redact;
 use crate::server::auto_clip::runner::streamer_opted_in;
 use crate::server::common::recording_policy::{self, Rejection};
 use crate::server::common::upload::{build_studio, submit_to_bilibili, upload};
+use crate::server::common::upload_observation::{NewTask, UploadObservations};
 use crate::server::common::util::Recorder;
 use crate::server::config::Config;
 use crate::server::core::download_manager::DownloadManager;
@@ -107,6 +108,13 @@ pub async fn get_streamers_endpoint(
             Some((rate, media, preview)) => (rate, media, Some(preview)),
             None => (None, Default::default(), None),
         };
+        let live_cover_url = match live_media.cover_url {
+            Some(url) => Some(url),
+            None => crate::server::common::live_image::cover_store()
+                .load(x.id)
+                .await
+                .map(|cover| cover.url),
+        };
 
         let auto_clip_after_live = show_after_live.then(|| streamer_opted_in(&x));
         if !show_hooks {
@@ -123,7 +131,7 @@ pub async fn get_streamers_endpoint(
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
             live_bytes_per_sec,
-            live_cover_url: live_media.cover_url,
+            live_cover_url,
             live_avatar_url: live_media.avatar_url,
             session_id,
             marker_count: None,
@@ -172,8 +180,12 @@ pub async fn post_streamers_endpoint(
         payload.downloaded_processor = None;
         payload.postprocessor = None;
     }
+    validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
-        Ok(live_streamers) => Ok(Json(live_streamers)),
+        Ok(live_streamers) => {
+            refresh_cover_after_save(&service_register, &live_streamers);
+            Ok(Json(live_streamers))
+        }
         Err(AddStreamerError::UnsupportedUrl) => {
             Err((StatusCode::BAD_REQUEST, "Not supported url").into_response())
         }
@@ -203,13 +215,55 @@ pub async fn put_streamers_endpoint(
         payload.downloaded_processor = current.downloaded_processor;
         payload.postprocessor = current.postprocessor;
     }
+    validate_streamer_mosaic(&payload.override_cfg)?;
     let mut streamer = update_streamer(&service_register, payload)
         .await
         .map_err(report_to_response)?;
+    refresh_cover_after_save(&service_register, &streamer);
     if !caller.can_access(Field::StreamerHooks) {
         strip_hooks(&mut streamer);
     }
     Ok(Json(streamer))
+}
+
+fn refresh_cover_after_save(services: &ServiceRegister, streamer: &LiveStreamer) {
+    let pool = services.pool.clone();
+    let id = streamer.id;
+    let url = streamer.url.clone();
+    tokio::spawn(async move {
+        crate::server::common::room_metadata::refresh_room_cover(&pool, id, &url, None).await;
+    });
+}
+
+fn validate_streamer_mosaic(
+    patch: &Option<crate::server::config::ConfigPatch>,
+) -> Result<(), Response> {
+    let value = patch
+        .as_ref()
+        .and_then(|patch| patch.mosaic_config.as_ref())
+        .and_then(|value| value.clone());
+    let duration = patch
+        .as_ref()
+        .and_then(|patch| patch.segment_time.as_ref())
+        .and_then(|value| value.clone());
+    let mut config = Config {
+        mosaic_config: value,
+        segment_time: duration,
+        ..Config::default()
+    };
+    config.normalize_segment_limits();
+    config.validate_segment_limits().map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(ApiError::new(
+                "视频分段时长格式无效，请输入大于 0 的时:分:秒、分:秒或秒数".to_string(),
+            )),
+        )
+            .into_response()
+    })?;
+    config
+        .validate_mosaic()
+        .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response())
 }
 
 pub async fn delete_streamers_endpoint(
@@ -283,6 +337,7 @@ pub async fn get_streamer_info(
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<StreamerInfoView>>, Response> {
     let streamer_infos = StreamerInfo::select()
+        .where_("kind = 'source'")
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
@@ -320,15 +375,55 @@ pub async fn get_streamer_info_files(
 }
 
 pub async fn get_upload_streamers_endpoint(
+    caller: Caller,
     // Extension(streamers_service): Extension<DynUploadStreamersRepository>,
     State(pool): State<ConnectionPool>,
-) -> Result<Json<Vec<UploadStreamer>>, Response> {
+) -> Result<Json<Vec<serde_json::Value>>, Response> {
     let uploader_streamers = UploadStreamer::select()
         .fetch_all(&pool)
         .await
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
-    Ok(Json(uploader_streamers))
+    let mut response = Vec::with_capacity(uploader_streamers.len());
+    for template in uploader_streamers {
+        response.push(template_view(&caller.subject, &pool, &template).await?);
+    }
+    Ok(Json(response))
+}
+
+async fn template_view(
+    subject: &Subject,
+    pool: &ConnectionPool,
+    template: &impl Serialize,
+) -> Result<serde_json::Value, Response> {
+    let mut view = serde_json::to_value(template)
+        .change_context(AppError::Unknown)
+        .map_err(report_to_response)?;
+    if !subject.can_access(Field::TemplateCoverPath) {
+        view["cover_path"] = serde_json::Value::Null;
+    }
+    if !subject.can_access(Field::TemplateAccount) {
+        let selector = if let Some(path) =
+            view["user_cookie"].as_str().filter(|path| !path.is_empty())
+        {
+            let id: Option<i64> = sqlx::query_scalar(
+                "SELECT id FROM configuration WHERE key = 'bilibili-cookies' AND value = ? ORDER BY id LIMIT 1",
+            )
+            .bind(path)
+            .fetch_optional(pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?;
+            Some(id.map_or_else(
+                || "account:current".to_string(),
+                |id| format!("account:{id}"),
+            ))
+        } else {
+            None
+        };
+        view["user_cookie"] = serde_json::to_value(selector).unwrap_or_default();
+    }
+    Ok(view)
 }
 
 /// 保存投稿模板时的两个受保护字段：没有 [`Field::TemplateAccount`] 的人只能从已登记的
@@ -340,9 +435,6 @@ async fn protect_template_fields(
 ) -> Result<(), Response> {
     let keep_cover = !subject.can_access(Field::TemplateCoverPath);
     let check_account = !subject.can_access(Field::TemplateAccount);
-    if !keep_cover && !check_account {
-        return Ok(());
-    }
     let current = match upload_streamer.id {
         Some(id) => UploadStreamer::select()
             .where_("id = ?")
@@ -358,26 +450,58 @@ async fn protect_template_fields(
             .as_ref()
             .and_then(|template| template.cover_path.clone());
     }
-    if !check_account {
-        return Ok(());
-    }
     let Some(cookie) = upload_streamer
         .user_cookie
         .as_deref()
         .filter(|c| !c.is_empty())
     else {
+        if check_account {
+            upload_streamer.user_cookie = current.and_then(|template| template.user_cookie);
+        }
         return Ok(());
     };
+    // Non-account managers receive an opaque `account:<id>` selector. Resolve
+    // it server-side so the API never needs to expose credential file paths.
+    let resolved_cookie = if let Some(id) = cookie.strip_prefix("account:") {
+        if id == "current" {
+            upload_streamer.user_cookie = current
+                .as_ref()
+                .and_then(|template| template.user_cookie.clone())
+                .filter(|path| !path.is_empty());
+            if upload_streamer.user_cookie.is_none() {
+                return Err((StatusCode::BAD_REQUEST, "没有可保留的投稿账号").into_response());
+            }
+            return Ok(());
+        }
+        let id = id
+            .parse::<i64>()
+            .map_err(|_| (StatusCode::BAD_REQUEST, "账号 ID 无效").into_response())?;
+        Configuration::select()
+            .where_("id = ? AND key = 'bilibili-cookies'")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .change_context(AppError::Unknown)
+            .map_err(report_to_response)?
+            .ok_or_else(|| (StatusCode::FORBIDDEN, "只能选择已登记的 B 站账号").into_response())?
+            .value
+    } else {
+        cookie.to_string()
+    };
+    upload_streamer.user_cookie = Some(resolved_cookie.clone());
+    if !check_account {
+        return Ok(());
+    }
     if current
         .as_ref()
-        .is_some_and(|template| template.user_cookie.as_deref() == Some(cookie))
+        .is_some_and(|template| template.user_cookie.as_deref() == Some(resolved_cookie.as_str()))
     {
         return Ok(());
     }
     let registered: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM configuration WHERE key = 'bilibili-cookies' AND value = ?)",
     )
-    .bind(cookie)
+    .bind(&resolved_cookie)
     .fetch_one(pool)
     .await
     .change_context(AppError::Unknown)
@@ -394,50 +518,37 @@ pub async fn add_upload_streamer_endpoint(
     Json(mut upload_streamer): Json<InsertUploadStreamer>,
 ) -> Result<Json<serde_json::Value>, Response> {
     protect_template_fields(&caller.subject, &pool, &mut upload_streamer).await?;
-    if upload_streamer.id.is_none() {
-        Ok(Json(
-            serde_json::to_value(
-                ormlite::Insert::insert(upload_streamer, &pool)
-                    .await
-                    .change_context(AppError::Unknown)
-                    .map_err(report_to_response)?,
-            )
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-        ))
+    let response = if upload_streamer.id.is_none() {
+        template_view(
+            &caller.subject,
+            &pool,
+            &ormlite::Insert::insert(upload_streamer, &pool)
+                .await
+                .change_context(AppError::Unknown)
+                .map_err(report_to_response)?,
+        )
+        .await?
     } else {
-        Ok(Json(
-            serde_json::to_value(
-                upload_streamer
-                    .update_all_fields(&pool)
-                    .await
-                    .change_context(AppError::Unknown)
-                    .map_err(report_to_response)?,
-            )
-            .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-        ))
-    }
+        template_view(
+            &caller.subject,
+            &pool,
+            &upload_streamer
+                .update_all_fields(&pool)
+                .await
+                .change_context(AppError::Unknown)
+                .map_err(report_to_response)?,
+        )
+        .await?
+    };
+    Ok(Json(response))
 }
 
 pub async fn get_upload_streamer_endpoint(
+    caller: Caller,
     State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
-) -> Result<Json<UploadStreamer>, Response> {
-    let uploader_streamers = UploadStreamer::select()
-        .where_("id = ?")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
-    Ok(Json(uploader_streamers))
-}
-pub async fn delete_template_endpoint(
-    State(pool): State<ConnectionPool>,
-    Path(id): Path<i64>,
-) -> Result<Json<()>, Response> {
-    let uploader_streamers = UploadStreamer::select()
+) -> Result<Json<serde_json::Value>, Response> {
+    let uploader_streamer = UploadStreamer::select()
         .where_("id = ?")
         .bind(id)
         .fetch_one(&pool)
@@ -445,15 +556,48 @@ pub async fn delete_template_endpoint(
         .change_context(AppError::Unknown)
         .map_err(report_to_response)?;
     Ok(Json(
-        uploader_streamers
-            .delete(&pool)
+        template_view(&caller.subject, &pool, &uploader_streamer).await?,
+    ))
+}
+/// 有主播在用的模板不删（409）：`livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`，
+/// 直接删会把绑着它的主播一起从库里删掉，而它们在监控里的房间还照常录、传。
+/// 判断与删除在同一条语句里，不会和并发的「主播改用这个模板」错开。
+pub async fn delete_template_endpoint(
+    State(pool): State<ConnectionPool>,
+    Path(id): Path<i64>,
+) -> Result<Json<()>, Response> {
+    let deleted = sqlx::query(
+        "DELETE FROM uploadstreamers WHERE id = ?1
+           AND NOT EXISTS (SELECT 1 FROM livestreamers WHERE upload_streamers_id = ?1)",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .change_context(AppError::Unknown)
+    .map_err(report_to_response)?
+    .rows_affected();
+    if deleted > 0 {
+        return Ok(Json(()));
+    }
+    let in_use: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM livestreamers WHERE upload_streamers_id = ?")
+            .bind(id)
+            .fetch_one(&pool)
             .await
             .change_context(AppError::Unknown)
-            .map_err(report_to_response)?,
-    ))
+            .map_err(report_to_response)?;
+    if in_use > 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("还有 {in_use} 个主播在用这个模板，先给它们换个模板再删除"),
+        )
+            .into_response());
+    }
+    Err((StatusCode::NOT_FOUND, "上传模板不存在").into_response())
 }
 
 pub async fn get_users_endpoint(
+    caller: Caller,
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<serde_json::Value>>, Response> {
     let configurations = Configuration::select()
@@ -464,10 +608,11 @@ pub async fn get_users_endpoint(
         .map_err(report_to_response)?;
     let mut res = Vec::new();
     for cookies in configurations {
+        let can_see_path = caller.can_access(Field::TemplateAccount);
         res.push(json!({
             "id": cookies.id,
-            "name": cookies.value,
-            "value": cookies.value,
+            "name": if can_see_path { cookies.value.clone() } else { format!("账号 #{}", cookies.id) },
+            "value": if can_see_path { cookies.value } else { format!("account:{}", cookies.id) },
             "platform": cookies.key,
         }))
     }
@@ -543,12 +688,20 @@ mod user_payload_tests {
 
 #[cfg(test)]
 mod template_field_tests {
-    use super::protect_template_fields;
+    use super::{
+        add_upload_streamer_endpoint, get_upload_streamer_endpoint, get_users_endpoint,
+        protect_template_fields,
+    };
+    use crate::server::api::access::Caller;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use crate::server::infrastructure::models::upload_streamer::InsertUploadStreamer;
     use crate::server::infrastructure::permissions::Role;
     use crate::server::infrastructure::policy::Subject;
     use axum::http::StatusCode;
+    use axum::{
+        Json,
+        extract::{Path, State},
+    };
     use ormlite::Model;
 
     fn template(id: Option<i64>, cookie: &str, cover: &str) -> InsertUploadStreamer {
@@ -560,6 +713,104 @@ mod template_field_tests {
             "tags": [],
         }))
         .unwrap()
+    }
+
+    fn operator() -> Caller {
+        let mut caller = Caller::unrestricted();
+        caller.subject = Subject::user(2, Role::Operator);
+        caller
+    }
+
+    #[tokio::test]
+    async fn operator_edits_preserve_bindings_without_exposing_credential_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let account = sqlx::query("INSERT INTO configuration (key, value) VALUES ('bilibili-cookies', '/srv/private/account.json')")
+            .execute(&pool).await.unwrap().last_insert_rowid();
+        let saved = template(None, "/srv/private/account.json", "/srv/private/cover.jpg")
+            .insert(&pool)
+            .await
+            .unwrap();
+        let users = get_users_endpoint(operator(), State(pool.clone()))
+            .await
+            .unwrap()
+            .0;
+        let selector = format!("account:{account}");
+        assert_eq!(users[0]["value"], selector);
+        assert!(
+            !serde_json::to_string(&users)
+                .unwrap()
+                .contains("/srv/private")
+        );
+
+        let id = saved.id.unwrap();
+        let read = get_upload_streamer_endpoint(operator(), State(pool.clone()), Path(id))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(read["user_cookie"], selector);
+        assert!(read["cover_path"].is_null());
+        // Simulate the edit form: the visible selection and a changed title
+        // are submitted, while the hidden cover path remains null.
+        let mut edit = template(Some(id), read["user_cookie"].as_str().unwrap(), "");
+        edit.title = Some("changed title".into());
+        let written = add_upload_streamer_endpoint(operator(), State(pool.clone()), Json(edit))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(written["user_cookie"], selector);
+        assert!(written["cover_path"].is_null());
+        assert!(!written.to_string().contains("/srv/private"));
+        let admin =
+            get_upload_streamer_endpoint(Caller::unrestricted(), State(pool.clone()), Path(id))
+                .await
+                .unwrap()
+                .0;
+        assert_eq!(admin["user_cookie"], "/srv/private/account.json");
+        assert_eq!(admin["cover_path"], "/srv/private/cover.jpg");
+        assert_eq!(admin["title"], "changed title");
+
+        let saved = template(None, "unregistered.json", "/srv/private/cover.jpg")
+            .insert(&pool)
+            .await
+            .unwrap();
+        let id = saved.id.unwrap();
+        let read = get_upload_streamer_endpoint(operator(), State(pool.clone()), Path(id))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(read["user_cookie"], "account:current");
+        let edit = template(Some(id), "account:current", "");
+        let written = add_upload_streamer_endpoint(operator(), State(pool.clone()), Json(edit))
+            .await
+            .unwrap()
+            .0;
+        assert_eq!(written["user_cookie"], "account:current");
+        let admin =
+            get_upload_streamer_endpoint(Caller::unrestricted(), State(pool.clone()), Path(id))
+                .await
+                .unwrap()
+                .0;
+        assert_eq!(admin["user_cookie"], "unregistered.json");
+
+        let mut forged = template(None, "account:current", "");
+        assert_eq!(
+            protect_template_fields(&operator().subject, &pool, &mut forged)
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let mut missing = template(None, "account:999999", "");
+        assert_eq!(
+            protect_template_fields(&operator().subject, &pool, &mut missing)
+                .await
+                .unwrap_err()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
     }
 
     #[tokio::test]
@@ -612,6 +863,84 @@ mod template_field_tests {
             assert_eq!(edit.cover_path.as_deref(), Some("/srv/new.jpg"));
             assert_eq!(edit.user_cookie.as_deref(), Some("/tmp/any.json"));
         }
+    }
+}
+
+#[cfg(test)]
+mod template_delete_tests {
+    use super::delete_template_endpoint;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::models::live_streamer::{InsertLiveStreamer, LiveStreamer};
+    use crate::server::infrastructure::models::upload_streamer::{
+        InsertUploadStreamer, UploadStreamer,
+    };
+    use axum::extract::{Path, State};
+    use axum::http::StatusCode;
+    use ormlite::{Insert, Model};
+
+    /// `livestreamers.upload_streamers_id` 是 `ON DELETE CASCADE`：直接删模板会连带删掉绑着它的主播
+    /// （库里没了，监控里的房间却还在录）。有主播在用时必须拒绝，什么都不删。
+    #[tokio::test]
+    async fn deleting_a_template_in_use_keeps_it_and_its_streamers() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let template = |name: &str| -> InsertUploadStreamer {
+            serde_json::from_value(serde_json::json!({ "template_name": name, "tags": [] }))
+                .unwrap()
+        };
+        let used = Insert::insert(template("used"), &pool).await.unwrap();
+        let unused = Insert::insert(template("unused"), &pool).await.unwrap();
+        let streamer: InsertLiveStreamer = serde_json::from_value(serde_json::json!({
+            "url": "https://live.example.com/1",
+            "remark": "a",
+            "upload_streamers_id": used.id,
+        }))
+        .unwrap();
+        let streamer = streamer.insert(&pool).await.unwrap();
+
+        let rejected = delete_template_endpoint(State(pool.clone()), Path(used.id))
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        let kept = LiveStreamer::select()
+            .where_("id = ?")
+            .bind(streamer.id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            kept.and_then(|s| s.upload_streamers_id),
+            Some(used.id),
+            "主播与它绑定的模板都要留着"
+        );
+        let template_exists = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                UploadStreamer::select()
+                    .where_("id = ?")
+                    .bind(id)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+        assert!(template_exists(used.id).await);
+
+        // 没人用的模板照常删除；再删一次是 404，不是 500
+        assert!(
+            delete_template_endpoint(State(pool.clone()), Path(unused.id))
+                .await
+                .is_ok()
+        );
+        assert!(!template_exists(unused.id).await);
+        let missing = delete_template_endpoint(State(pool.clone()), Path(unused.id))
+            .await
+            .unwrap_err();
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 }
 
@@ -787,6 +1116,7 @@ pub struct PostUploads {
 pub async fn post_uploads(
     State(config): State<Arc<RwLock<Config>>>,
     State(pool): State<ConnectionPool>,
+    State(observations): State<Arc<UploadObservations>>,
     Json(json_data): Json<PostUploads>,
 ) -> Result<Json<serde_json::Value>, Response> {
     let upload_config = UploadStreamer::select()
@@ -832,37 +1162,64 @@ pub async fn post_uploads(
         return Err((StatusCode::BAD_REQUEST, "至少选择一个媒体文件").into_response());
     }
     info!("通过页面开始上传");
+    let guard = observations.register(NewTask {
+        source: "manual",
+        scheduler_group: "manual",
+        title: upload_config
+            .title
+            .as_deref()
+            .unwrap_or(&upload_config.template_name),
+        streamer_name: None,
+        session_id: None,
+        template_name: Some(&upload_config.template_name),
+        fifo: false,
+    });
+    let task_id = guard.observation().id().to_owned();
+    let mut queued_files = Vec::with_capacity(files.len());
+    for file in &files {
+        queued_files.push((
+            file.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            fs::metadata(file).await.ok().map(|metadata| metadata.len()),
+        ));
+    }
+    guard.observation().prepare_files(queued_files);
     tokio::spawn(async move {
-        let result = async {
-            let (bilibili, videos) = upload(
-                upload_config
-                    .user_cookie
-                    .as_deref()
-                    .unwrap_or("cookies.json"),
-                None,
-                line,
-                &files,
-                limit as usize,
-            )
-            .await?;
-            if !videos.is_empty() {
-                let recorder = Recorder::new(
-                    upload_config.title.clone(),
-                    StreamerInfo::new(
-                        &upload_config.template_name,
-                        "stream_title",
-                        "",
-                        Utc::now(),
-                        "",
-                    ),
-                );
-                let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
-                submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
-                info!(template_id = upload_config.id, "通过页面上传成功");
-            }
-            Ok::<_, Report<AppError>>(())
-        }
-        .await;
+        let result = guard
+            .scope(async {
+                guard.observation().phase("initializing");
+                let (bilibili, videos) = upload(
+                    upload_config
+                        .user_cookie
+                        .as_deref()
+                        .unwrap_or("cookies.json"),
+                    None,
+                    line,
+                    &files,
+                    limit as usize,
+                )
+                .await?;
+                if !videos.is_empty() {
+                    let recorder = Recorder::new(
+                        upload_config.title.clone(),
+                        StreamerInfo::new(
+                            &upload_config.template_name,
+                            "stream_title",
+                            "",
+                            Utc::now(),
+                            "",
+                        ),
+                    );
+                    let studio = build_studio(&upload_config, &bilibili, videos, &recorder).await?;
+                    guard.observation().title(&studio.title);
+                    submit_to_bilibili(&bilibili, &studio, submit_api.as_deref()).await?;
+                    info!(template_id = upload_config.id, "通过页面上传成功");
+                }
+                Ok::<_, Report<AppError>>(())
+            })
+            .await;
+        guard.finish_result(&result);
         if result.is_err() {
             // Upload failures can wrap upstream response bodies containing
             // short-lived upload authorization. Keep persistent Web logs free
@@ -871,7 +1228,7 @@ pub async fn post_uploads(
         }
     });
 
-    Ok(Json(serde_json::json!({})))
+    Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
 #[cfg(test)]
@@ -881,6 +1238,74 @@ mod recording_policy_status_tests {
     use chrono::{Duration as ChronoDuration, SecondsFormat};
     use ormlite::Insert;
     use serde_json::Value;
+
+    #[tokio::test]
+    async fn manual_upload_registers_files_and_reports_initialization_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let template: InsertUploadStreamer = serde_json::from_value(json!({
+            "template_name": "手动模板",
+            "title": "手动任务",
+            "user_cookie": dir.path().join("missing-cookie.json"),
+            "tags": []
+        }))
+        .unwrap();
+        let template = ormlite::Insert::insert(template, &pool).await.unwrap();
+        let media = tempfile::Builder::new()
+            .prefix(".manual-upload-observation-")
+            .suffix(".flv")
+            .tempfile_in(std::env::current_dir().unwrap())
+            .unwrap();
+        std::fs::write(media.path(), b"test media").unwrap();
+        let file_name = media
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let observations = UploadObservations::new(pool.clone());
+        observations.initialize().await.unwrap();
+        let Json(response) = post_uploads(
+            State(Arc::new(RwLock::new(Config::default()))),
+            State(pool),
+            State(observations.clone()),
+            Json(PostUploads {
+                files: vec![file_name.clone()],
+                template_id: template.id,
+            }),
+        )
+        .await
+        .unwrap();
+        let id = response["task_id"].as_str().unwrap();
+        let detail = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let detail = observations.detail(id).await.unwrap().unwrap();
+                if detail.task.state == "failed" {
+                    break detail;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(detail.task.source, "manual");
+        assert_eq!(detail.task.scheduler_group, "manual");
+        assert_eq!(detail.task.queue_position, None);
+        assert_eq!(detail.task.title, "手动任务");
+        assert_eq!(detail.task.bytes_confirmed, 0);
+        assert_eq!(detail.task.total_bytes, Some(10));
+        assert_eq!(detail.files.len(), 1);
+        assert_eq!(detail.files[0].name, file_name);
+        assert!(
+            !detail
+                .task
+                .error
+                .unwrap()
+                .contains(dir.path().to_str().unwrap())
+        );
+    }
 
     /// 以当前时刻为基准造窗口，形态与前端 `Date.toISOString()` 写出的一致
     fn window(starts_in: i64, ends_in: i64) -> String {
@@ -916,6 +1341,27 @@ mod recording_policy_status_tests {
             Arc::new(RwLock::new(Config::default())),
             Default::default(),
         )
+    }
+
+    #[tokio::test]
+    async fn recording_history_excludes_virtual_session_groups() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        for (id, kind) in [(1, "source"), (2, "group")] {
+            sqlx::query("INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path,kind) VALUES(?, '主播', 'https://example.com/1', '直播', ?, '', ?)")
+                .bind(id)
+                .bind(Utc::now())
+                .bind(kind)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        let Json(history) = get_streamer_info(State(pool)).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].info.id, 1);
     }
 
     /// 走完整的 数据库 -> /v1/streamers 处理函数 -> JSON 这条路
@@ -1066,6 +1512,26 @@ mod configuration_tests {
     use super::*;
     use crate::server::infrastructure::connection_pool::ConnectionManager;
     use tracing_subscriber::{EnvFilter, reload};
+
+    #[test]
+    fn streamer_mosaic_save_rejects_invalid_configuration() {
+        let invalid = serde_json::from_value(serde_json::json!({
+            "mosaic_config": {"enabled": true, "regions": []}
+        }))
+        .unwrap();
+        assert_eq!(
+            validate_streamer_mosaic(&Some(invalid))
+                .unwrap_err()
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert!(validate_streamer_mosaic(&None).is_ok());
+        let disabled = serde_json::from_value(serde_json::json!({
+            "mosaic_config": {"enabled": false, "regions": []}
+        }))
+        .unwrap();
+        assert!(validate_streamer_mosaic(&Some(disabled)).is_ok());
+    }
 
     /// Web 界面保存配置后，下载池 / 上传池容量立即换成新值，不需要重启
     #[tokio::test]

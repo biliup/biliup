@@ -5,6 +5,7 @@ use super::{
 use async_trait::async_trait;
 use base64::Engine;
 use chrono::Utc;
+use md5::{Digest, Md5};
 use rand::Rng;
 use rand::seq::SliceRandom;
 use regex::Regex;
@@ -13,14 +14,22 @@ use serde::Deserialize;
 use serde::de::Deserializer;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 use url::{Url, form_urlencoded};
 
+#[path = "douyu_cookie.rs"]
+mod cookie;
+#[path = "douyu_refresh.rs"]
+mod refresh;
+pub use refresh::{
+    DouyuCookieInput, DouyuCookieRefresh, DouyuLoginIdentity, DouyuRefreshClient, DouyuRefreshError,
+};
 #[path = "douyu_signature.rs"]
 mod signature;
 const DOUYU_WEB_DOMAIN: &str = "www.douyu.com";
+const DOUYU_WEB_DEVICE_ID: &str = "10000000000000000000000000001501";
 const DOUYU_MOBILE_DOMAIN: &str = "m.douyu.com";
 const DOUYU_HUOS_DOMAIN: &str = "openflv-huos.douyucdn2.cn";
 const DOUYU_HS_CDN: &str = "hs-h5";
@@ -52,6 +61,10 @@ impl Douyu {
             real_room_id: RwLock::new(HashMap::new()),
         }
     }
+
+    pub async fn validate_cookie(cookie: &str, client: &Client) -> LiveResult<bool> {
+        cookie::validate_cookie(cookie, client).await
+    }
 }
 
 #[async_trait]
@@ -82,6 +95,7 @@ struct DouyuLive<'a> {
     douyu_codec: String,
     douyu_disable_interactive_game: bool,
     douyu_danmaku: bool,
+    douyu_cookie: Option<String>,
     room_id: Option<String>,
     real_room_id_cache: &'a RwLock<HashMap<String, String>>,
 }
@@ -100,18 +114,25 @@ impl<'a> DouyuLive<'a> {
             douyu_codec: options.codec,
             douyu_disable_interactive_game: options.disable_interactive_game,
             douyu_danmaku: options.danmaku,
+            douyu_cookie: request.credentials.douyu_cookie,
             room_id: None,
             real_room_id_cache,
         }
     }
 
     async fn check_stream(&mut self) -> LiveResult<LiveStatus> {
+        self.douyu_cookie = self
+            .douyu_cookie
+            .as_deref()
+            .map(cookie::normalize_cookie_header)
+            .transpose()?
+            .filter(|header| !header.is_empty());
         let room_id = self.resolve_room_id().await?;
         self.room_id = Some(room_id.clone());
         let Some(room_info) = self.get_room_info(&room_id).await? else {
             return Ok(LiveStatus::Offline);
         };
-        let play_info = self.get_app_play_info(&room_id).await?;
+        let play_info = self.get_play_info(&room_id).await?;
         let raw_stream_url = select_stream_url(play_info, &self.douyu_codec);
         let raw_stream_url = self.maybe_build_huos_url(raw_stream_url).await;
         let raw_stream_url = with_ws_expire_override(raw_stream_url);
@@ -143,7 +164,6 @@ impl<'a> DouyuLive<'a> {
                 Err(err) => {
                     warn!(
                         error = ?err,
-                        url = raw_stream_url,
                         "failed to build Douyu huos URL, falling back to original stream URL"
                     );
                     raw_stream_url
@@ -193,11 +213,7 @@ impl<'a> DouyuLive<'a> {
             .await
             .map_err(|err| LiveError::custom(format!("读取斗鱼房间页面失败: {err}")))?;
 
-        if let Some(caps) = Regex::new(r#"roomInfo":\{"rid":(\d+)"#)
-            .unwrap()
-            .captures(&text)
-        {
-            let rid = caps[1].to_string();
+        if let Some(rid) = room_id_from_mobile_page(&text) {
             self.real_room_id_cache
                 .write()
                 .await
@@ -253,23 +269,35 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn fetch_room_info_text(&self, room_id: &str) -> Result<String, reqwest::Error> {
-        self.client
+        let mut request = self
+            .client
             .get(format!("https://{DOUYU_WEB_DOMAIN}/betard/{room_id}"))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
-            .send()
-            .await?
-            .text()
-            .await
+            .header("user-agent", DOUYU_USER_AGENT);
+
+        // 如果提供了cookie，添加到请求头以获取高清流质量
+        if let Some(ref cookie) = self.douyu_cookie {
+            request = request.header("cookie", cookie);
+        }
+
+        request.send().await?.text().await
     }
 
     async fn has_interactive_game(&self, room_id: &str) -> LiveResult<bool> {
-        let data: Value = self
+        let mut request = self
             .client
             .get(format!(
                 "https://{DOUYU_WEB_DOMAIN}/api/interactive/web/v2/list?rid={room_id}"
             ))
             .header("referer", format!("https://{DOUYU_WEB_DOMAIN}"))
-            .header("user-agent", DOUYU_USER_AGENT)
+            .header("user-agent", DOUYU_USER_AGENT);
+
+        // 添加Cookie以获取完整的互动游戏信息
+        if let Some(ref cookie) = self.douyu_cookie {
+            request = request.header("cookie", cookie);
+        }
+
+        let data: Value = request
             .send()
             .await
             .map_err(|err| LiveError::custom(format!("获取斗鱼互动游戏信息失败: {err}")))?
@@ -290,34 +318,229 @@ impl<'a> DouyuLive<'a> {
             .unwrap_or(false))
     }
 
-    async fn get_app_play_info(&self, room_id: &str) -> LiveResult<PlayInfo> {
-        let room_number: u32 = room_id
-            .parse()
-            .map_err(|_| LiveError::custom("斗鱼房间号无效"))?;
-        let device_id = if self.douyu_device_id.trim().is_empty() {
-            signature::DEFAULT_DEVICE_ID
+    async fn get_play_info(&self, room_id: &str) -> LiveResult<PlayInfo> {
+        self.get_play_info_at(
+            room_id,
+            &format!("https://{DOUYU_WEB_DOMAIN}"),
+            "https://playclient.douyucdn.cn",
+        )
+        .await
+    }
+
+    async fn get_play_info_at(
+        &self,
+        room_id: &str,
+        web_origin: &str,
+        app_origin: &str,
+    ) -> LiveResult<PlayInfo> {
+        let play_info = match self.get_web_play_response_at(room_id, web_origin).await {
+            Ok(response) if response.error == 0 && response.data.is_none() => {
+                let error = LiveError::custom("斗鱼网页播放信息缺少 data");
+                warn!(
+                    room_id,
+                    error = %error,
+                    "斗鱼网页播放接口返回不完整响应，回退 App 接口"
+                );
+                self.get_app_play_info_at(room_id, app_origin).await?
+            }
+            Ok(response) => play_info_from_response(response)?,
+            Err(WebPlayError::Rejected(error)) => return Err(error),
+            Err(WebPlayError::Protocol(error)) => {
+                warn!(
+                    room_id,
+                    error = %error,
+                    "斗鱼网页播放接口请求失败，回退 App 接口；App 接口可能限制登录画质"
+                );
+                self.get_app_play_info_at(room_id, app_origin).await?
+            }
+        };
+        self.log_stream_quality(room_id, &play_info);
+        Ok(play_info)
+    }
+
+    fn device_id(&self, web: bool) -> LiveResult<&str> {
+        let configured = self.douyu_device_id.trim();
+        let device_id = if !configured.is_empty() {
+            configured
         } else {
-            self.douyu_device_id.trim()
+            self.douyu_cookie
+                .as_deref()
+                .and_then(|header| {
+                    if web {
+                        cookie::cookie_value(header, "dy_did")
+                            .or_else(|| cookie::cookie_value(header, "acf_did"))
+                    } else {
+                        cookie::cookie_value(header, "acf_did")
+                    }
+                })
+                .unwrap_or(if web {
+                    DOUYU_WEB_DEVICE_ID
+                } else {
+                    signature::DEFAULT_DEVICE_ID
+                })
         };
         if device_id.len() > 36 || !device_id.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
             return Err(LiveError::custom(
-                "douyu_deviceId 应为 Cookie acf_did 的值（不超过 36 位字母或数字）",
+                "斗鱼设备 ID 应为不超过 36 位的字母或数字",
             ));
         }
+        Ok(device_id)
+    }
+
+    async fn get_web_play_response_at(
+        &self,
+        room_id: &str,
+        web_origin: &str,
+    ) -> Result<PlayResponse, WebPlayError> {
+        let room_number: u32 = room_id
+            .parse()
+            .map_err(|_| WebPlayError::Rejected(LiveError::custom("斗鱼房间号无效")))?;
+        let device_id = self.device_id(true).map_err(WebPlayError::Rejected)?;
+        // Browser exports can include unrelated application and tracking cookies.
+        // Sending those to the playback API can trigger HTTP 403 even with a valid
+        // login, causing the anonymous App fallback to lose access to original quality.
+        let playback_cookie = self
+            .douyu_cookie
+            .as_deref()
+            .map(web_playback_cookie_header)
+            .filter(|header| !header.is_empty());
+        let referer = format!("{web_origin}/{room_id}");
+        let mut key_request = self
+            .client
+            .get(format!(
+                "{web_origin}/wgapi/livenc/liveweb/websec/getEncryption"
+            ))
+            .query(&[("did", device_id)])
+            .header("user-agent", DOUYU_USER_AGENT)
+            .header("referer", &referer)
+            .timeout(Duration::from_secs(15));
+        if let Some(cookie) = &playback_cookie {
+            key_request = key_request.header("cookie", cookie);
+        }
+        let response = key_request
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|err| web_protocol_error("获取网页播放密钥失败", err))?;
+        let timestamp = response
+            .headers()
+            .get(reqwest::header::DATE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| chrono::DateTime::parse_from_rfc2822(value).ok())
+            .and_then(|value| u64::try_from(value.timestamp()).ok())
+            .map(Ok)
+            .unwrap_or_else(unix_now)
+            .map_err(WebPlayError::Rejected)?;
+        let encrypted: WebEncryptionResponse = response
+            .json()
+            .await
+            .map_err(|err| web_protocol_error("解析网页播放密钥失败", err))?;
+        if encrypted.error != 0 {
+            return Err(WebPlayError::Rejected(LiveError::custom(format!(
+                "斗鱼网页播放密钥错误: code={}",
+                encrypted.error
+            ))));
+        }
+        let key = encrypted.data.ok_or_else(|| {
+            WebPlayError::Protocol(LiveError::custom("斗鱼网页播放密钥缺少 data"))
+        })?;
+        let auth =
+            web_signature_auth(&key, room_number, timestamp).map_err(WebPlayError::Protocol)?;
+        let params = [
+            ("enc_data", key.enc_data.as_str()),
+            ("tt", &timestamp.to_string()),
+            ("did", device_id),
+            ("auth", &auth),
+            ("cdn", self.douyu_cdn.as_str()),
+            ("ver", "Douyu_new"),
+            ("rate", &self.douyu_rate.to_string()),
+            (
+                "hevc",
+                if self.douyu_codec.eq_ignore_ascii_case("HEVC") {
+                    "1"
+                } else {
+                    "0"
+                },
+            ),
+            ("iar", "0"),
+            ("ive", "0"),
+            ("sov", "0"),
+            ("fa", "0"),
+        ];
+        let mut play_request = self
+            .client
+            .post(format!("{web_origin}/lapi/live/getH5PlayV1/{room_id}"))
+            .form(&params)
+            .header("user-agent", DOUYU_USER_AGENT)
+            .header("referer", referer)
+            .timeout(Duration::from_secs(15));
+        if let Some(cookie) = &playback_cookie {
+            play_request = play_request.header("cookie", cookie);
+        }
+        play_request
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|err| web_protocol_error("请求网页播放信息失败", err))?
+            .json()
+            .await
+            .map_err(|err| web_protocol_error("解析网页播放信息失败", err))
+    }
+
+    fn log_stream_quality(&self, room_id: &str, info: &PlayInfo) {
+        let actual = info
+            .rate
+            .and_then(|rate| info.multirates.iter().find(|quality| quality.rate == rate));
+        debug!(
+            room_id,
+            requested_rate = self.douyu_rate,
+            actual_rate = ?info.rate,
+            quality = actual.map(|quality| quality.name.as_str()),
+            bitrate_kbps = actual.map(|quality| quality.bit),
+            has_hevc = info.player_1.as_ref().is_some_and(|url| !url.trim().is_empty()),
+            "斗鱼播放接口返回画质"
+        );
+        if let Some(actual_rate) = info.rate {
+            if actual_rate != self.douyu_rate {
+                warn!(
+                    room_id,
+                    requested_rate = self.douyu_rate,
+                    actual_rate,
+                    quality = actual.map(|quality| quality.name.as_str()),
+                    "斗鱼返回的画质与请求不同；原画可能需要有效的网页版登录 Cookie"
+                );
+            }
+        }
+    }
+
+    async fn get_app_play_info_at(&self, room_id: &str, app_origin: &str) -> LiveResult<PlayInfo> {
+        let room_number: u32 = room_id
+            .parse()
+            .map_err(|_| LiveError::custom("斗鱼房间号无效"))?;
+        let device_id = self.device_id(false)?;
         let path = format!("/lapi/live/appGetPlayer/stream/{room_id}");
         let timestamp = unix_now()?;
         let device = random_android_device();
         let mut params = std::collections::BTreeMap::new();
-        params.insert("txdw".to_string(), "0".to_string()); // 腾讯大王卡免流
+        params.insert("txdw".to_string(), "0".to_string());
         params.insert(
             "cdn".to_string(),
             self.douyu_cdn.trim_end_matches("-h5").to_string(),
         );
-        params.insert("token".to_string(), String::new()); // 已登录账号Token
+        // A web acf_auth cookie is not an Android login token.
+        params.insert("token".to_string(), String::new());
         params.insert("rate".to_string(), self.douyu_rate.to_string());
-        params.insert("hevc".to_string(), "1".to_string()); // 设备 Codec 偏好
-        params.insert("ilow".to_string(), "0".to_string()); // 低端设备
-        params.insert("iar".to_string(), "0".to_string()); // 首屏加载（非 0 时忽略 rate，提供最低画质）
+        params.insert(
+            "hevc".to_string(),
+            if self.douyu_codec.eq_ignore_ascii_case("HEVC") {
+                "1"
+            } else {
+                "0"
+            }
+            .to_string(),
+        );
+        params.insert("ilow".to_string(), "0".to_string());
+        params.insert("iar".to_string(), "0".to_string());
         params.insert("net".to_string(), "WIFI".to_string());
         params.insert("device".to_string(), device.clone());
         let csign = signature::csign(room_number, device_id, timestamp, &params);
@@ -329,30 +552,31 @@ impl<'a> DouyuLive<'a> {
         let auth = signature::header_auth(&path, timestamp, "android1", &params);
         let user_device =
             base64::engine::general_purpose::STANDARD.encode(format!("{device_id}|v8.2.2.0"));
-        let rsp = self
+        let cookie_header =
+            build_cookie_header(self.douyu_cookie.as_deref().unwrap_or_default(), device_id);
+        let response = self
             .client
-            .get(format!("https://playclient.douyucdn.cn{path}"))
+            .get(format!("{app_origin}{path}"))
             .query(&params)
             .header("User-Device", user_device)
             .header("aid", "android1")
-            .header("channel", "447") // 安装包下载渠道（447: H5移动端下载页）
+            .header("channel", "447")
             .header(
                 "User-Agent",
                 format!("android/8.2.2.0 (android 16; ; {device})"),
             )
             .header("time", timestamp.to_string())
             .header("auth", auth)
-            .header("Cookie", format!("acf_did={device_id}"))
+            .header("Cookie", cookie_header)
+            .timeout(Duration::from_secs(15))
             .send()
             .await
-            .map_err(|err| LiveError::custom(format!("请求斗鱼播放信息失败: {err}")))?;
-        let status = rsp.status();
-        let body = rsp
-            .text()
-            .await
-            .map_err(|err| LiveError::custom(format!("读取斗鱼播放信息失败: {err}")))?;
-        let parsed: PlayResponse = serde_json::from_str(&body).map_err(|err| {
-            LiveError::custom(format!("解析斗鱼播放信息失败 (HTTP {status}): {err}"))
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|err| {
+                LiveError::custom(format!("请求斗鱼 App 播放信息失败: {}", err.without_url()))
+            })?;
+        let parsed: PlayResponse = response.json().await.map_err(|err| {
+            LiveError::custom(format!("解析斗鱼 App 播放信息失败: {}", err.without_url()))
         })?;
         play_info_from_response(parsed)
     }
@@ -387,11 +611,21 @@ impl<'a> DouyuLive<'a> {
     }
 
     async fn request_txsecret(&self, api: &str, stream_id: &str) -> LiveResult<XP2PTxSecret> {
+        let device_id = self.device_id(false)?;
+
+        // 构建Cookie：如果用户提供了完整cookie，使用它；否则只使用device_id
+        let cookie_header = if let Some(ref cookie) = self.douyu_cookie {
+            build_cookie_header(cookie.trim(), device_id)
+        } else {
+            format!("acf_did={device_id}")
+        };
+
         let tx_secret: XP2PTxSecret = self
             .client
             .get(format!("{api}/p2p/get_txsecret"))
             .query(&[("lid", stream_id)])
             .header("user-agent", DOUYU_USER_AGENT)
+            .header("Cookie", cookie_header)
             .send()
             .await
             .map_err(|err| {
@@ -461,18 +695,116 @@ fn random_android_device() -> String {
     )
 }
 
+/// The App signature and User-Device header must use the same acf_did.
+fn build_cookie_header(user_cookie: &str, device_id: &str) -> String {
+    let mut parts = user_cookie
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .filter(|part| !part.starts_with("acf_did="))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    parts.push(format!("acf_did={device_id}"));
+    parts.join("; ")
+}
+
+/// The official Web playback endpoints need the login cookies and their Web DID.
+/// Keep the full imported source separately for renewal and other request types.
+fn web_playback_cookie_header(cookie: &str) -> String {
+    cookie
+        .split(';')
+        .map(str::trim)
+        .filter(|part| {
+            part.split_once('=')
+                .is_some_and(|(name, _)| name.starts_with("acf_") || name == "dy_did")
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+fn room_id_from_mobile_page(page: &str) -> Option<String> {
+    Regex::new(r#"roomInfo"\s*:\s*\{\s*"rid"\s*:\s*(\d+)"#)
+        .unwrap()
+        .captures(page)
+        .map(|captures| captures[1].to_string())
+}
+
+// Current official first-stream bundle: web-encrypt-57bbddd0.js.
+// Unlike the older ub98484234 JS signer, this key API uses repeated MD5.
+fn web_signature_auth(key: &WebEncryptionKey, room_id: u32, timestamp: u64) -> LiveResult<String> {
+    if key.enc_time > 10_000
+        || key.key.is_empty()
+        || key.rand_str.is_empty()
+        || key.enc_data.is_empty()
+    {
+        return Err(LiveError::custom("斗鱼网页播放密钥格式错误"));
+    }
+    let digest = |source: String| format!("{:x}", Md5::digest(source.as_bytes()));
+    let mut auth = key.rand_str.clone();
+    for _ in 0..key.enc_time {
+        auth = digest(format!("{auth}{}", key.key));
+    }
+    let suffix = if key.is_special == 1 {
+        String::new()
+    } else {
+        format!("{room_id}{timestamp}")
+    };
+    Ok(digest(format!("{auth}{}{suffix}", key.key)))
+}
+
+#[derive(Debug)]
+enum WebPlayError {
+    Protocol(LiveError),
+    Rejected(LiveError),
+}
+
+fn web_protocol_error(context: &str, error: reqwest::Error) -> WebPlayError {
+    WebPlayError::Protocol(LiveError::custom(format!(
+        "斗鱼{context}: {}",
+        error.without_url()
+    )))
+}
+
+#[derive(Deserialize)]
+struct WebEncryptionResponse {
+    error: i64,
+    data: Option<WebEncryptionKey>,
+}
+
+#[derive(Deserialize)]
+struct WebEncryptionKey {
+    key: String,
+    rand_str: String,
+    enc_time: u32,
+    is_special: u32,
+    enc_data: String,
+}
+
 fn select_stream_url(play_info: PlayInfo, codec: &str) -> String {
-    if codec == "HEVC" {
+    if play_info.is_mixed
+        && !play_info.mixed_url.trim().is_empty()
+        && !play_info.mixed_live.trim().is_empty()
+    {
+        return format!(
+            "{}/{}",
+            play_info.mixed_url.trim_end_matches('/'),
+            play_info.mixed_live.trim_start_matches('/')
+        );
+    }
+    if codec.eq_ignore_ascii_case("HEVC") {
         if let Some(url) = play_info.player_1.filter(|url| !url.trim().is_empty()) {
+            debug!("使用 HEVC 流: player_1");
             return url;
         }
-        warn!("斗鱼未提供 HEVC 流，回退到 AVC");
+        warn!("斗鱼未提供 HEVC 流 (player_1 为空)，回退到 AVC 流");
     }
-    format!(
+    let avc_url = format!(
         "{}/{}",
         play_info.rtmp_url.trim_end_matches('/'),
         play_info.rtmp_live.trim_start_matches('/')
-    )
+    );
+    debug!("使用 AVC 流: rtmp_url + rtmp_live");
+    avc_url
 }
 
 fn deserialize_optional_player_url<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -673,12 +1005,32 @@ struct PlayResponse {
     data: Option<PlayInfo>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Default)]
 struct PlayInfo {
     rtmp_url: String,
     rtmp_live: String,
     #[serde(default, deserialize_with = "deserialize_optional_player_url")]
     player_1: Option<String>,
+    // Web calls this multirates, Android calls the same list rateSetting.
+    #[serde(default, alias = "rateSetting")]
+    multirates: Vec<StreamQuality>,
+    #[serde(default)]
+    rate: Option<u32>,
+    #[serde(default)]
+    is_mixed: bool,
+    #[serde(default)]
+    mixed_url: String,
+    #[serde(default)]
+    mixed_live: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct StreamQuality {
+    rate: u32,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    bit: u32,
 }
 
 #[derive(Deserialize)]
@@ -716,6 +1068,7 @@ mod tests {
             rtmp_url: "https://cdn.example/live/".into(),
             rtmp_live: "/avc.flv".into(),
             player_1: Some("https://cdn.example/hevc.flv".into()),
+            ..PlayInfo::default()
         };
         for codec in ["", "AVC", "unexpected"] {
             assert_eq!(
@@ -755,6 +1108,7 @@ mod tests {
             rtmp_url: "http://hwa.douyucdn2.cn/live".into(),
             rtmp_live: "48699rh53o1mcUfL.flv?wsAuth=".into(),
             player_1: None,
+            ..PlayInfo::default()
         };
         assert_eq!(
             select_stream_url(sample, "HEVC"),
@@ -777,6 +1131,7 @@ mod tests {
             douyu_codec: String::new(),
             douyu_disable_interactive_game: false,
             douyu_danmaku: false,
+            douyu_cookie: None,
             room_id: None,
             real_room_id_cache,
         }
@@ -1024,6 +1379,344 @@ mod tests {
             );
             let response: BetardResponse = serde_json::from_str(&body).unwrap();
             assert_eq!(response.room.unwrap().is_live(), expected);
+        }
+    }
+
+    #[test]
+    fn app_cookie_uses_the_signed_device_id() {
+        let header = build_cookie_header("acf_auth=encoded%2F==; acf_did=old", "selected");
+        assert_eq!(cookie::cookie_value(&header, "acf_did"), Some("selected"));
+        assert_eq!(
+            cookie::cookie_value(&header, "acf_auth"),
+            Some("encoded%2F==")
+        );
+    }
+
+    #[test]
+    fn web_playback_cookie_omits_unrelated_fields_and_preserves_encoded_login() {
+        let header = web_playback_cookie_header(
+            " huya_ua={\"source\":\"browser\"}; acf_auth=encoded%2F==; PHPSESSID=other; acf_uid=42; dy_did=device; LTP0=passport-only; _ga=tracking; acf_did=app-device ",
+        );
+        assert_eq!(
+            header,
+            "acf_auth=encoded%2F==; acf_uid=42; dy_did=device; acf_did=app-device"
+        );
+        assert!(web_playback_cookie_header("PHPSESSID=other; _ga=tracking").is_empty());
+    }
+
+    #[test]
+    fn hevc_codec_selection_respects_user_choice() {
+        // 测试HEVC选择
+        let hevc_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+            ..PlayInfo::default()
+        };
+        assert_eq!(
+            select_stream_url(hevc_info, "HEVC"),
+            "https://cdn.example/hevc.flv"
+        );
+
+        // 测试AVC选择
+        let avc_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+            ..PlayInfo::default()
+        };
+        assert_eq!(
+            select_stream_url(avc_info, "AVC"),
+            "https://cdn.example/live/avc.flv"
+        );
+
+        // 测试空字符串也被当作AVC
+        let default_info = PlayInfo {
+            rtmp_url: "https://cdn.example/live/".into(),
+            rtmp_live: "/avc.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+            ..PlayInfo::default()
+        };
+        assert_eq!(
+            select_stream_url(default_info, ""),
+            "https://cdn.example/live/avc.flv"
+        );
+    }
+
+    fn encryption_fixture() -> &'static str {
+        r#"{"error":0,"data":{"key":"public-test-key","rand_str":"seed","enc_time":2,"is_special":0,"enc_data":"fixture+data/=="}}"#
+    }
+
+    #[test]
+    fn web_signature_matches_official_algorithm_fixture() {
+        let mut key: WebEncryptionKey =
+            serde_json::from_str::<WebEncryptionResponse>(encryption_fixture())
+                .unwrap()
+                .data
+                .unwrap();
+        // Independent known values for the official repeated-MD5 algorithm.
+        assert_eq!(
+            web_signature_auth(&key, 6979222, 1700000000).unwrap(),
+            "c084ce69399fa5d87fbda97be8b7befa"
+        );
+        key.is_special = 1;
+        assert_eq!(
+            web_signature_auth(&key, 6979222, 1700000000).unwrap(),
+            "73810131d86c959e9ba9c32e82577866"
+        );
+        key.enc_time = 10001;
+        assert!(web_signature_auth(&key, 6979222, 1700000000).is_err());
+    }
+
+    #[test]
+    fn mobile_alias_fixture_resolves_6657_and_keeps_loop_policy() {
+        let page = r#"<script id="vike_pageContext" type="application/json">{"pageProps":{"room":{"roomInfo":{"encInfo":"","roomInfo":{"rid":6979222,"vipId":6657}}}}}</script>"#;
+        assert_eq!(room_id_from_mobile_page(page).as_deref(), Some("6979222"));
+        let room: BetardResponse = serde_json::from_str(
+            r#"{"room":{"room_name":"fixture","show_status":1,"videoLoop":1}}"#,
+        )
+        .unwrap();
+        assert!(!room.room.unwrap().is_live());
+    }
+
+    #[test]
+    fn device_id_comes_from_cookie_unless_explicitly_configured() {
+        let cache = RwLock::new(HashMap::new());
+        let mut live = make_live("https://www.douyu.com/288016", &cache);
+        live.douyu_cookie = Some("dy_did=webDevice; acf_did=appDevice".into());
+        assert_eq!(live.device_id(true).unwrap(), "webDevice");
+        assert_eq!(live.device_id(false).unwrap(), "appDevice");
+        live.douyu_device_id = "overrideDevice".into();
+        assert_eq!(live.device_id(true).unwrap(), "overrideDevice");
+        assert_eq!(live.device_id(false).unwrap(), "overrideDevice");
+    }
+
+    #[test]
+    fn play_info_uses_real_quality_fields_and_mixed_stream() {
+        let info: PlayInfo = serde_json::from_str(r#"{"rtmp_url":"https://cdn.example/live","rtmp_live":"regular.flv","rate":4,"rateSetting":[{"rate":0,"name":"原画","bit":8000},{"rate":4,"name":"蓝光4M","bit":4000}]}"#).unwrap();
+        assert_eq!(info.rate, Some(4));
+        assert_eq!(info.multirates.len(), 2);
+        assert_eq!(info.multirates[1].bit, 4000);
+        let mixed = PlayInfo {
+            rtmp_url: "https://cdn.example/live".into(),
+            rtmp_live: "regular.flv".into(),
+            player_1: Some("https://cdn.example/hevc.flv".into()),
+            is_mixed: true,
+            mixed_url: "https://mixed.example/live/".into(),
+            mixed_live: "/mixed.flv".into(),
+            ..PlayInfo::default()
+        };
+        assert_eq!(
+            select_stream_url(mixed, "HEVC"),
+            "https://mixed.example/live/mixed.flv"
+        );
+    }
+
+    #[derive(Debug)]
+    struct RecordedRequest {
+        path: String,
+        method: String,
+        cookie: Option<String>,
+        query: HashMap<String, String>,
+        body: HashMap<String, String>,
+    }
+
+    struct MockApi {
+        web_status: axum::http::StatusCode,
+        web_body: String,
+        requests: std::sync::Mutex<Vec<RecordedRequest>>,
+    }
+
+    async fn mock_api_request(
+        axum::extract::State(mock): axum::extract::State<std::sync::Arc<MockApi>>,
+        request: axum::extract::Request,
+    ) -> axum::response::Response {
+        use axum::response::IntoResponse;
+        let path = request.uri().path().to_string();
+        let method = request.method().to_string();
+        let cookie = request
+            .headers()
+            .get("cookie")
+            .map(|value| value.to_str().unwrap().to_string());
+        let unrelated_cookie = cookie.as_deref().is_some_and(|header| {
+            cookie::cookie_value(header, "huya_ua").is_some()
+                || cookie::cookie_value(header, "PHPSESSID").is_some()
+        });
+        let query = form_urlencoded::parse(request.uri().query().unwrap_or_default().as_bytes())
+            .into_owned()
+            .collect();
+        let body = axum::body::to_bytes(request.into_body(), 32 * 1024)
+            .await
+            .unwrap();
+        let body = form_urlencoded::parse(&body).into_owned().collect();
+        mock.requests.lock().unwrap().push(RecordedRequest {
+            path: path.clone(),
+            method,
+            cookie,
+            query,
+            body,
+        });
+        let (status, body) = if path.ends_with("/getEncryption") {
+            (axum::http::StatusCode::OK, encryption_fixture().to_string())
+        } else if path.contains("getH5PlayV1") {
+            if unrelated_cookie {
+                // Reproduce the observed Web rejection of an otherwise valid
+                // full browser export, before the App fallback loses login quality.
+                (axum::http::StatusCode::FORBIDDEN, r#""forbidden""#.into())
+            } else {
+                (mock.web_status, mock.web_body.clone())
+            }
+        } else if path.contains("appGetPlayer") {
+            (axum::http::StatusCode::OK, r#"{"error":0,"data":{"rtmp_url":"https://cdn.example/live","rtmp_live":"fallback.flv","rate":3,"rateSetting":[{"name":"超清","rate":3,"bit":2000}]}}"#.into())
+        } else {
+            (axum::http::StatusCode::NOT_FOUND, String::new())
+        };
+        (
+            status,
+            [
+                ("content-type", "application/json"),
+                ("date", "Tue, 14 Nov 2023 22:13:20 GMT"),
+            ],
+            body,
+        )
+            .into_response()
+    }
+
+    async fn start_mock_api(
+        status: axum::http::StatusCode,
+        body: &str,
+    ) -> (String, std::sync::Arc<MockApi>, tokio::task::JoinHandle<()>) {
+        let mock = std::sync::Arc::new(MockApi {
+            web_status: status,
+            web_body: body.to_string(),
+            requests: std::sync::Mutex::new(Vec::new()),
+        });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let app = axum::Router::new()
+            .fallback(mock_api_request)
+            .with_state(mock.clone());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (origin, mock, task)
+    }
+
+    #[tokio::test]
+    async fn web_api_contract_preserves_cookie_codec_rate_and_server_downgrade() {
+        let body = r#"{"error":0,"data":{"rtmp_url":"https://cdn.example/live","rtmp_live":"source_4000.flv","player_1":"https://cdn.example/source_4000h.flv","rate":4,"multirates":[{"name":"蓝光4M","rate":4,"bit":4000}]}}"#;
+        for logged_in in [false, true] {
+            let (origin, mock, task) = start_mock_api(axum::http::StatusCode::OK, body).await;
+            let cache = RwLock::new(HashMap::new());
+            let mut live = make_live("https://www.douyu.com/6979222", &cache);
+            live.douyu_codec = "hevc".into();
+            live.douyu_cdn = "hw-h5".into();
+            // Dynamic room qualities must not be rejected by a fixed whitelist.
+            live.douyu_rate = 8;
+            if logged_in {
+                live.douyu_cookie = Some(cookie::normalize_cookie_header(r#"[{"name":"acf_auth","value":"fixture%2F==","domain":"www.douyu.com"},{"name":"dy_did","value":"fixtureDevice","domain":".douyu.com"},{"name":"huya_ua","value":"{\"source\":\"browser\"}","domain":".douyu.com"},{"name":"PHPSESSID","value":"other-session","domain":".douyu.com"}]"#).unwrap());
+            }
+            let info = live
+                .get_play_info_at("6979222", &origin, &origin)
+                .await
+                .unwrap();
+            assert_eq!(info.rate, Some(4));
+            assert_eq!(info.multirates[0].bit, 4000);
+            assert_eq!(
+                select_stream_url(info, "hevc"),
+                "https://cdn.example/source_4000h.flv"
+            );
+            let requests = mock.requests.lock().unwrap();
+            assert_eq!(
+                requests.len(),
+                2,
+                "successful downgraded Web response must not trigger App fallback"
+            );
+            assert_eq!(requests[0].method, "GET");
+            assert_eq!(requests[1].method, "POST");
+            let expected_did = if logged_in {
+                "fixtureDevice"
+            } else {
+                DOUYU_WEB_DEVICE_ID
+            };
+            assert_eq!(requests[0].query["did"], expected_did);
+            assert_eq!(requests[1].body["did"], expected_did);
+            assert_eq!(requests[1].body["auth"], "c084ce69399fa5d87fbda97be8b7befa");
+            assert_eq!(requests[1].body["tt"], "1700000000");
+            assert_eq!(requests[1].body["enc_data"], "fixture+data/==");
+            assert_eq!(requests[1].body["rate"], "8");
+            assert_eq!(requests[1].body["hevc"], "1");
+            assert_eq!(requests[1].body["cdn"], "hw-h5");
+            assert_eq!(requests[1].body["ver"], "Douyu_new");
+            assert_eq!(requests[1].body["iar"], "0");
+            for request in requests.iter() {
+                assert_eq!(request.cookie.is_some(), logged_in);
+                if logged_in {
+                    assert_eq!(
+                        cookie::cookie_value(request.cookie.as_deref().unwrap(), "acf_auth"),
+                        Some("fixture%2F==")
+                    );
+                    assert_eq!(
+                        request.cookie.as_deref(),
+                        Some("acf_auth=fixture%2F==; dy_did=fixtureDevice")
+                    );
+                }
+            }
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn web_business_errors_do_not_fall_back_to_app() {
+        for (code, message) in [
+            (-5, "closeRoom"),
+            (-9, "serverTime"),
+            (126, "restricted"),
+            (113, "banned"),
+        ] {
+            let body = format!(r#"{{"error":{code},"msg":"{message}","data":""}}"#);
+            let (origin, mock, task) = start_mock_api(axum::http::StatusCode::OK, &body).await;
+            let cache = RwLock::new(HashMap::new());
+            let live = make_live("https://www.douyu.com/6979222", &cache);
+            assert!(
+                live.get_play_info_at("6979222", &origin, &origin)
+                    .await
+                    .is_err()
+            );
+            assert_eq!(mock.requests.lock().unwrap().len(), 2);
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn web_http_and_protocol_failures_fall_back_to_app() {
+        for (status, body) in [
+            (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "temporarily unavailable",
+            ),
+            (axum::http::StatusCode::OK, "not JSON"),
+            (
+                axum::http::StatusCode::OK,
+                r#"{"error":0,"msg":"ok","data":null}"#,
+            ),
+        ] {
+            let (origin, mock, task) = start_mock_api(status, body).await;
+            let cache = RwLock::new(HashMap::new());
+            let live = make_live("https://www.douyu.com/6979222", &cache);
+            let info = live
+                .get_play_info_at("6979222", &origin, &origin)
+                .await
+                .unwrap();
+            assert_eq!(info.rtmp_live, "fallback.flv");
+            assert_eq!(info.rate, Some(3));
+            let requests = mock.requests.lock().unwrap();
+            assert_eq!(requests.len(), 3);
+            assert!(requests[2].path.contains("appGetPlayer"));
+            assert_eq!(requests[2].query["hevc"], "0");
+            assert_eq!(requests[2].query["rate"], "0");
+            assert_eq!(requests[2].query["cdn"], "hs");
+            task.abort();
         }
     }
 }

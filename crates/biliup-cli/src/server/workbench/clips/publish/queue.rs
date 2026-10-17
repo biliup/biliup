@@ -16,6 +16,7 @@ use super::{Archive, ClipVars, StudioOverride, cover_file, session_info, templat
 use crate::server::common::upload::{
     UploadContext, initialize_upload_context, submit_to_bilibili, upload_single_file_with_progress,
 };
+use crate::server::common::upload_observation::{NewTask, UploadObservations};
 use crate::server::config::Config;
 use crate::server::errors::AppError;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
@@ -50,13 +51,15 @@ pub const SUBMITTED: &str = "投稿已提交，无法撤回；投完后这里会
 pub enum Failure {
     /// 601：暂停队列。
     RateLimited(String),
+    /// 投稿请求的结果未知（例如超时）：请求可能已经到达 B 站，不能自动重发。
+    Unknown(String),
     Other(String),
 }
 
 impl Failure {
     fn message(&self) -> &str {
         match self {
-            Failure::RateLimited(m) | Failure::Other(m) => m,
+            Failure::RateLimited(m) | Failure::Unknown(m) | Failure::Other(m) => m,
         }
     }
 }
@@ -104,6 +107,18 @@ fn describe(report: &Report<AppError>) -> Failure {
         parts.push(report.to_string());
     }
     Failure::Other(parts.join("："))
+}
+
+/// 投稿请求的网络错误不能安全重试：请求可能已被 B 站处理，但客户端没有收到响应。
+fn describe_submit(report: &Report<AppError>) -> Failure {
+    if report
+        .frames()
+        .filter_map(|frame| frame.downcast_ref::<Kind>())
+        .any(Kind::is_transient)
+    {
+        return Failure::Unknown(format!("{UNKNOWN_HINT}（{}）", describe(report).message()));
+    }
+    describe(report)
 }
 
 /// 投稿 / 封面接口出错时库里只给 `ResponseData { code: .., message: ".." .. }` 的 Debug 串，
@@ -199,7 +214,7 @@ impl Connection for BiliConnection {
     async fn submit(&self, studio: &Studio) -> Result<Submitted, Failure> {
         let ret = submit_to_bilibili(&self.context.bilibili, studio, self.submit_api.as_deref())
             .await
-            .map_err(|e| describe(&e))?;
+            .map_err(|e| describe_submit(&e))?;
         let bvid = ret
             .data
             .as_ref()
@@ -278,6 +293,9 @@ struct Job {
     videos: Vec<Option<Video>>,
     /// 这一轮已经过了投稿前的最后一次取消检查，投稿请求随时会到 B 站。
     submitting: bool,
+    /// 投稿请求结果未知；只能由用户确认后重新入队。
+    submit_unknown: bool,
+    observation: Option<crate::server::common::upload_observation::TaskGuard>,
 }
 
 #[derive(Default)]
@@ -309,6 +327,11 @@ pub struct ClipPublisher {
     pool: ConnectionPool,
     exports: Arc<ClipExports>,
     backend: Arc<dyn Bilibili>,
+    observations: Option<Arc<UploadObservations>>,
+    /// Serializes session deletion with publication validation and in-memory admission.
+    session_admission: tokio::sync::Mutex<()>,
+    #[cfg(test)]
+    session_admission_attempts: Mutex<Option<tokio::sync::mpsc::UnboundedSender<()>>>,
     queue: Mutex<Queue>,
     wake: Notify,
     next_id: AtomicU64,
@@ -328,6 +351,7 @@ enum Outcome {
     },
     Paused(String),
     Failed(String),
+    SubmitUnknown(String),
     Cancelled,
 }
 
@@ -341,10 +365,36 @@ impl ClipPublisher {
             pool,
             exports,
             backend,
+            observations: None,
+            session_admission: tokio::sync::Mutex::new(()),
+            #[cfg(test)]
+            session_admission_attempts: Mutex::new(None),
             queue: Mutex::new(Queue::default()),
             wake: Notify::new(),
             next_id: AtomicU64::new(1),
         }
+    }
+
+    pub fn with_observations(mut self, observations: Arc<UploadObservations>) -> Self {
+        self.observations = Some(observations);
+        self
+    }
+
+    /// Holds the shared boundary while an API validates a session's clips and admits jobs,
+    /// or while the session deletion endpoint checks and deletes that session.
+    pub async fn lock_session_admission(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        #[cfg(test)]
+        if let Some(attempts) = lock(&self.session_admission_attempts).as_ref() {
+            let _ = attempts.send(());
+        }
+        self.session_admission.lock().await
+    }
+
+    #[cfg(test)]
+    pub fn watch_session_admission_attempts(&self) -> tokio::sync::mpsc::UnboundedReceiver<()> {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        *lock(&self.session_admission_attempts) = Some(sender);
+        receiver
     }
 
     /// 启动后台的发布循环（整个进程一个）。
@@ -419,12 +469,27 @@ impl ClipPublisher {
             created_at: now,
             updated_at: now,
         };
+        let observation = self.observations.as_ref().map(|observations| {
+            let mut observation = observations.register(NewTask {
+                source: "clip",
+                scheduler_group: "clip-publish",
+                title: "切片投稿",
+                streamer_name: None,
+                session_id: Some(session_id),
+                template_name: None,
+                fifo: true,
+            });
+            observation.pin();
+            observation
+        });
         queue.jobs.push(Job {
             view: view.clone(),
             settings,
             mode,
             videos: vec![None; clips.len()],
             submitting: false,
+            submit_unknown: false,
+            observation,
         });
         prune(&mut queue.jobs);
         drop(queue);
@@ -438,6 +503,10 @@ impl ClipPublisher {
         let was = queue.paused.take().is_some();
         for job in &mut queue.jobs {
             if job.view.state == JobState::Paused {
+                if let Some(observation) = &mut job.observation {
+                    observation.reopen();
+                    observation.observation().queued();
+                }
                 job.view.state = JobState::Queued;
                 job.view.detail = "排队中".into();
                 job.view.error = None;
@@ -462,6 +531,16 @@ impl ClipPublisher {
             .ok_or(ActionError::NotFound)?;
         if job.view.state != JobState::Failed {
             return Err(ActionError::Conflict("只有失败的任务可以重试".into()));
+        }
+        if job.submit_unknown {
+            return Err(ActionError::Conflict(format!(
+                "{}；确认没有之后再发布时带上 confirm_unknown: true",
+                UNKNOWN_HINT
+            )));
+        }
+        if let Some(observation) = &mut job.observation {
+            observation.reopen();
+            observation.observation().requeue();
         }
         job.view.state = JobState::Queued;
         job.view.error = None;
@@ -499,6 +578,9 @@ impl ClipPublisher {
             job.view.detail = "正在取消".into();
             job.view.updated_at = now_ms();
             return Ok(true);
+        }
+        if let Some(observation) = queue.jobs[index].observation.take() {
+            observation.finish("cancelled", None, None);
         }
         queue.jobs.remove(index);
         drop(queue);
@@ -597,6 +679,7 @@ impl ClipPublisher {
                 Ok(outcome) => outcome,
                 Err(e) => Outcome::Failed(format!("发布任务异常退出：{e}")),
             };
+            self.finish_observation(id, &outcome);
             self.finish(id, outcome);
         }
     }
@@ -656,6 +739,13 @@ impl ClipPublisher {
                 job.view.detail = "失败".into();
                 job.view.error = Some(message);
             }
+            Outcome::SubmitUnknown(message) => {
+                warn!(job = id, %message, "投稿结果未知，禁止自动重试");
+                job.view.state = JobState::Failed;
+                job.view.detail = "投稿结果未知".into();
+                job.view.error = Some(message);
+                job.submit_unknown = true;
+            }
         }
         prune(&mut queue.jobs);
     }
@@ -669,6 +759,51 @@ impl ClipPublisher {
     }
 
     async fn run(&self, id: u64) -> Outcome {
+        if self.snapshot(id).is_none() {
+            return Outcome::Failed("任务不见了".into());
+        }
+        let observation = lock(&self.queue)
+            .jobs
+            .iter()
+            .find(|job| job.view.id == id)
+            .and_then(|job| job.observation.as_ref().map(|guard| guard.observation()));
+        let outcome = if let Some(observation) = &observation {
+            observation.scope(self.run_inner(id)).await
+        } else {
+            self.run_inner(id).await
+        };
+        outcome
+    }
+
+    fn finish_observation(&self, id: u64, outcome: &Outcome) {
+        let mut queue = lock(&self.queue);
+        if let Some(job) = queue.jobs.iter_mut().find(|job| job.view.id == id)
+            && let Some(guard) = &mut job.observation
+        {
+            match &outcome {
+                Outcome::Done { bvid, .. } => {
+                    guard.finish_and_keep("succeeded", None, Some(bvid));
+                }
+                Outcome::Paused(message) => guard.finish_and_keep("paused", Some(message), None),
+                Outcome::SubmitUnknown(message) => {
+                    guard.finish_and_keep("unknown", Some(message), None);
+                }
+                Outcome::Failed(message) => {
+                    let observation = guard.observation();
+                    if observation.is_submitting() {
+                        guard.finish_and_keep("unknown", Some(message), None);
+                    } else {
+                        guard.finish_and_keep("failed", Some(message), None);
+                    }
+                }
+                Outcome::Cancelled => {
+                    guard.finish_and_keep("cancelled", None, None);
+                }
+            }
+        }
+    }
+
+    async fn run_inner(&self, id: u64) -> Outcome {
         let Some((view, settings, mode, mut videos)) = self.snapshot(id) else {
             return Outcome::Failed("任务不见了".into());
         };
@@ -704,12 +839,18 @@ impl ClipPublisher {
         }
         let title = archive.render().title;
         self.update(id, |job| job.view.title = Some(title.clone()));
+        if let Some(task) = crate::server::common::upload_observation::TaskObservation::current() {
+            task.title(&title);
+            task.template_name(Some(&archive.template.template_name));
+        }
         // 3. 登录、上传
         self.progress(id, Step::Upload, "登录 B 站、选上传线路", None);
         let connection = match self.backend.connect(&archive.template).await {
             Ok(c) => c,
             Err(Failure::RateLimited(m)) => return Outcome::Paused(m),
-            Err(Failure::Other(m)) => return Outcome::Failed(format!("登录 B 站失败：{m}")),
+            Err(Failure::Other(m) | Failure::Unknown(m)) => {
+                return Outcome::Failed(format!("登录 B 站失败：{m}"));
+            }
         };
         let sizes: Vec<u64> = parts
             .iter()
@@ -756,7 +897,7 @@ impl ClipPublisher {
                     });
                 }
                 Err(Failure::RateLimited(m)) => return Outcome::Paused(m),
-                Err(Failure::Other(m)) => {
+                Err(Failure::Other(m) | Failure::Unknown(m)) => {
                     let which = if total > 1 {
                         format!("上传 P{} 失败", index + 1)
                     } else {
@@ -803,12 +944,14 @@ impl ClipPublisher {
         }
         let submitted = match connection.submit(&studio).await {
             Ok(s) => s,
+            Err(Failure::Unknown(message)) => return Outcome::SubmitUnknown(message),
             Err(failure) => {
                 if let Err(e) = clips::end_submit(&self.pool, &ids, job).await {
                     warn!(job = id, error = %e, "投稿失败后清除投稿中标记失败");
                 }
                 return match failure {
                     Failure::RateLimited(m) => Outcome::Paused(m),
+                    Failure::Unknown(_) => unreachable!(),
                     Failure::Other(m) => Outcome::Failed(format!("投稿失败：{m}")),
                 };
             }

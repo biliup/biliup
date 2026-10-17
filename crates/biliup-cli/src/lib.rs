@@ -163,6 +163,8 @@ pub async fn serve_on(
         repositories::get_config(&conn_pool).await?
     };
     tools::set_configured_ffmpeg(loaded_config.ffmpeg_path.as_deref());
+    tools::set_configured_render_fonts(loaded_config.render_fonts_dir.as_deref());
+    tools::warn_legacy_danmaku_factory_path(loaded_config.danmaku_factory_path.as_deref());
     if cfg!(windows) {
         tracing::info!(
             create_no_window = biliup::tools::hides_console_windows(),
