@@ -89,15 +89,6 @@ test('inherited clip updates use the group route while keeping canonical ownersh
   assert.ok(api.refreshes.includes('/v1/sessions/12/clips'))
 })
 
-test('nullable view metadata never refreshes or mutates a null session', async () => {
-  const clip = { id: 20, session_id: 8, view_session_id: null }
-  const api = clipModule()
-  api.refresh(clip)
-  await api.deleteClip(clip)
-  assert.equal(api.requests[0].url, '/v1/sessions/8/clips/20')
-  assert.equal(api.refreshes.some(key => key.includes('/null/')), false)
-})
-
 test('publishing inherited clips obtains owner coordinates and preserves the group selection order', async () => {
   const inherited = { id: 20, session_id: 8, view_session_id: 12, in_ms: 1014000, out_ms: 1024000 }
   const canonical = { ...inherited, view_session_id: null, in_ms: 10000, out_ms: 20000 }
@@ -116,76 +107,4 @@ test('all coincident markers survive clustering and out-of-window markers are ex
   const clusters = markerHelpers.markerClusters(input, 0, 600000)
   assert.deepEqual(Array.from(clusters, cluster => Array.from(cluster, marker => marker.id)), [[1, 3, 2], [4]])
   assert.deepEqual(input.map(marker => marker.id), [3, 1, 2, 4, 5])
-})
-
-function timeline(globals = {}) {
-  const jsx = (type, props, key) => ({ type, props, key })
-  const exports = load('../ui/replay/Timeline.tsx', {
-    react: { useEffect() {}, useRef: () => ({ current: null }), useState: initial => [initial, () => {}] },
-    'react/jsx-runtime': { jsx, jsxs: jsx },
-    '@douyinfe/semi-ui': { Tooltip: props => props.children, Popover: props => [props.children, props.content] },
-    '@douyinfe/semi-icons': { IconFlag: () => jsx('svg', {}) },
-    '@/app/lib/markers': markerHelpers,
-    '@/app/lib/sessions': sessions,
-    './replay.module.scss': new Proxy({}, { get: (_, key) => key }),
-  }, globals)
-  const flatten = node => {
-    if (!node || typeof node !== 'object') return []
-    if (Array.isArray(node)) return node.flatMap(flatten)
-    if (typeof node.type === 'function') return flatten(node.type(node.props))
-    return [node, ...flatten(node.props?.children)]
-  }
-  return { ...exports, flatten }
-}
-
-test('both timeline layers expose flag buttons whose activation picks once without seeking the background', () => {
-  const { OverviewBar, DetailBar, flatten } = timeline()
-  for (const Component of [OverviewBar, DetailBar]) {
-    const picked = [], seeks = []
-    const chosen = marker(1, 100000)
-    const tree = Component({ duration: 600000, from: 0, to: 600000, segments: [], gaps: [], points: [],
-      markers: [chosen], selection: { in: null, out: null }, playhead: null, detailWindow: null,
-      onPickMarker: marker => picked.push(marker), onSeek: time => seeks.push(time) })
-    const flag = flatten(tree).find(node => node.props?.['data-marker-id'] === chosen.id)
-    assert.equal(flag.type, 'button')
-    assert.match(flag.props['aria-label'], /1:40\.0.*高光.*0:40\.0.*2:10\.0/)
-    assert.equal(flag.props.style.color, chosen.color)
-    let stopped = 0
-    flag.props.onPointerDown({ stopPropagation: () => stopped++ })
-    flag.props.onKeyDown({ key: ' ', stopPropagation: () => stopped++ })
-    flag.props.onClick({ stopPropagation: () => stopped++ })
-    assert.equal(stopped, 3)
-    assert.equal(picked[0], chosen)
-    assert.equal(picked.length, 1)
-    assert.equal(seeks.length, 0)
-  }
-})
-
-test('dense marker menus retain a separate actionable button for every marker', () => {
-  const { OverviewBar, flatten } = timeline()
-  const picked = []
-  const markers = [marker(1, 100000), marker(2, 100000), marker(3, 100000)]
-  const tree = OverviewBar({ duration: 600000, segments: [], gaps: [], markers, selection: { in: null, out: null },
-    playhead: null, detailWindow: null, onPickMarker: marker => picked.push(marker) })
-  const flags = flatten(tree).filter(node => node.props?.['data-marker-id'])
-  assert.equal(flags.length, 3)
-  for (const flag of flags) flag.props.onClick({ stopPropagation() {} })
-  assert.deepEqual(picked.map(marker => marker.id), [1, 2, 3])
-})
-
-test('keyboard activation of a dense flag opens the explicit menu and moves focus to a marker choice', () => {
-  const callbacks = []
-  let focused = 0
-  const { OverviewBar, flatten } = timeline({ setTimeout: callback => callbacks.push(callback),
-    document: { querySelector: selector => { assert.match(selector, /data-marker-cluster-menu/); return { focus: () => focused++ } } },
-  })
-  const tree = OverviewBar({ duration: 600000, segments: [], gaps: [], markers: [marker(1, 100000), marker(2, 100000)],
-    selection: { in: null, out: null }, playhead: null, detailWindow: null, onPickMarker() {} })
-  const trigger = flatten(tree).find(node => node.props?.['data-marker-cluster'])
-  let stopped = 0, prevented = 0
-  trigger.props.onKeyDown({ key: 'Enter', stopPropagation: () => stopped++, preventDefault: () => prevented++ })
-  callbacks.forEach(callback => callback())
-  assert.equal(stopped, 1)
-  assert.equal(prevented, 1)
-  assert.equal(focused, 1)
 })

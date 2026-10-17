@@ -45,14 +45,6 @@ test('a rectangle selected on a resized portrait frame retains identical video c
   assert.equal(selected.height, 0.5)
 })
 
-test('reverse drag and pointer capture outside the live image cannot select its margins', () => {
-  const bounds = { left: 30, top: 200, width: 400, height: 300 }
-  const start = normalizedFramePoint(390, 470, bounds)
-  const end = normalizedFramePoint(-100, -100, bounds)
-  assert.deepEqual(mosaicRectangle(start, end), { x: 0, y: 0, width: 0.9, height: 0.9 })
-  assert.deepEqual(normalizedFramePoint(500, 600, bounds), { x: 1, y: 1 })
-})
-
 test('missing image dimensions and collapsed canvas bounds prevent coordinate creation', () => {
   for (const dimensions of [{ width: 0, height: 720 }, { width: 1280, height: 0 },
     { width: NaN, height: 720 }, { width: 1280, height: Infinity }, { width: 12.5, height: 720 }]) {

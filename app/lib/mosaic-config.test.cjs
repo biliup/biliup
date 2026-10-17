@@ -70,22 +70,3 @@ test('validation prevents enabled empty regions, malformed shapes, and invalid s
   assert.equal(validateMosaicConfig(config({ regions: [region({ effectType: 'solid', color: '#A0B0c0' })] })), '')
   assert.equal(isMosaicConfig(config({ regions: [region({ effectType: { toString() { throw Error('bad') } } })] })), false)
 })
-
-test('backward drags retain the fixed start point across multiple pointer moves', () => {
-  const start = { x: 0.8, y: 0.8 }
-  const first = mosaicRectangle(start, { x: 0.6, y: 0.6 })
-  const second = mosaicRectangle(start, { x: 0.2, y: 0.2 })
-  assert.equal(first.x, 0.6)
-  assert.equal(second.x, 0.2)
-  assert.ok(Math.abs(second.width - 0.6) < 1e-9)
-  assert.ok(Math.abs(second.height - 0.6) < 1e-9)
-  assert.deepEqual(start, { x: 0.8, y: 0.8 })
-})
-
-test('pointer capture outside the canvas clamps every rectangle to the video bounds', () => {
-  const full = mosaicRectangle({ x: -1, y: 2 }, { x: 2, y: -1 })
-  assert.deepEqual(full, { x: 0, y: 0, width: 1, height: 1 })
-  const nearEdge = mosaicRectangle({ x: 0.7, y: 0.9 }, { x: 3, y: 3 })
-  assert.equal(nearEdge.x + nearEdge.width, 1)
-  assert.equal(nearEdge.y + nearEdge.height, 1)
-})

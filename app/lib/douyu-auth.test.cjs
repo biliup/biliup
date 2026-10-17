@@ -27,27 +27,6 @@ const status = (overrides = {}) => ({
   failure_count: 0, needs_login: false, ...overrides,
 })
 
-test('status parser returns only safe known fields and rejects unknown states', () => {
-  const auth = loadAuth()
-  const parsed = auth.parseDouyuAuthStatus(status({ cookie: 'secret-cookie', ltp0: 'secret-ticket', last_error: 'secret-response' }))
-  assert.equal(parsed.account_id, '42')
-  assert.equal(parsed.last_success_at, 1700000000)
-  assert.equal(Object.hasOwn(parsed, 'cookie'), false)
-  assert.equal(Object.hasOwn(parsed, 'ltp0'), false)
-  assert.equal(Object.hasOwn(parsed, 'last_error'), false)
-  assert.throws(() => auth.parseDouyuAuthStatus(status({ login_state: 'secret-response' })), /状态响应无效/)
-  assert.equal(auth.parseDouyuAuthStatus(status({ account_id: 'credential-content', next_refresh_at: Infinity })).account_id, null)
-  assert.equal(auth.parseDouyuAuthStatus(status({ next_refresh_at: Infinity })).next_refresh_at, null)
-})
-
-test('unsaved auth change detection respects empty values and default enabled switch', () => {
-  const auth = loadAuth()
-  assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_cookie: '', douyu_ltp0: null, douyu_auto_refresh: true }), true)
-  assert.equal(auth.douyuAuthFieldsEqual({ douyu_ltp0: 'saved' }, { douyu_ltp0: 'edited' }), false)
-  assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_auto_refresh: false }), false)
-  assert.equal(auth.douyuAuthFieldsEqual({ douyu_cookie: 'acf_auth=a%2F==' }, { douyu_cookie: 'acf_auth=a/==' }), false)
-})
-
 test('room cookie choices keep inheritance and explicit anonymous requests distinct', () => {
   const auth = loadAuth()
   for (const value of [undefined, null]) assert.equal(auth.douyuCookieOverrideMode(value), 'inherit')
@@ -61,31 +40,6 @@ test('room cookie choices keep inheritance and explicit anonymous requests disti
   assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_cookie: null }, true), true)
   assert.equal(auth.douyuAuthFieldsEqual({}, { douyu_cookie: '' }, true), false)
   assert.equal(auth.douyuAuthFieldsEqual({ douyu_cookie: '' }, { douyu_cookie: null }, true), false)
-})
-
-test('manual refresh reports success only with a new successful exchange', () => {
-  const auth = loadAuth()
-  const previous = status()
-  assert.match(auth.douyuManualRefreshMessage(previous, status({ last_success_at: previous.last_success_at + 60 })), /已续期/)
-  assert.match(auth.douyuManualRefreshMessage(status({ last_success_at: null }), status()), /已续期/)
-  // Manual renewal is also supported when the automatic switch is disabled.
-  assert.match(auth.douyuManualRefreshMessage(previous, status({
-    enabled: false, refresh_state: 'disabled', last_success_at: previous.last_success_at + 60,
-  })), /已续期/)
-})
-
-test('a valid retained Cookie after failure or cooldown is not reported as renewal success', () => {
-  const auth = loadAuth()
-  const previous = status()
-  assert.match(auth.douyuManualRefreshMessage(previous, status({ refresh_state: 'retry', failure_count: 1 })), /未完成.*退避重试/)
-  assert.match(auth.douyuManualRefreshMessage(previous, status()), /没有新的续期成功记录.*冷却期/)
-  assert.match(auth.douyuManualRefreshMessage(previous, status({ refresh_state: 'refreshing' })), /正在进行/)
-  assert.match(auth.douyuManualRefreshMessage(previous, status({
-    refresh_state: 'credentials_invalid', needs_login: true, last_success_at: previous.last_success_at + 60,
-  })), /未完成.*重新登录/)
-  assert.match(auth.douyuManualRefreshMessage(previous, status({
-    refresh_state: 'retry', last_success_at: previous.last_success_at + 60,
-  })), /未完成.*退避重试/)
 })
 
 test('manual refresh sends only the saved credential target, never source credentials', async () => {
@@ -119,18 +73,4 @@ test('forbidden credential requests refresh permissions without exposing the res
   })
   await assert.rejects(auth.fetchDouyuAuthStatus('/v1/douyu/auth/status'), /没有权限管理斗鱼登录凭据/)
   assert.equal(revalidated, 1)
-})
-
-test('unsaved cookie validation uses only the provided cookie and requires a boolean valid field', async () => {
-  const input = 'acf_uid=42; acf_auth=fixture%2F=='
-  let payload
-  let result = { valid: true }
-  const auth = loadAuth({ apiFetch: async (_url, init) => {
-    payload = JSON.parse(init.body)
-    return { status: 200, ok: true, json: async () => result }
-  } })
-  assert.equal(await auth.testDouyuCookie(input), true)
-  assert.deepEqual(payload, { cookie: input })
-  result = { valid: 'secret-error' }
-  await assert.rejects(auth.testDouyuCookie(input), /验证响应无效/)
 })

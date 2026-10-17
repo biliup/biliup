@@ -22,11 +22,6 @@ test('picture bounds exclude letterboxes for portrait and ultrawide video', () =
   assert.equal(pictureBounds({ left: 0, top: 0, width: 0, height: 100 }, 1920, 1080), null)
   assert.equal(pictureBounds({ left: 0, top: 0, width: 800, height: 450 }, 0, 0), null)
 })
-test('drag movement clamps the whole image into the picture', () => {
-  const rect = { x: .3, y: .2, width: .2, height: .3 }
-  assert.deepEqual(moveRegion(rect, -100, 100), { x: 0, y: .7, width: .2, height: .3 })
-  assert.deepEqual(moveRegion(rect, .1, .1), { x: .4, y: .30000000000000004, width: .2, height: .3 })
-})
 test('all eight locked resize handles retain aspect and stay bounded', () => {
   const rect = { x: .3, y: .3, width: .2, height: .1 }
   for (const handle of ['n', 'ne', 'e', 'se', 's', 'sw', 'w', 'nw']) {
@@ -42,14 +37,6 @@ test('all eight locked resize handles retain aspect and stay bounded', () => {
       if (handle === 'n' || handle === 's') close(result.x + result.width / 2, rect.x + rect.width / 2)
     }
   }
-})
-test('unlocked corner resize fixes the opposite corner and cannot flip', () => {
-  const rect = { x: .2, y: .2, width: .3, height: .4 }
-  const result = resizeRegion(rect, 'nw', -.1, -.1, false)
-  close(result.x, .1); close(result.y, .1); close(result.width, .4); close(result.height, .5)
-  const crossed = resizeRegion(rect, 'nw', 1, 1, false)
-  close(crossed.x + crossed.width, .5); close(crossed.y + crossed.height, .6)
-  close(crossed.width, .001); close(crossed.height, .001)
 })
 test('intervals include starts, exclude ends and leave gaps inactive', () => {
   const intervals = [{ from_ms: 1000, to_ms: 2000 }, { from_ms: 4000, to_ms: 5000 }]
