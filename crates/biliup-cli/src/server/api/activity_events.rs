@@ -1,8 +1,8 @@
 //! Service activity, derived from the business records at read time.
 //!
 //! 事件不落库：每次读取时从场次、分段、压制任务和上传任务推导。写入路径因此不用登记活动，
-//! 代价是历史不再独立于业务记录 —— 被删掉的记录（保留策略、手动删除）连同它的事件一起消失，
-//! 同一个对象的多次状态变化只留下当前状态。
+//! 代价是历史不再独立于业务记录 —— 被删掉的记录连同它的事件一起消失，上传任务也只留下登记时间
+//! 与当前状态（压制任务的排队/开始/结束三个节点能从时间戳还原，中间的进度更新还原不了）。
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -32,11 +32,15 @@ pub struct ActivityEvent {
 /// 每个来源一段 SELECT，再按时间取最近的若干条。
 ///
 /// - `id` 用「来源段号 × 10^12 + 该行 id」拼出来：派生事件没有自己的主键，但客户端拿它当列表
-///   key，必须稳定、且跨来源不重复。
+///   key，必须稳定、且跨来源不重复。段号：1 场次开始、2 场次结束、3 分段完成、4/5/6 压制任务的
+///   排队/开始/结束、7 上传登记、8 上传当前状态。
 /// - 每段各取 `limit` 条再合并：全局最近 `limit` 条一定落在各段最近的 `limit` 条里，结果不变，
 ///   但每张表只需要扫自己那一段（`stream_sessions`、`segments` 上没有排序列的索引）。
 /// - 场次的时间以 `started_at` 为准，Python 版留下的只有 `date` 的老录像退回按日期算 —— 与升级
 ///   时的回填口径一致；分段事件沿用回填的保守口径，只在场次有 `started_at` 时才有时间基准。
+/// - 压制任务的状态机是单向的（开始要求 `queued`，结束要求 `queued` 或 `running`），所以排队、开始、
+///   结束三个节点能从 `created_at` / `started_at` / `finished_at` 还原，不必把每次状态变化落库；
+///   只有进度更新（phase、ratio）还原不了，也就没有事件。
 const DERIVED_EVENTS: &str = r#"
 WITH recent_limit(n) AS (SELECT ?)
 SELECT id,kind,ts,text,sub,session_id,entity_id FROM (
@@ -60,22 +64,36 @@ SELECT id,kind,ts,text,sub,session_id,entity_id FROM (
     WHERE s.kind='source' AND g.state='finished' AND s.started_at > 0 AND g.end_ms IS NOT NULL
     ORDER BY ts DESC LIMIT (SELECT n FROM recent_limit)
 ) UNION ALL SELECT * FROM (
-    SELECT 4000000000000 + j.id AS id, 'render' AS kind, j.updated_at AS ts,
-        '压制任务 #' || j.id AS text,
-        CASE j.state WHEN 'queued' THEN '等待压制' WHEN 'running' THEN '正在压制'
-            WHEN 'ready' THEN '压制完成' WHEN 'failed' THEN '压制失败'
-            WHEN 'cancelled' THEN '压制已取消' END AS sub,
+    SELECT 4000000000000 + j.id AS id, 'render' AS kind, j.created_at AS ts,
+        '压制任务 #' || j.id AS text, '等待压制' AS sub,
         j.session_id AS session_id, j.id AS entity_id
     FROM render_jobs j
     ORDER BY ts DESC LIMIT (SELECT n FROM recent_limit)
 ) UNION ALL SELECT * FROM (
-    SELECT 5000000000000 + t.rowid AS id, 'upload_queued' AS kind, t.created_at AS ts,
+    SELECT 5000000000000 + j.id AS id, 'render' AS kind, j.started_at AS ts,
+        '压制任务 #' || j.id AS text, '正在压制' AS sub,
+        j.session_id AS session_id, j.id AS entity_id
+    FROM render_jobs j
+    WHERE j.started_at IS NOT NULL
+    ORDER BY ts DESC LIMIT (SELECT n FROM recent_limit)
+) UNION ALL SELECT * FROM (
+    SELECT 6000000000000 + j.id AS id, 'render' AS kind,
+        COALESCE(j.finished_at,j.updated_at) AS ts,
+        '压制任务 #' || j.id AS text,
+        CASE j.state WHEN 'ready' THEN '压制完成' WHEN 'failed' THEN '压制失败'
+            WHEN 'cancelled' THEN '压制已取消' END AS sub,
+        j.session_id AS session_id, j.id AS entity_id
+    FROM render_jobs j
+    WHERE j.state IN ('ready','failed','cancelled')
+    ORDER BY ts DESC LIMIT (SELECT n FROM recent_limit)
+) UNION ALL SELECT * FROM (
+    SELECT 7000000000000 + t.rowid AS id, 'upload_queued' AS kind, t.created_at AS ts,
         json_extract(t.snapshot,'$.title') AS text, '上传任务已登记' AS sub,
         json_extract(t.snapshot,'$.session_id') AS session_id, NULL AS entity_id
     FROM upload_observation_tasks t
     ORDER BY ts DESC LIMIT (SELECT n FROM recent_limit)
 ) UNION ALL SELECT * FROM (
-    SELECT 6000000000000 + t.rowid AS id, 'upload_' || t.state AS kind, t.updated_at AS ts,
+    SELECT 8000000000000 + t.rowid AS id, 'upload_' || t.state AS kind, t.updated_at AS ts,
         json_extract(t.snapshot,'$.title') AS text,
         CASE t.state WHEN 'queued' THEN '等待上传' WHEN 'running' THEN '正在处理上传'
             WHEN 'retrying' THEN '上传重试' WHEN 'submitting' THEN '正在提交稿件'

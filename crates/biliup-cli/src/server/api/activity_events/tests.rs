@@ -68,7 +68,7 @@ async fn old_recordings_appear_with_their_business_times() {
 }
 
 #[tokio::test]
-async fn every_event_reflects_the_current_state_of_its_business_record() {
+async fn every_event_reflects_the_milestones_of_its_business_record() {
     let pool = fixture().await;
     sqlx::raw_sql(
         "INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path) \
@@ -85,9 +85,12 @@ async fn every_event_reflects_the_current_state_of_its_business_record() {
         UPDATE segments SET state='finished' WHERE id=5;
         INSERT INTO render_jobs(id,session_id,state,phase,spec_json,created_at,updated_at) \
             VALUES(5,5,'queued','queued','{}',1900000010000,1900000010000);
-        UPDATE render_jobs SET state='running',updated_at=1900000011000 WHERE id=5;
+        UPDATE render_jobs SET state='running',phase='preparing',started_at=1900000011000,updated_at=1900000011000 WHERE id=5;
         UPDATE render_jobs SET phase='编码',ratio=0.5,updated_at=1900000012000 WHERE id=5;
-        UPDATE render_jobs SET state='failed',updated_at=1900000013000,finished_at=1900000013000 WHERE id=5;
+        UPDATE render_jobs SET state='failed',error='boom',updated_at=1900000013000,finished_at=1900000013000 WHERE id=5;
+        INSERT INTO render_jobs(id,session_id,state,phase,spec_json,created_at,updated_at) \
+            VALUES(6,5,'queued','queued','{}',1900000014000,1900000014000);
+        UPDATE render_jobs SET state='cancelled',phase='cancelled',updated_at=1900000015000,finished_at=1900000015000 WHERE id=6;
         INSERT INTO upload_observation_tasks(id,source,scheduler_group,task_order,state,created_at,updated_at,snapshot) \
             VALUES('t1','sync','sync',1,'running',1900000020000,1900000020000,'{\"title\":\"新主播 投稿\",\"session_id\":5}');
         UPDATE upload_observation_tasks SET state='submitting',updated_at=1900000021000 WHERE id='t1';
@@ -101,15 +104,42 @@ async fn every_event_reflects_the_current_state_of_its_business_record() {
         .iter()
         .filter(|event| event.session_id == Some(5))
         .collect();
-    assert_eq!(own.len(), 6);
+    assert_eq!(own.len(), 10);
     // 分段的状态改来改去，只留下一次「已完成」
     assert_eq!(own.iter().filter(|event| event.kind == "file").count(), 1);
-    // 压制任务只反映最后一次状态，中间的进度更新不产生事件
-    let render: Vec<_> = own.iter().filter(|event| event.kind == "render").collect();
-    assert_eq!(render.len(), 1);
-    assert_eq!(render[0].sub.as_deref(), Some("压制失败"));
-    assert_eq!(render[0].ts, 1900000013000);
-    // 上传任务：登记一次，加上当前状态
+    // 压制任务：排队、开始、结束三个节点都在；中间的进度更新不产生事件
+    let renders: Vec<_> = own.iter().filter(|event| event.kind == "render").collect();
+    assert_eq!(renders.len(), 5);
+    let mut job5: Vec<_> = renders
+        .iter()
+        .filter(|event| event.entity_id == Some(5))
+        .copied()
+        .collect();
+    job5.sort_by_key(|event| event.ts);
+    assert_eq!(
+        job5.iter()
+            .map(|event| event.sub.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("等待压制"), Some("正在压制"), Some("压制失败")]
+    );
+    assert_eq!(
+        job5.iter().map(|event| event.ts).collect::<Vec<_>>(),
+        [1900000010000, 1900000011000, 1900000013000]
+    );
+    // 没跑起来就被取消的任务只有排队与结束两个节点
+    let mut job6: Vec<_> = renders
+        .iter()
+        .filter(|event| event.entity_id == Some(6))
+        .copied()
+        .collect();
+    job6.sort_by_key(|event| event.ts);
+    assert_eq!(
+        job6.iter()
+            .map(|event| event.sub.as_deref())
+            .collect::<Vec<_>>(),
+        [Some("等待压制"), Some("压制已取消")]
+    );
+    // 上传任务：登记一次，加上当前状态（中间的过渡不落库，还原不了）
     let queued = own
         .iter()
         .find(|event| event.kind == "upload_queued")

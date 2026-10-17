@@ -165,7 +165,8 @@ CREATE TABLE upload_observation_files (
 CREATE INDEX upload_observation_file_order ON upload_observation_files(task_id,file_order);
 
 -- 活动历史：不落表，读取时从业务记录推导
--- 事件（场次开始/结束、分段完成、压制状态、上传状态）由 GET /v1/activity-events 在读取时从
--- stream_sessions、segments、render_jobs、upload_observation_tasks 推导，写入路径不登记、也不
--- 需要触发器。代价是历史不再独立于业务记录：被删掉的记录连同它的事件一起消失，同一个对象
--- 的多次状态变化只留下当前状态。
+-- 事件（场次开始/结束、分段完成、压制任务的排队/开始/结束、上传任务的登记与当前状态）由
+-- GET /v1/activity-events 在读取时从 stream_sessions、segments、render_jobs 和
+-- upload_observation_tasks 推导，写入路径不登记、也不需要触发器。代价是历史不再独立于业务
+-- 记录：被删掉的记录连同它的事件一起消失，上传任务只知道登记时间与当前状态 —— 压制任务能靠
+-- created_at / started_at / finished_at 还原三个节点，是因为它的状态机是单向的。
