@@ -2,7 +2,7 @@
 
 Tauri 壳：在本进程内启动 biliup 服务（`biliup_cli::entry::serve`），监听 `127.0.0.1:19159`（被占用时换一个空闲端口），就绪后在窗口里打开 WebUI。没有 sidecar 子进程。
 
-发布 workflow 会从根目录 `Cargo.toml` 的 `[workspace.package] version` 同步安装包版本。本地需要打出同版本安装包时，先运行 `node .github/scripts/desktop-version.mjs`。
+桌面安装包版本手写在 `tauri-app/src-tauri/tauri.conf.json` 的 `version`，发布前要手工与根目录 `Cargo.toml` 的 `[workspace.package] version` 改成一致；`test.yml` 的 `desktop-lockfile` 任务会核对这两个值。
 
 - 数据目录（`data/`、`ds_update.log`、`cookies.json` 和录像都在这里）：
   - Windows，程序不在系统盘（`%SystemDrive%`）上：就是安装目录，与旧版相同。
