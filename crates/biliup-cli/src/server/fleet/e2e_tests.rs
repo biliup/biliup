@@ -46,7 +46,10 @@ async fn node_services(dir: &std::path::Path) -> ServiceRegister {
     let pool = ConnectionManager::new_pool(dir.join("data.sqlite3").to_str().unwrap())
         .await
         .unwrap();
-    let config = Config::default();
+    let mut config = Config::default();
+    // 磁盘告警阈值默认是总容量的 5%：夹具不该随宿主机的剩余空间变化（机器快满时会多出一条
+    // 磁盘告警，把数告警条数的断言搅成时红时绿）。给节点一个固定的小阈值，阈值逻辑本身有单元测试。
+    config.min_free_space = Some(1 << 30);
     let managers = DownloadManager::new(config.pool1_size, config.pool2_size, pool.clone());
     managers.add_plugin(Arc::new(StuckPlatform)).await;
     let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
