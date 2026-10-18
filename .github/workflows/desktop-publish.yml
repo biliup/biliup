@@ -36,7 +36,6 @@ jobs:
         node-version: lts/*
     # biliup-cli 通过 rust-embed 把 out/ 编进桌面程序
     - name: Build frontend
-      shell: bash
       run: |
         npm install
         npm run build
