@@ -329,6 +329,7 @@ async fn grouped_dvr_follows_the_real_live_tail() {
         .await
         .unwrap()
         .id;
+    let second = live::unique_session_id(&pool, second).await;
     store::set_started_at(&pool, second, origin + 15000)
         .await
         .unwrap();
