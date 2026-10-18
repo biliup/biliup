@@ -2302,6 +2302,25 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
             .await
             .unwrap();
     let expected = received.canonicalize().unwrap_or_else(|_| received.clone());
+    // 凭据是一次接收里分两步落地的：先写文件，随后才登记进 configuration。
+    // 文件可读不代表登记已可见，等登记跟上再断言（断言本身不变）。
+    eventually(
+        "the primary records the received credential",
+        Duration::from_secs(20),
+        || {
+            let pool = c.pool.clone();
+            let expected = expected.to_string_lossy().into_owned();
+            async move {
+                let registered: Vec<String> =
+                    sqlx::query_scalar("SELECT value FROM configuration WHERE key = 'bilibili-cookies'")
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap();
+                registered == [expected]
+            }
+        },
+    )
+    .await;
     assert_eq!(registered, [expected.to_string_lossy().into_owned()]);
     for entry in std::fs::read_dir(dir.path()).unwrap() {
         let path = entry.unwrap().path();
