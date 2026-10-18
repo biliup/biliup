@@ -223,6 +223,7 @@ impl Upos {
             title: None,
             filename: truncated_filename,
             desc: "".into(),
+            cid: None,
         })
     }
 }

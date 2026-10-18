@@ -334,6 +334,13 @@ pub struct Video {
     pub title: Option<String>,
     pub filename: String,
     pub desc: String,
+    /// 已发布分P的 cid。
+    ///
+    /// 编辑稿件时 B 站要求已存在的分P回传自己的 cid，否则会把它们当作本次新增的
+    /// 分P，长稿件就会返回 21058「单次投稿添加的分P数已达最大上限」。
+    /// 新上传的分P没有 cid，序列化时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cid: Option<u64>,
 }
 
 impl Video {
@@ -342,6 +349,7 @@ impl Video {
             title: None,
             filename: filename.into(),
             desc: "".into(),
+            cid: None,
         }
     }
 
