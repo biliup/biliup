@@ -91,7 +91,7 @@ export default function Home() {
           )}
           {d.videosFailed && (
             <div className={styles.warnBox}>
-              <Text>录制文件列表加载失败,文件总量与文件事件暂不可用。</Text>
+              <Text>录制文件列表加载失败,文件总量暂不可用。</Text>
             </div>
           )}
           {d.statusFailed && (
@@ -169,14 +169,14 @@ export default function Home() {
             )}
           </section>
 
-          {/* 最近事件:前端合成的 24h 活动流 */}
+          {/* 最近事件来自后端持久化活动记录，与其它概览数据独立加载 */}
           <section className={styles.section}>
             <div className={styles.secHead}>
               <span className={styles.secLabel}>最近事件</span>
-              <span className={styles.secNote}>最近 24h</span>
+              <span className={styles.secNote}>最新 12 条</span>
             </div>
             <div className={styles.timelineCard}>
-              <EventTimeline events={d.events} />
+              <EventTimeline events={d.events} error={d.activityFailed} />
             </div>
           </section>
         </>

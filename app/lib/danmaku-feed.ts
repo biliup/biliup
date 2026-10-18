@@ -62,7 +62,9 @@ export class DanmakuFeed {
   private connectIfNeeded() {
     if (!this.active || this.source || this.ids.length === 0 || typeof window === 'undefined') return
     if (![...this.listeners.values()].some((set) => set.size > 0)) return
-    const source = new EventSource(`${API_BASE}/v1/danmaku?ids=${this.ids.join(',')}`)
+    const source = new EventSource(`${API_BASE}/v1/danmaku?ids=${this.ids.join(',')}`, {
+      withCredentials: true,
+    })
     const handle = (e: MessageEvent<string>) => {
       let frame: DanmakuFrame
       try {

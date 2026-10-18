@@ -393,6 +393,7 @@ pub async fn publish_clip(
     if let Err(message) = body.settings().validate() {
         return bad_request(message);
     }
+    let _admission = publisher.lock_session_admission().await;
     let mut clip = match clips::get(&pool, cid).await {
         Ok(Some(clip)) => clip,
         Ok(None) => return clip_not_found(),
@@ -432,6 +433,7 @@ pub async fn publish_batch(
     State(publisher): State<Arc<ClipPublisher>>,
     Json(body): Json<PublishBatch>,
 ) -> Response {
+    let _admission = publisher.lock_session_admission().await;
     let clips = match load_clips(&pool, &body.clip_ids).await {
         Ok(clips) => clips,
         Err(rejection) => return rejection.into_response(),
@@ -447,10 +449,24 @@ pub struct JobsQuery {
 
 /// `GET /v1/publish-jobs?session=`
 pub async fn list_publish_jobs(
+    State(pool): State<ConnectionPool>,
     State(publisher): State<Arc<ClipPublisher>>,
     Query(query): Query<JobsQuery>,
-) -> Json<QueueView> {
-    Json(publisher.view(query.session))
+) -> Result<Json<QueueView>, Response> {
+    let Some(session) = query.session else {
+        return Ok(Json(publisher.view(None)));
+    };
+    let members = crate::server::workbench::session_groups::timeline(&pool, session)
+        .await
+        .map_err(internal)?;
+    let mut view = publisher.view(None);
+    view.jobs.retain(|job| {
+        job.session_id == session
+            || members
+                .iter()
+                .any(|member| member.source_session_id == job.session_id)
+    });
+    Ok(Json(view))
 }
 
 /// `POST /v1/publish-jobs/resume`：601 暂停后继续。

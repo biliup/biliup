@@ -6,6 +6,7 @@ updated = 2020-05-01T08:00:00+00:00
 draft = false
 
 [extra]
+language_code = "en-US"
 class = "page single"
 +++
 

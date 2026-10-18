@@ -1,0 +1,2 @@
+# Inputs of the golden corpus (the repository ignores *.xml recordings).
+!*.xml

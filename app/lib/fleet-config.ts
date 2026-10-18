@@ -14,6 +14,7 @@ export const DELIVERABLE_KEYS = [
   'downloader',
   'sync_save_dir',
   'ffmpeg_path',
+  'render_fonts_dir',
   'file_size',
   'segment_time',
   'filtering_threshold',
@@ -91,6 +92,7 @@ export const PER_NODE_KEYS = [
   'pool1_size',
   'pool2_size',
   'ffmpeg_path',
+  'render_fonts_dir',
   'sync_save_dir',
   'min_free_space',
   'loggers_level',
@@ -114,13 +116,17 @@ export const LOCAL_SECRET_FIELDS = [
   'user.niconico-user-session',
   'user.niconico-purge-credentials',
   'kuaishou_cookie',
+  'douyu_cookie',
+  'douyu_ltp0',
+  'douyu_refresh_device_id',
+  'douyu_auto_refresh',
   'douyu_deviceId',
   'twitcasting_password',
 ]
 
 export type ConfigValues = Record<string, unknown>
 
-/** `GET /v1/fleet/configuration`；`PUT` 的响应多了 `changed` 与 `ignored` */
+/** `GET /v1/fleet/configuration`；条件 `PUT` 的响应多了 `changed` 与 `ignored` */
 export interface FleetConfig {
   /** 还没保存过为 0 */
   version: number
@@ -175,24 +181,65 @@ export const nodeConfigKey = (id: number) => `/v1/fleet/nodes/${id}/config`
 async function putJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(API_BASE + path, {
     method: 'PUT',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
+  if (res.status === 409) {
+    const payload = await res.json().catch(() => ({}))
+    throw new FleetConfigConflictError(
+      typeof payload.message === 'string' ? payload.message : '配置已被其他管理员更新',
+      payload.current,
+    )
+  }
   await handleResponse(res)
   return res.json()
 }
 
-export function saveFleetConfig(config: ConfigValues) {
-  return putJson<FleetConfig>(FLEET_CONFIG_KEY, config)
+export class FleetConfigConflictError extends Error {
+  constructor(message: string, readonly current: unknown) {
+    super(message)
+    this.name = 'FleetConfigConflictError'
+  }
 }
 
-export function saveNodeOverride(id: number, override: ConfigValues) {
-  return putJson<{ node_id: number; override: ConfigValues; ignored: string[] }>(nodeConfigKey(id), override)
+export function saveFleetConfig(expectedVersion: number, config: ConfigValues) {
+  return putJson<FleetConfig>(FLEET_CONFIG_KEY, { expected_version: expectedVersion, config })
+}
+
+export function saveNodeOverride(
+  id: number,
+  expectedOverride: ConfigValues,
+  expectedGlobalVersion: number,
+  override: ConfigValues,
+) {
+  return putJson<{ node_id: number; override: ConfigValues; ignored: string[] }>(nodeConfigKey(id), {
+    expected_override: expectedOverride,
+    expected_global_version: expectedGlobalVersion,
+    override,
+  })
 }
 
 /** 表单清空后的值：Semi 清空输入框会给 undefined 或空串，接口里一律是 null */
 const blank = (value: unknown) => (value === undefined || value === '' ? null : value)
 const same = (a: unknown, b: unknown) => JSON.stringify(blank(a)) === JSON.stringify(blank(b))
+
+/** Keep only fields the user changed while rebasing a draft on a freshly loaded form. */
+export function mergeConfigDraft(
+  latest: ConfigValues,
+  previousInitial: ConfigValues,
+  draft: ConfigValues,
+  exactKeys: string[] = [],
+): ConfigValues {
+  const merged = { ...latest }
+  for (const key of new Set([...Object.keys(previousInitial), ...Object.keys(draft)])) {
+    const unchanged = exactKeys.includes(key)
+      ? JSON.stringify(draft[key]) === JSON.stringify(previousInitial[key])
+      : same(draft[key], previousInitial[key])
+    if (!unchanged) merged[key] = draft[key]
+  }
+  return merged
+}
 
 /**
  * 全局配置的请求体：键集合永远是上次保存的那一份（共享键全集），键数不随表单变。
@@ -209,6 +256,7 @@ export function globalPayload(saved: ConfigValues, initial: ConfigValues, values
 /**
  * 节点覆盖的请求体：只含这台节点与全局不同的键。
  * 没动过的字段保留原有覆盖；改动后清空的字段、改成与全局相同的共享字段都撤掉覆盖。
+ * 分段大小 / 时长的显式 null 表示关闭这个限制，须保留；undefined / 空串仍表示撤掉覆盖。
  * `global` 为 null 表示还没保存过全局配置（节点不收共享键），这时填了什么就覆盖什么。
  */
 export function overridePayload(
@@ -219,8 +267,16 @@ export function overridePayload(
 ): ConfigValues {
   const body: ConfigValues = {}
   for (const key of DELIVERABLE_KEYS) {
-    if (same(values[key], initial[key])) {
+    const clearable = key === 'file_size' || key === 'segment_time'
+    const unchanged = clearable && (values[key] === null || initial[key] === null)
+      ? values[key] === initial[key]
+      : same(values[key], initial[key])
+    if (unchanged) {
       if (key in current) body[key] = current[key]
+      continue
+    }
+    if (clearable && values[key] === null) {
+      body[key] = null
       continue
     }
     const value = blank(values[key])

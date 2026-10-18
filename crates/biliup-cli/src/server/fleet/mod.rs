@@ -520,6 +520,10 @@ mod tests {
                 6,
                 "c0ca05edd662e1687e2c52dcf3c49842e839447b39cd1e9fc4fd22e0b36534069ba71e94282a6c401f622667c0e6cef7",
             ),
+            (
+                7,
+                "94355800e8a52e4816853a06da63ec58152de630dd3bccc15eb65d98b853be5ec9f08c4a47a122b0855f280f6e209ea7",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -544,7 +548,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, [1, 2, 3, 4, 5, 6, 7]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -587,6 +591,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
     }
 }

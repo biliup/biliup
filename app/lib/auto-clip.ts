@@ -4,6 +4,7 @@ import useSWR, { mutate } from 'swr'
 import { fetcher } from './api-streamer'
 import { type Clip, refresh as refreshClip, send, usePolled } from './clips'
 import { formatSpan } from './sessions'
+import { ACTIVE_AUTO_CLIP_POLL_MS, sessionJobRefreshInterval } from './auto-clip-poll'
 
 /** GET /v1/auto-clip/status（后端 `api/auto_clip.rs::StatusView`） */
 export interface AutoClipStatus {
@@ -89,6 +90,8 @@ export type SuggestionState = 'pending' | 'accepted' | 'dismissed' | 'expired'
 export interface Suggestion {
   id: number
   session_id: number
+  view_session_id?: number | null
+  source_session_id?: number | null
   job_id: number | null
   in_ms: number
   out_ms: number
@@ -125,7 +128,6 @@ export const suggestionsUrl = (sessionId: number) => `/v1/sessions/${sessionId}/
 export const AUTO_CLIP_SETTINGS_HREF = '/dashboard'
 
 /** 任务在排队或运行时多久刷新一次 */
-const ACTIVE_POLL_MS = 3_000
 /** 有待处理的候选时多久刷新一次列表（跟上后台的过期清理） */
 const PENDING_POLL_MS = 60_000
 
@@ -163,7 +165,7 @@ export function useAutoClip(active = true): AutoClipAvailability {
 export const isActive = (job: AutoClipJob | null | undefined): boolean =>
   !!job && (job.state === 'queued' || job.state === 'running')
 
-const sessionRefresh = (data?: SessionAutoClip) => (isActive(data?.job) ? ACTIVE_POLL_MS : 0)
+const sessionRefresh = (data?: SessionAutoClip) => (isActive(data?.job) ? ACTIVE_AUTO_CLIP_POLL_MS : 0)
 
 /**
  * 场次的自动切片任务与预估；任务在排队或运行时每 3 秒刷新，任务结束时顺带刷新候选列表。
@@ -215,10 +217,10 @@ function flushJobs() {
   }
 }
 
-/** 剪辑台一行的任务（不含预估）；任务在排队或运行时每 3 秒刷新。`sessionId` 为 null 时不请求 */
+/** 剪辑台一行的任务（不含预估）；活动任务快速刷新，空闲行每分钟发现后台新任务。`sessionId` 为 null 时不请求 */
 export function useSessionJob(sessionId: number | null) {
   return useSWR(sessionId === null ? null : sessionJobKey(sessionId), () => loadJob(sessionId!), {
-    refreshInterval: (job) => (isActive(job) ? ACTIVE_POLL_MS : 0),
+    refreshInterval: sessionJobRefreshInterval,
     revalidateOnFocus: false,
     shouldRetryOnError: false,
   })
@@ -285,22 +287,24 @@ export async function cancelAutoClip(sessionId: number): Promise<void> {
 
 /** 接受候选：按给的入点、出点（不给就用候选自己的）建切片草稿 */
 export async function acceptSuggestion(
-  s: Pick<Suggestion, 'id' | 'session_id'>,
+  s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>,
   body: { in_ms?: number; out_ms?: number; title?: string } = {}
 ): Promise<{ suggestion: Suggestion; clip: Clip }> {
   const result = await postJson<{ suggestion: Suggestion; clip: Clip }>(
-    `${suggestionsUrl(s.session_id)}/${s.id}/accept`,
+    `${suggestionsUrl(s.view_session_id ?? s.session_id)}/${s.id}/accept`,
     body
   )
   refreshClip(result.clip)
   void mutate(suggestionsUrl(s.session_id))
+  if (s.view_session_id != null && s.view_session_id !== s.session_id) void mutate(suggestionsUrl(s.view_session_id))
   return result
 }
 
-export async function dismissSuggestion(s: Pick<Suggestion, 'id' | 'session_id'>): Promise<Suggestion> {
-  const res = await send(`${suggestionsUrl(s.session_id)}/${s.id}/dismiss`, { method: 'POST' })
+export async function dismissSuggestion(s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>): Promise<Suggestion> {
+  const res = await send(`${suggestionsUrl(s.view_session_id ?? s.session_id)}/${s.id}/dismiss`, { method: 'POST' })
   const updated: Suggestion = await res.json()
   void mutate(suggestionsUrl(s.session_id))
+  if (s.view_session_id != null && s.view_session_id !== s.session_id) void mutate(suggestionsUrl(s.view_session_id))
   return updated
 }
 

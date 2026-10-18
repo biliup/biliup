@@ -1,6 +1,5 @@
 use crate::server::common::throughput::SubprocessProgress;
-use crate::server::common::util::redact_process_debug;
-use crate::server::core::downloader;
+use crate::server::common::util::{parse_segment_time, redact_process_debug};
 use crate::server::core::downloader::{
     DownloadConfig, DownloadStatus, DownloaderType, SegmentEvent, SegmentInfo,
 };
@@ -13,7 +12,7 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::RwLock;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// FFmpeg下载器实现
 /// 使用FFmpeg进行直播流下载，支持内部和外部分段
@@ -26,6 +25,20 @@ pub struct FfmpegDownloader {
 
     /// 下载器类型
     pub downloader_type: DownloaderType,
+}
+
+/// 一段录制能否发布（改名为正式文件名并进入上传 / 后处理）。
+///
+/// **未完成的录像一律不删除**：`stop()` 用 SIGKILL 结束 ffmpeg，暂停、删除房间、退出程序、
+/// 断流后的异常退出都会走到这里，删掉 `.part` 就等于丢掉整段（可能是几个小时的）录像。
+///
+/// - ffmpeg 正常结束（0 / 255）：照常发布。
+/// - 被杀或异常退出的 FLV / TS / MKV 等流式容器：截断后仍可播放，照常发布、照常上传。
+/// - 被杀或异常退出的 MP4 / MOV：moov 在结束时才写，截断后无法播放，不发布也不上传，
+///   但 `.part` 文件原样留在磁盘上，供用户手动恢复或自行删除。
+fn publishes_segment(status_code: Option<i32>, suffix: &str) -> bool {
+    matches!(status_code, Some(0) | Some(255))
+        || !matches!(suffix.to_ascii_lowercase().as_str(), "mp4" | "mov")
 }
 
 impl FfmpegDownloader {
@@ -79,9 +92,16 @@ impl FfmpegDownloader {
         args.extend(["-strftime".to_string(), "1".to_string()]);
 
         // -segment_time: 分段时长（秒）
-        if let Some(segment_time) = &download_config.segment_time {
-            let seconds = downloader::parse_duration(segment_time);
-            args.extend(["-segment_time".to_string(), seconds.to_string()]);
+        if let Some(duration) = download_config
+            .segment_time
+            .as_deref()
+            .and_then(parse_segment_time)
+            .filter(|duration| !duration.is_zero())
+        {
+            args.extend([
+                "-segment_time".to_string(),
+                duration.as_secs_f64().to_string(),
+            ]);
         }
 
         // -t: 录制总时长上限。内部分段由 segment muxer 自己切片、进程不会自行退出，
@@ -228,6 +248,19 @@ impl FfmpegDownloader {
             download_config.bytes_written.clone(),
         )
         .await?;
+        let status_code = status.code();
+        if !publishes_segment(status_code, &download_config.suffix) {
+            // 截断的 MP4 没有 moov：不进入上传流程，但 `.part` 文件不删除（见 publishes_segment），
+            // 留在磁盘上供手动恢复。
+            warn!(
+                part_file,
+                ?status_code,
+                "ffmpeg exited before finishing the MP4 trailer, not publishing the segment"
+            );
+            return Ok(DownloadStatus::Error(format!(
+                "FFmpeg error: {status_code:?}"
+            )));
+        }
         // 退出时，重命名文件
         tokio::fs::rename(&part_file, &output_file)
             .await
@@ -243,9 +276,10 @@ impl FfmpegDownloader {
             next_file_path: None,
             duration_secs: None,
             size_bytes: None,
+            ready: None,
         }));
         // 根据退出码判断状态
-        match status.code() {
+        match status_code {
             Some(0) => Ok(DownloadStatus::SegmentCompleted),
             Some(255) => Ok(DownloadStatus::StreamEnded),
             err => Ok(DownloadStatus::Error(format!("FFmpeg error: {err:?}"))),
@@ -310,6 +344,7 @@ impl FfmpegDownloader {
                 segment_index,
                 duration_secs: None,
                 size_bytes: None,
+                ready: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -337,6 +372,7 @@ impl FfmpegDownloader {
                 segment_index,
                 duration_secs: None,
                 size_bytes: None,
+                ready: None,
                 // start_time: std::time::SystemTime::now(),
                 // end_time: std::time::SystemTime::now(),
             }));
@@ -480,6 +516,20 @@ mod tests {
     }
 
     #[test]
+    fn truncated_mp4_is_not_published_but_streamable_containers_are() {
+        for code in [Some(0), Some(255)] {
+            assert!(publishes_segment(code, "mp4"));
+            assert!(publishes_segment(code, "flv"));
+        }
+        for code in [None, Some(1)] {
+            assert!(!publishes_segment(code, "mp4"));
+            assert!(!publishes_segment(code, "MOV"));
+            assert!(publishes_segment(code, "flv"));
+            assert!(publishes_segment(code, "ts"));
+        }
+    }
+
+    #[test]
     fn both_modes_ask_ffmpeg_for_machine_readable_progress_on_stderr() {
         for args in [
             external().build_ffmpeg_args_external_segment(&config(None, None)),
@@ -550,5 +600,24 @@ mod tests {
         let args = internal().build_ffmpeg_args_internal_segment(&config(Some("01:00:00"), None));
         assert_eq!(value_of(&args, "-segment_time"), Some("3600".to_string()));
         assert_eq!(value_of(&args, "-t"), None);
+    }
+
+    #[test]
+    fn custom_duration_formats_and_subseconds_reach_both_ffmpeg_segmentation_modes() {
+        for (duration, seconds) in [
+            ("00:07:30", "450"),
+            ("7:30", "450"),
+            ("450", "450"),
+            ("00:07:30.5", "450.5"),
+        ] {
+            let config = config(Some(duration), None);
+            let internal_args = internal().build_ffmpeg_args_internal_segment(&config);
+            assert_eq!(
+                value_of(&internal_args, "-segment_time").as_deref(),
+                Some(seconds)
+            );
+            let external_args = external().build_ffmpeg_args_external_segment(&config);
+            assert_eq!(value_of(&external_args, "-to").as_deref(), Some(duration));
+        }
     }
 }

@@ -16,8 +16,8 @@ extension-module = ["pyo3/extension-module"]
 
 [dependencies]
 pyo3 = { version = "0.27.1", features = ["abi3-py39", "anyhow"] }
-pythonize = { version = "0.27.0" }
-axum = { version = "0.8", features = ["macros"] }
+reqwest = { workspace = true }
+futures = { workspace = true }
 nom = "8"
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -25,10 +25,8 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tracing-appender = { workspace = true }
 biliup = { path = "../biliup"}
-biliup-cli = { path = "../biliup-cli"}
 time = { workspace = true }
 bon = { workspace = true }
-error-stack = { workspace = true }
 
 [build-dependencies]
 pyo3-build-config = "0.27.1"

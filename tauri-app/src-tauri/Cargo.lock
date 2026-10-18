@@ -681,7 +681,7 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "biliup"
-version = "1.2.11"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -717,7 +717,7 @@ dependencies = [
 
 [[package]]
 name = "biliup-cli"
-version = "1.2.11"
+version = "1.3.0"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -730,6 +730,7 @@ dependencies = [
  "chrono",
  "clap",
  "danmaku",
+ "danmaku-factory",
  "dialoguer",
  "dirs",
  "error-stack",
@@ -752,6 +753,7 @@ dependencies = [
  "mesio-engine",
  "mime_guess",
  "nom 8.0.0",
+ "once_cell",
  "ormlite",
  "password-auth",
  "pipeline-common",
@@ -791,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "biliup-desktop"
-version = "0.1.0"
+version = "1.3.0"
 dependencies = [
  "biliup-cli",
  "dunce",
@@ -1702,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "danmaku"
-version = "1.2.11"
+version = "1.3.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1727,6 +1729,15 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+]
+
+[[package]]
+name = "danmaku-factory"
+version = "1.3.0"
+dependencies = [
+ "quick-xml 0.37.5",
+ "serde",
+ "tempfile",
 ]
 
 [[package]]

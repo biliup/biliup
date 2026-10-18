@@ -1,15 +1,19 @@
 # stream-gears
 
-通过 PyO3 导出**上传** B 站与**下载** FLV、HLS 流的函数供Python调用,
-支持时间或文件大小分段，同时解决拉取FLV流花屏的问题。
+Rust/PyO3 bindings for Bilibili login, video upload and direct FLV/HLS download.
+The PyPI distribution is named `biliup`; import its APIs as `stream_gears`.
 
-## Dev
+```python
+from stream_gears import download, upload
 
-1. Install the latest [Rust compiler](https://www.rust-lang.org/tools/install)
-2. Install [maturin](https://maturin.rs/): `$ pip3 install maturin`
-
-```shell
-$python -m venv .env
-$source .env/bin/activate
-$maturin develop
+download("https://example.com/live.flv", {}, "recording", {"time": 600})
+upload(["recording.flv"], "cookies.json", "My recording")
 ```
+
+The package contains the native extension and type stubs. It has no service,
+recording scheduler, web frontend, fonts, FFmpeg or `biliup` command. Install the
+native biliup release or Docker image to run the complete application.
+
+For development, run `maturin develop -m crates/stream-gears/Cargo.toml` from
+the repository root. Tests run against an installed package:
+`pytest crates/stream-gears/tests` and `python -m mypy.stubtest stream_gears`.

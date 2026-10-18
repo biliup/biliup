@@ -1,7 +1,7 @@
 import os
-from typing import Any, Callable, ClassVar, Mapping, Optional, Protocol, Sequence, Union, final
+from typing import Callable, ClassVar, Mapping, Optional, Protocol, Sequence, Union, final
 
-from typing_extensions import TypeAlias, deprecated
+from typing_extensions import TypeAlias
 
 from stream_gears import Credit
 
@@ -9,7 +9,6 @@ __all__ = [
     "PySegment",
     "StreamGearsError",
     "UploadLine",
-    "config_bindings",
     "download",
     "download_with_callback",
     "get_qrcode",
@@ -18,7 +17,6 @@ __all__ = [
     "login_by_sms",
     "login_by_web_cookies",
     "login_by_web_qrcode",
-    "main_loop",
     "send_sms",
     "upload",
 ]
@@ -81,10 +79,6 @@ class UploadLine:
     Akbd: ClassVar[UploadLine]
     """B站自建"""
     def __int__(self) -> int: ...
-
-class _ConfigState:
-    def get(self, key: str, default: Any = None) -> Any:
-        """`key` 不存在且未给 `default` 时抛 `AttributeError`。"""
 
 def download(
     url: str,
@@ -247,15 +241,4 @@ def upload(
     :raises StreamGearsError: 登录、上传或投稿失败
     :raises ValueError: `extra_fields` 不是合法的 JSON 对象
     :raises TypeError: `desc_v2` 元素缺少必填字段
-    """
-
-@deprecated("config_bindings() always returns the built-in default configuration and will be removed.")
-def config_bindings() -> _ConfigState:
-    """总是返回内置的默认配置；运行中的服务不读写它。"""
-
-def main_loop() -> None:
-    """`biliup` 命令行入口，参数取自 `sys.argv`。无参数或 `start` 时按 `server` 运行。
-
-    :raises SystemExit: 命令行参数错误
-    :raises RuntimeError: 服务运行出错
     """

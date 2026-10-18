@@ -68,5 +68,5 @@ all-platforms = ["twitch", "twitcasting", "bilibili", "douyu", "huya", "douyin",
 
 [dev-dependencies]
 tracing-subscriber = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["full", "test-util"] }
 futures = { workspace = true }

@@ -1,7 +1,7 @@
 'use client'
 import React, { useEffect } from 'react'
 import { Form, Select, useFormApi } from '@douyinfe/semi-ui'
-import PlatformPanel from './PlatformPanel'
+import PlatformPanel, { digitsToNumber } from './PlatformPanel'
 
 type Props = {
   entity: any
@@ -29,6 +29,7 @@ const Bilibili: React.FC<Props> = props => {
           allowCreate={true}
           filter
           field="bili_qn"
+          convert={digitsToNumber}
           extraText={
             <div style={{ fontSize: '14px' }}>
               录制画质，默认原画。
@@ -150,8 +151,8 @@ const Bilibili: React.FC<Props> = props => {
               选 hls_fmp4 时，开播后会先等待下方「hls_fmp4 转码等待时间」，仍拿不到 fmp4 流则本场回退为
               FLV。
               <br />
-              默认的下载插件 mesio 支持 hls_fmp4（保存为 .mp4）；<strong>stream-gears 不支持 hls_fmp4</strong>，选了
-              stream-gears 的需改为 mesio、ffmpeg 或 streamlink。
+              默认的下载插件 mesio 与 stream-gears 都支持 hls_fmp4（保存为 .mp4）；用
+              ffmpeg、streamlink 也可以。
             </div>
           }
           label="直播流协议（bili_protocol）"

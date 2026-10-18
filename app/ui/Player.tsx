@@ -43,6 +43,9 @@ interface PlayerConfig {
   onEnded?: () => void
   /** mpegts.js 或探测阶段报错（网络 / 解码），附一句可展示的说明 */
   onError?: (message: string) => void
+  onConnecting?: () => void
+  /** 媒体元素真正开始播放时通知调用方，初始化期间继续显示加载状态 */
+  onPlaying?: () => void
   /** 中转流稳态期间缓冲耗尽一次（waiting → playing），调用方据此决定要不要换更深的档 */
   onStall?: (info: StallInfo) => void
   /**
@@ -355,7 +358,8 @@ function playWithMediaSource(
   artWithMse.fmp4Dispose = null
   const mime = fmp4MimeType(codecs)
   if (!mime) {
-    onError?.('后端未能解析出 fMP4 的编码参数，无法起播')
+    // 轮询可能先看到 fMP4 格式、后看到 init segment 解出的编码参数。
+    // 保持加载遮罩，待 codecs 更新后播放器 effect 会重新创建。
     return
   }
   if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mime)) {
@@ -484,7 +488,7 @@ export function describeMpegtsError(errorType: string, detail: string, info?: { 
   if (errorType === mpegts.ErrorTypes.NETWORK_ERROR) {
     if (detail === mpegts.ErrorDetails.NETWORK_STATUS_CODE_INVALID) {
       const code = info?.code
-      if (code === 415) return '当前下载器 / 容器不支持预览'
+      if (code === 415) return info?.msg?.trim() || '当前下载器 / 容器不支持预览'
       if (code === 429) return tooManyPreviewsMessage(info?.msg)
       if (code === 503) return '录制尚未开始拉流或正在重连'
       return `连接失败（HTTP ${code ?? '?'}）`
@@ -492,14 +496,54 @@ export function describeMpegtsError(errorType: string, detail: string, info?: { 
     return `网络错误: ${info?.msg ?? detail}`
   }
   if (errorType === mpegts.ErrorTypes.MEDIA_ERROR) {
-    if (detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) return '浏览器不支持该编码（可能为 HEVC）'
+    if (detail === mpegts.ErrorDetails.MEDIA_CODEC_UNSUPPORTED) return `播放器无法处理该编码${info?.msg ? `：${info.msg}` : ''}`
     if (detail === mpegts.ErrorDetails.MEDIA_MSE_ERROR) {
-      // 典型来源：TS 的 PES 没有按访问单元对齐（如 Twitch），mpegts.js 拆出的帧不完整，浏览器拒绝解码
-      return '浏览器解码失败：该直播源的封装方式 mpegts.js 无法处理，录制不受影响'
+      return `浏览器媒体缓冲或解码失败${info?.msg ? `：${info.msg}` : '，请检查编码与封装参数'}`
     }
     return `解码错误: ${info?.msg ?? detail}`
   }
   return `播放错误: ${info?.msg ?? detail}`
+}
+
+export function describeVideoError(error: MediaError | null, codecs?: string | null): string {
+  const encoding = codecs ? `（${codecs}）` : ''
+  if (error?.code === 2) return `网络错误：${error.message || '媒体连接已中断'}`
+  if (error?.code === 3) return `浏览器解码失败${encoding}${error.message ? `：${error.message}` : ''}`
+  if (error?.code === 4) return `浏览器无法播放该媒体${encoding}${error.message ? `：${error.message}` : ''}`
+  return `媒体播放失败${error?.message ? `：${error.message}` : ''}`
+}
+
+/** 直播与 DVR 共用实际解复用后的编码变化检测；变化后重开 MSE，避免复用旧 SourceBuffer。 */
+export function attachMpegtsDiagnostics(
+  video: HTMLVideoElement,
+  player: mpegts.Player,
+  onCodecChange: () => void,
+  onError: (message: string) => void,
+): () => void {
+  let previousVideoCodec: string | null = null
+  let codecs: string | null = null
+  let terminal = false
+  const onMediaInfo = (info: { videoCodec?: string | null; audioCodec?: string | null }) => {
+    if (terminal) return
+    codecs = [info.videoCodec, info.audioCodec].filter(Boolean).join(',') || null
+    if (previousVideoCodec && info.videoCodec && previousVideoCodec !== info.videoCodec) {
+      terminal = true
+      onCodecChange()
+    }
+    previousVideoCodec = info.videoCodec ?? previousVideoCodec
+  }
+  const onVideoError = () => {
+    if (terminal) return
+    terminal = true
+    onError(describeVideoError(video.error, codecs))
+  }
+  player.on(mpegts.Events.MEDIA_INFO, onMediaInfo)
+  video.addEventListener('error', onVideoError)
+  return () => {
+    terminal = true
+    player.off(mpegts.Events.MEDIA_INFO, onMediaInfo)
+    video.removeEventListener('error', onVideoError)
+  }
 }
 
 interface MpegtsOptions {
@@ -569,10 +613,12 @@ function playWithMpegts(
     isLive ? mpegtsLiveConfig(transport) : {}
   )
   artWithMpegts.mpegts = player
+  const detachDiagnostics = attachMpegtsDiagnostics(video, player, () => onEnded?.(), (message) => onError?.(message))
   if (isLive && transport === 'relay') {
     artWithMpegts.detachBuffer = attachLiveBufferControl(video, buffer, { onStall })
   }
   art.on('destroy', () => {
+    detachDiagnostics()
     artWithMpegts.detachBuffer?.()
     artWithMpegts.detachBuffer = null
     if (artWithMpegts.mpegts) {
@@ -619,6 +665,8 @@ const Players: React.FC<PlayerConfig> = ({
   autoplay = isLive,
   onEnded,
   onError,
+  onConnecting,
+  onPlaying,
   onStall,
   danmaku,
   lease,
@@ -630,10 +678,10 @@ const Players: React.FC<PlayerConfig> = ({
   const danmakuFeed = danmaku?.feed ?? null
   const danmakuFontSize = danmaku?.fontSize ?? 22
   // 回调与缓冲策略放进 ref：父组件每次渲染传入的新函数 / 中途换档都不应重建播放器
-  const callbacksRef = useRef({ onEnded, onError, onStall })
+  const callbacksRef = useRef({ onEnded, onError, onConnecting, onPlaying, onStall })
   const bufferRef = useRef<LiveBufferPolicy>(buffer ?? RELAY_PROFILES.smooth)
   useEffect(() => {
-    callbacksRef.current = { onEnded, onError, onStall }
+    callbacksRef.current = { onEnded, onError, onConnecting, onPlaying, onStall }
     bufferRef.current = buffer ?? RELAY_PROFILES.smooth
   })
 
@@ -646,6 +694,7 @@ const Players: React.FC<PlayerConfig> = ({
 
     const create = (mediaType: LiveType | null) => {
       if (cancelled || !container.isConnected) return
+      callbacksRef.current.onConnecting?.()
       if (playerRef.current) {
         playerRef.current.destroy()
         playerRef.current = null
@@ -676,8 +725,9 @@ const Players: React.FC<PlayerConfig> = ({
             ]
           : [],
       }
-      const onEndedCb = () => callbacksRef.current.onEnded?.()
-      const onErrorCb = (message: string) => callbacksRef.current.onError?.(message)
+      const onEndedCb = () => { if (!cancelled) callbacksRef.current.onEnded?.() }
+      const onErrorCb = (message: string) => { if (!cancelled) callbacksRef.current.onError?.(message) }
+      const onPlayingCb = () => { if (!cancelled) callbacksRef.current.onPlaying?.() }
       const onStallCb = (info: StallInfo) => callbacksRef.current.onStall?.(info)
       const bufferPolicy = () => bufferRef.current
       try {
@@ -732,6 +782,13 @@ const Players: React.FC<PlayerConfig> = ({
           })
         } else {
           playerRef.current = new Artplayer(base)
+        }
+        container.querySelector('video')?.addEventListener('playing', onPlayingCb, { once: true })
+        if (mediaType !== 'flv' && mediaType !== 'mpegts') {
+          container.querySelector('video')?.addEventListener('error', () => {
+            const video = container.querySelector('video')
+            onErrorCb(describeVideoError(video?.error ?? null, codecs))
+          }, { once: true })
         }
       } catch (error) {
         console.error('播放器初始化失败:', error)
@@ -791,7 +848,22 @@ const Players: React.FC<PlayerConfig> = ({
       cancelled = true
       unsubscribe?.()
     }
-  }, [danmakuId, danmakuFeed, url, type, codecs])
+  }, [
+    danmakuId,
+    danmakuFeed,
+    url,
+    height,
+    width,
+    type,
+    codecs,
+    isLive,
+    transport,
+    muted,
+    autoplay,
+    danmakuCapable,
+    danmakuFontSize,
+    lease,
+  ])
 
   return <div ref={containerRef} style={{ width, height }} />
 }

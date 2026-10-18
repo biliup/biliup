@@ -65,28 +65,14 @@ def test_wheel_ships_stubs():
         assert PACKAGE_FILES <= files
 
 
-def test_biliup_resolves_from_python_source(tmp_path):
-    """Editable installs put only `python-source` on sys.path, so `biliup` has
-    to live there next to `stream_gears`."""
-    code = (
-        "import importlib.util, biliup\n"
-        "print(biliup.__file__)\n"
-        "print(importlib.util.find_spec('biliup.__main__').origin)\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(PYTHON_SOURCE)},
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert result.returncode == 0, result.stderr
-    package = PYTHON_SOURCE / "biliup"
-    assert result.stdout.splitlines() == [
-        str(package / "__init__.py"),
-        str(package / "__main__.py"),
-    ]
+def test_api_package_has_no_server_or_resources():
+    assert not hasattr(stream_gears, "main_loop")
+    assert not hasattr(stream_gears, "config_bindings")
+    dist = importlib.metadata.distribution("biliup")
+    assert not any(e.group == "console_scripts" for e in dist.entry_points)
+    files = {str(f).replace("\\", "/") for f in dist.files}
+    assert not any("render-tools/" in f or f.startswith("biliup/") for f in files)
+    assert not dist.requires
 
 
 def test_upload_text_signature_is_accepted():

@@ -17,10 +17,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use sysinfo::{CGroupLimits, IpNetwork, Networks, System};
+#[cfg(target_os = "linux")]
+use sysinfo::{DiskRefreshKind, Disks};
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, warn};
@@ -58,6 +60,11 @@ pub struct Sample {
     pub rx: u64,
     /// 上行速率（字节/秒）
     pub tx: u64,
+    /// 录制目录所在设备的读写速率；不支持、首次采样或计数器重置时为 null
+    #[serde(default)]
+    pub disk_read_bytes_per_sec: Option<u64>,
+    #[serde(default)]
+    pub disk_write_bytes_per_sec: Option<u64>,
 }
 
 /// 内存用量（字节）
@@ -117,6 +124,8 @@ pub(crate) struct Reading {
     pub(crate) cpu: f32,
     pub(crate) rx: u64,
     pub(crate) tx: u64,
+    pub(crate) disk_read_bytes_per_sec: Option<u64>,
+    pub(crate) disk_write_bytes_per_sec: Option<u64>,
     pub(crate) memory: Option<MemoryUsage>,
     pub(crate) interfaces: Vec<String>,
     pub(crate) cores: CpuInfo,
@@ -191,6 +200,8 @@ impl SystemMonitor {
             cpu: reading.cpu,
             rx: reading.rx,
             tx: reading.tx,
+            disk_read_bytes_per_sec: reading.disk_read_bytes_per_sec,
+            disk_write_bytes_per_sec: reading.disk_write_bytes_per_sec,
         });
         state.cpu = Some(reading.cores);
         state.memory = reading.memory;
@@ -209,6 +220,7 @@ async fn run(weak: Weak<SystemMonitor>, interval: Duration) {
         }
     };
     let mut disk = DiskProbe::new();
+    let mut disk_io = DiskIoProbe::default();
     let mut tick = tokio::time::interval(interval);
     tick.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // 第一次 tick 立即完成；基线刚刷新过，从下一次开始读差值
@@ -218,7 +230,7 @@ async fn run(weak: Weak<SystemMonitor>, interval: Duration) {
         if weak.strong_count() == 0 {
             break;
         }
-        let (returned, reading) = match tokio::task::spawn_blocking(move || {
+        let (returned, mut reading) = match tokio::task::spawn_blocking(move || {
             let reading = sampler.read();
             (sampler, reading)
         })
@@ -232,7 +244,9 @@ async fn run(weak: Weak<SystemMonitor>, interval: Duration) {
         };
         sampler = returned;
         let ts = now_ms();
-        let disk_usage = disk.poll().await;
+        let (disk_usage, rates) = tokio::join!(disk.poll(), disk_io.poll());
+        reading.disk_read_bytes_per_sec = rates.read;
+        reading.disk_write_bytes_per_sec = rates.write;
         let Some(monitor) = weak.upgrade() else {
             break;
         };
@@ -306,6 +320,8 @@ impl Sampler {
             },
             rx: per_second(received, elapsed),
             tx: per_second(transmitted, elapsed),
+            disk_read_bytes_per_sec: None,
+            disk_write_bytes_per_sec: None,
             memory: memory_usage(
                 self.system.total_memory(),
                 self.system.available_memory(),
@@ -322,6 +338,260 @@ fn per_second(bytes: u64, elapsed: Duration) -> u64 {
         return 0;
     }
     (bytes as f64 / elapsed.as_secs_f64()).round() as u64
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DiskRates {
+    read: Option<u64>,
+    write: Option<u64>,
+}
+
+#[derive(Default)]
+struct DiskIoSampler {
+    #[cfg(target_os = "linux")]
+    disks: Disks,
+    previous: Option<(String, Instant, u64, u64)>,
+}
+
+impl DiskIoSampler {
+    fn read(&mut self) -> DiskRates {
+        let counters = self.counters();
+        self.record(counters, Instant::now())
+    }
+
+    fn record(&mut self, counters: Option<(String, u64, u64)>, now: Instant) -> DiskRates {
+        let previous = self.previous.take();
+        let Some((device, read, write)) = counters else {
+            return DiskRates::default();
+        };
+        self.previous = Some((device.clone(), now, read, write));
+        let Some((last_device, at, last_read, last_write)) = previous else {
+            return DiskRates::default();
+        };
+        let elapsed = now.saturating_duration_since(at);
+        if device != last_device || elapsed.is_zero() || read < last_read || write < last_write {
+            return DiskRates::default();
+        }
+        DiskRates {
+            read: Some(per_second(read - last_read, elapsed)),
+            write: Some(per_second(write - last_write, elapsed)),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn counters(&mut self) -> Option<(String, u64, u64)> {
+        let path = std::env::current_dir().ok()?;
+        // Include all mounts here: sysinfo skips network/tmpfs mounts by default.
+        // Their enclosing local disk must never be reported as their IO device.
+        let mounts = std::fs::read_to_string("/proc/self/mounts").ok()?;
+        let mount = recording_mount(&path, &mounts)?;
+        // refresh_specifics discovers mounts even when the initial list is empty.
+        // Keep all enumeration inside the worker; no statvfs or implicit IO fallback.
+        self.disks
+            .refresh_specifics(true, DiskRefreshKind::nothing());
+        let disk = self
+            .disks
+            .list()
+            .iter()
+            .find(|disk| disk.mount_point() == mount)?;
+        let device = PathBuf::from(disk.name());
+        let actual = std::fs::canonicalize(&device).unwrap_or(device);
+        let name = actual.strip_prefix("/dev").ok()?.to_str()?;
+        // Disk::usage returns zero when the OS counter is unavailable and does
+        // not expose success. Read that same kernel source explicitly so a
+        // failed counter refresh can never look like an idle device.
+        let stats = std::fs::read_to_string("/proc/diskstats").ok()?;
+        let (read, write) = disk_cumulative_bytes(&stats, name)?;
+        Some((
+            format!("{}:{}", actual.display(), mount.display()),
+            read,
+            write,
+        ))
+    }
+
+    #[cfg(windows)]
+    fn counters(&mut self) -> Option<(String, u64, u64)> {
+        windows_disk_counters(&std::env::current_dir().ok()?).ok()
+    }
+
+    #[cfg(not(any(target_os = "linux", windows)))]
+    fn counters(&mut self) -> Option<(String, u64, u64)> {
+        // sysinfo does not expose whether these platforms' IO query succeeded;
+        // reporting its fallback zeros would turn unavailable counters into idle.
+        None
+    }
+}
+
+#[cfg(windows)]
+fn windows_disk_counters(path: &Path) -> io::Result<(String, u64, u64)> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeNameForVolumeMountPointW,
+            GetVolumePathNameW, OPEN_EXISTING,
+        },
+        System::{
+            IO::DeviceIoControl,
+            Ioctl::{DISK_PERFORMANCE, IOCTL_DISK_PERFORMANCE},
+        },
+    };
+
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut mount = vec![0u16; 32768];
+    let mut volume = vec![0u16; 1024];
+    // SAFETY: all input strings are NUL-terminated; output lengths match buffers.
+    if unsafe { GetVolumePathNameW(wide.as_ptr(), mount.as_mut_ptr(), mount.len() as u32) } == 0
+        || unsafe {
+            GetVolumeNameForVolumeMountPointW(
+                mount.as_ptr(),
+                volume.as_mut_ptr(),
+                volume.len() as u32,
+            )
+        } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let (identity, volume) = windows_volume_device(&volume)?;
+    // Access 0 permits querying performance on ordinary user handles where the
+    // OS/driver supports it. No write access or disk-perf configuration changes.
+    let handle = unsafe {
+        CreateFileW(
+            volume.as_ptr(),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut performance = std::mem::MaybeUninit::<DISK_PERFORMANCE>::zeroed();
+    let mut returned = 0u32;
+    // SAFETY: the ioctl writes only to a buffer sized for DISK_PERFORMANCE.
+    let ok = unsafe {
+        DeviceIoControl(
+            handle,
+            IOCTL_DISK_PERFORMANCE,
+            std::ptr::null(),
+            0,
+            performance.as_mut_ptr().cast(),
+            std::mem::size_of::<DISK_PERFORMANCE>() as u32,
+            &mut returned,
+            std::ptr::null_mut(),
+        )
+    };
+    let error = (ok == 0).then(io::Error::last_os_error);
+    unsafe { CloseHandle(handle) };
+    if let Some(error) = error {
+        return Err(error);
+    }
+    if returned < std::mem::size_of::<DISK_PERFORMANCE>() as u32 {
+        return Err(io::Error::other("磁盘性能计数器返回了不完整的数据"));
+    }
+    let performance = unsafe { performance.assume_init() };
+    let (read, write) = windows_performance_bytes(performance.BytesRead, performance.BytesWritten)?;
+    Ok((identity, read, write))
+}
+
+#[cfg(any(windows, test))]
+fn windows_volume_device(volume: &[u16]) -> io::Result<(String, Vec<u16>)> {
+    let end = volume
+        .iter()
+        .position(|value| *value == 0)
+        .ok_or_else(|| io::Error::other("卷 GUID 路径没有终止符"))?;
+    let mut device = volume[..end].to_vec();
+    if device.last() == Some(&u16::from(b'\\')) {
+        device.pop();
+    }
+    let identity = String::from_utf16(&device).map_err(io::Error::other)?;
+    if !identity.starts_with("\\\\?\\Volume{") || !identity.ends_with('}') {
+        return Err(io::Error::other("没有可查询的本地卷 GUID"));
+    }
+    device.push(0);
+    Ok((identity, device))
+}
+
+#[cfg(any(windows, test))]
+fn windows_performance_bytes(read: i64, write: i64) -> io::Result<(u64, u64)> {
+    Ok((
+        u64::try_from(read).map_err(io::Error::other)?,
+        u64::try_from(write).map_err(io::Error::other)?,
+    ))
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn recording_mount(path: &Path, mounts: &str) -> Option<PathBuf> {
+    mounts
+        .lines()
+        .filter_map(|line| {
+            let mount = line.split_whitespace().nth(1)?;
+            let mount = PathBuf::from(
+                mount
+                    .replace("\\040", " ")
+                    .replace("\\011", "\t")
+                    .replace("\\012", "\n")
+                    .replace("\\134", "\\"),
+            );
+            path.starts_with(&mount).then_some(mount)
+        })
+        .max_by_key(|mount| mount.components().count())
+}
+
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn disk_cumulative_bytes(stats: &str, name: &str) -> Option<(u64, u64)> {
+    stats.lines().find_map(|line| {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        if fields.get(2) != Some(&name) {
+            return None;
+        }
+        // Linux reports diskstats sectors in fixed 512-byte units regardless
+        // of the physical/logical block size of the disk.
+        Some((
+            fields.get(5)?.parse::<u64>().ok()?.checked_mul(512)?,
+            fields.get(9)?.parse::<u64>().ok()?.checked_mul(512)?,
+        ))
+    })
+}
+
+/// Capacity and IO probes run separately. A blocked remote filesystem keeps at
+/// most one worker occupied and cannot stop CPU/network sampling.
+#[derive(Default)]
+struct DiskIoProbe {
+    sampler: Option<DiskIoSampler>,
+    in_flight: Option<JoinHandle<(DiskIoSampler, DiskRates)>>,
+}
+
+impl DiskIoProbe {
+    async fn poll(&mut self) -> DiskRates {
+        if self.in_flight.is_none() {
+            let mut sampler = self.sampler.take().unwrap_or_default();
+            self.in_flight = Some(tokio::task::spawn_blocking(move || {
+                let rates = sampler.read();
+                (sampler, rates)
+            }));
+        }
+        let handle = self.in_flight.as_mut().unwrap();
+        match tokio::time::timeout(Duration::from_millis(100), handle).await {
+            Ok(result) => {
+                self.in_flight = None;
+                match result {
+                    Ok((sampler, rates)) => {
+                        self.sampler = Some(sampler);
+                        rates
+                    }
+                    Err(error) => {
+                        debug!(%error, "磁盘 IO 采样失败");
+                        DiskRates::default()
+                    }
+                }
+            }
+            Err(_) => DiskRates::default(),
+        }
+    }
 }
 
 /// 容器设了内存上限（小于整机内存）时报 cgroup 口径，否则报整机口径。
@@ -727,6 +997,8 @@ mod tests {
             cpu,
             rx: 10,
             tx: 20,
+            disk_read_bytes_per_sec: Some(30),
+            disk_write_bytes_per_sec: Some(40),
             memory: Some(MemoryUsage {
                 used: 1,
                 total: 2,
@@ -843,19 +1115,23 @@ mod tests {
                     cpu: 12.3,
                     rx: 1_024,
                     tx: 0,
+                    disk_read_bytes_per_sec: None,
+                    disk_write_bytes_per_sec: Some(512),
                 },
                 Sample {
                     ts: 1_700_000_002_000,
                     cpu: 100.0,
                     rx: u64::MAX,
                     tx: 7,
+                    disk_read_bytes_per_sec: Some(0),
+                    disk_write_bytes_per_sec: None,
                 },
             ],
         };
         let json = serde_json::to_string(&full).unwrap();
         assert_eq!(
             json,
-            r#"{"ts":1700000000123,"interval_ms":2000,"history_ms":300000,"cpu":{"logical":8,"physical":null},"memory":{"used":3221225472,"total":17179869184,"limited":true},"disk":{"path":"/srv/录播","total":1099511627776,"used":549755813888,"available":274877906944},"interfaces":["eth0","wlan0"],"samples":[{"ts":1700000000000,"cpu":12.3,"rx":1024,"tx":0},{"ts":1700000002000,"cpu":100.0,"rx":18446744073709551615,"tx":7}]}"#
+            r#"{"ts":1700000000123,"interval_ms":2000,"history_ms":300000,"cpu":{"logical":8,"physical":null},"memory":{"used":3221225472,"total":17179869184,"limited":true},"disk":{"path":"/srv/录播","total":1099511627776,"used":549755813888,"available":274877906944},"interfaces":["eth0","wlan0"],"samples":[{"ts":1700000000000,"cpu":12.3,"rx":1024,"tx":0,"disk_read_bytes_per_sec":null,"disk_write_bytes_per_sec":512},{"ts":1700000002000,"cpu":100.0,"rx":18446744073709551615,"tx":7,"disk_read_bytes_per_sec":0,"disk_write_bytes_per_sec":null}]}"#
         );
 
         let empty = SystemMonitor::new(SAMPLE_INTERVAL).snapshot(None);
@@ -868,6 +1144,129 @@ mod tests {
             assert_eq!(parsed.disk, stats.disk);
             assert_eq!(parsed.samples, stats.samples);
         }
+    }
+
+    #[test]
+    fn disk_io_uses_measured_elapsed_and_rebaselines_changes_and_resets() {
+        let mut sampler = DiskIoSampler::default();
+        let now = Instant::now();
+        let count = |device: &str, read, write| Some((device.to_string(), read, write));
+        assert_eq!(
+            sampler.record(count("nvme", 100, 200), now),
+            DiskRates::default()
+        );
+        assert_eq!(
+            sampler.record(count("nvme", 600, 1200), now + Duration::from_millis(2500)),
+            DiskRates {
+                read: Some(200),
+                write: Some(400)
+            }
+        );
+        assert_eq!(
+            sampler.record(count("nvme", 600, 1200), now + Duration::from_secs(4)),
+            DiskRates {
+                read: Some(0),
+                write: Some(0)
+            }
+        );
+        assert_eq!(
+            sampler.record(count("sda", 600, 1200), now + Duration::from_secs(6)),
+            DiskRates::default()
+        );
+        assert_eq!(
+            sampler.record(count("sda", 10, 20), now + Duration::from_secs(8)),
+            DiskRates::default()
+        );
+        assert_eq!(
+            sampler.record(None, now + Duration::from_secs(10)),
+            DiskRates::default()
+        );
+        assert_eq!(
+            sampler.record(count("sda", 20, 40), now + Duration::from_secs(12)),
+            DiskRates::default()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disk_io_enumeration_is_lazy_and_refresh_fills_an_initially_empty_list() {
+        let mut sampler = DiskIoSampler::default();
+        assert!(
+            sampler.disks.list().is_empty(),
+            "construction must not perform blocking IO"
+        );
+        let counters = sampler.counters();
+        // sysinfo intentionally skips network filesystems, but local mounts are
+        // discovered by refresh_specifics without a separate initialization call.
+        let local_mounts = std::fs::read_to_string("/proc/self/mounts").unwrap();
+        if local_mounts.lines().any(|line| {
+            line.split_whitespace()
+                .nth(2)
+                .is_some_and(|fs| matches!(fs, "ext4" | "xfs" | "btrfs" | "overlay"))
+        }) {
+            assert!(!sampler.disks.list().is_empty());
+        }
+        if let Some((_, read, write)) = counters {
+            assert_eq!(read % 512, 0);
+            assert_eq!(write % 512, 0);
+        }
+    }
+
+    #[test]
+    fn windows_disk_performance_fixture_keeps_real_zero_and_rejects_invalid_data() {
+        let volume = "\\\\?\\Volume{550e8400-e29b-41d4-a716-446655440000}\\";
+        let wide: Vec<u16> = volume.encode_utf16().chain(Some(0)).collect();
+        let (identity, device) = windows_volume_device(&wide).unwrap();
+        assert_eq!(identity, volume.trim_end_matches('\\'));
+        assert_eq!(
+            String::from_utf16(&device[..device.len() - 1]).unwrap(),
+            identity
+        );
+        assert_eq!(windows_performance_bytes(0, 0).unwrap(), (0, 0));
+        assert_eq!(
+            windows_performance_bytes(1234567, 9876543).unwrap(),
+            (1234567, 9876543)
+        );
+        assert!(windows_performance_bytes(-1, 0).is_err());
+        assert!(windows_volume_device(&volume.encode_utf16().collect::<Vec<_>>()).is_err());
+        let unc: Vec<u16> = "\\\\server\\share\\"
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        assert!(windows_volume_device(&unc).is_err());
+    }
+
+    #[test]
+    fn deepest_recording_mount_includes_unsupported_and_escaped_mounts() {
+        let mounts = "/dev/sda / ext4 rw 0 0\nserver:/nas /mnt/nas nfs4 rw 0 0\n/dev/sdb /mnt/recording\\040disk ext4 rw 0 0\n";
+        assert_eq!(
+            recording_mount(Path::new("/mnt/nas/live"), mounts),
+            Some(PathBuf::from("/mnt/nas"))
+        );
+        assert_eq!(
+            recording_mount(Path::new("/mnt/nas2/live"), mounts),
+            Some(PathBuf::from("/"))
+        );
+        assert_eq!(
+            recording_mount(Path::new("/mnt/recording disk/live"), mounts),
+            Some(PathBuf::from("/mnt/recording disk"))
+        );
+        assert_eq!(
+            disk_cumulative_bytes("8 0 sda 0 0 0 0 0 0 0 0", "sda"),
+            Some((0, 0))
+        );
+        assert_eq!(
+            disk_cumulative_bytes("8 0 sda 0 0 12 0 0 0 24 0", "sda"),
+            Some((6144, 12288))
+        );
+        assert_eq!(
+            disk_cumulative_bytes("8 0 sda 0 0 0 0 0 0 0 0", "sdb"),
+            None
+        );
+        assert_eq!(
+            disk_cumulative_bytes("8 0 sda 0 0 nope 0 0 0 0 0", "sda"),
+            None
+        );
     }
 
     static HUNG_PROBE_CALLS: AtomicUsize = AtomicUsize::new(0);

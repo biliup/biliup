@@ -226,8 +226,29 @@ impl LoginLimiter {
         username.to_lowercase()
     }
 
+    #[cfg(test)]
     fn is_locked(&self, username: &str, now: Instant) -> bool {
+        Self::locked(&mut self.attempts.lock().unwrap(), username, now)
+    }
+
+    #[cfg(test)]
+    fn record_failure(&self, username: &str, now: Instant) {
+        Self::count(&mut self.attempts.lock().unwrap(), username, now);
+    }
+
+    /// 开始一次登录尝试：锁定中返回 `false`（按密码错误处理）。否则先把这次尝试按失败记账再放行，
+    /// 成功由 [`Self::record_success`] 清零。检查与记账在同一把锁里：还在校验密码的尝试也算数，
+    /// 并发涌来的一批猜测里只有前 [`MAX_LOGIN_FAILURES`] 个能真正去校验，限流不会被并发绕过。
+    fn begin_attempt(&self, username: &str, now: Instant) -> bool {
         let mut attempts = self.attempts.lock().unwrap();
+        if Self::locked(&mut attempts, username, now) {
+            return false;
+        }
+        Self::count(&mut attempts, username, now);
+        true
+    }
+
+    fn locked(attempts: &mut HashMap<String, Attempts>, username: &str, now: Instant) -> bool {
         let Some(entry) = attempts.get_mut(&Self::key(username)) else {
             return false;
         };
@@ -241,8 +262,7 @@ impl LoginLimiter {
         }
     }
 
-    fn record_failure(&self, username: &str, now: Instant) {
-        let mut attempts = self.attempts.lock().unwrap();
+    fn count(attempts: &mut HashMap<String, Attempts>, username: &str, now: Instant) {
         if attempts.len() >= MAX_TRACKED_USERNAMES {
             attempts.retain(|_, entry| entry.locked_until.is_some_and(|until| until > now));
         }
@@ -453,7 +473,7 @@ impl Backend {
                 role = COALESCE(?2, role),
                 disabled = COALESCE(?3, disabled),
                 password_hash = COALESCE(?4, password_hash),
-                session_version = session_version + (?4 IS NOT NULL),
+                session_version = session_version + (?4 IS NOT NULL OR (COALESCE(?3, 0) = 1 AND disabled = 0)),
                 updated_at = unixepoch()
              WHERE id = ?1
                AND (
@@ -529,11 +549,34 @@ impl Backend {
         {
             return Ok(None);
         }
-        let changes = UserChanges {
-            password: Some(new_password),
-            ..Default::default()
-        };
-        self.update_user(id, changes).await.map(Some)
+        let password_hash = hash_password(new_password).await?;
+        self.set_own_password_if_current(&user, &password_hash)
+            .await
+    }
+
+    /// Password verification and hashing can take long enough for another request to
+    /// reset credentials or revoke sessions. Only the verified account version may
+    /// authorize this password change.
+    async fn set_own_password_if_current(
+        &self,
+        verified: &User,
+        password_hash: &str,
+    ) -> Result<Option<User>, UpdateUserError> {
+        let row: Option<UserRow> = sqlx::query_as(&format!(
+            "UPDATE web_users SET password_hash = ?1,
+                session_version = session_version + 1, updated_at = unixepoch()
+             WHERE id = ?2 AND password_hash = ?3 AND session_version = ?4 AND disabled = 0
+             RETURNING {USER_COLUMNS}"
+        ))
+        .bind(password_hash)
+        .bind(verified.id)
+        .bind(&verified.password_hash)
+        .bind(verified.session_version)
+        .fetch_optional(&self.db)
+        .await?;
+        row.map(User::try_from)
+            .transpose()
+            .map_err(UpdateUserError::Database)
     }
 
     /// CLI 用：按用户名重置密码并让该用户所有会话失效。
@@ -570,8 +613,7 @@ impl AuthnBackend for Backend {
         {
             return Ok(None);
         }
-        let now = Instant::now();
-        if self.limiter.is_locked(&creds.username, now) {
+        if !self.limiter.begin_attempt(&creds.username, Instant::now()) {
             return Ok(None);
         }
         let user = self
@@ -583,8 +625,8 @@ impl AuthnBackend for Backend {
             .map(|user| user.password_hash.clone())
             .unwrap_or_else(dummy_hash);
         let matches = password_matches(creds.password, hash).await?;
+        // 失败在 begin_attempt 里已经记过账
         let Some(user) = user.filter(|_| matches) else {
-            self.limiter.record_failure(&creds.username, now);
             return Ok(None);
         };
         self.limiter.record_success(&creds.username);
@@ -988,6 +1030,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pending_password_changes_cannot_override_resets_or_revocations() {
+        let (_dir, backend) = backend().await;
+        let admin = backend
+            .bootstrap_admin(credentials("biliup", "password-1"))
+            .await
+            .unwrap();
+        let viewer = backend
+            .create_user("viewer", "password-2".into(), Role::Viewer)
+            .await
+            .unwrap();
+
+        // This snapshot represents credentials verified before another request
+        // finishes a reset, logout or disable operation.
+        let reset = backend
+            .reset_password("viewer", "password-reset".into())
+            .await
+            .unwrap();
+        assert!(
+            backend
+                .set_own_password_if_current(&viewer, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            backend
+                .find_by_id(viewer.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .password_hash,
+            reset.password_hash
+        );
+
+        backend.logout_everywhere(viewer.id).await.unwrap();
+        assert!(
+            backend
+                .set_own_password_if_current(&reset, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let before_disable = backend.find_by_id(viewer.id).await.unwrap().unwrap();
+        let disabled = backend
+            .update_user(
+                viewer.id,
+                UserChanges {
+                    disabled: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            disabled.session_auth_hash(),
+            before_disable.session_auth_hash()
+        );
+        assert!(
+            backend
+                .set_own_password_if_current(&before_disable, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let enabled = backend
+            .update_user(
+                viewer.id,
+                UserChanges {
+                    disabled: Some(false),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_ne!(
+            enabled.session_auth_hash(),
+            before_disable.session_auth_hash()
+        );
+        assert!(
+            backend
+                .set_own_password_if_current(&before_disable, &admin.password_hash)
+                .await
+                .unwrap()
+                .is_none(),
+            "re-enabling an account must not restore a revoked session"
+        );
+
+        let changed = backend
+            .set_own_password_if_current(&enabled, &admin.password_hash)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(changed.session_auth_hash(), enabled.session_auth_hash());
+        assert!(
+            backend
+                .set_own_password_if_current(&enabled, &reset.password_hash)
+                .await
+                .unwrap()
+                .is_none(),
+            "two requests verified against the same password cannot both commit"
+        );
+    }
+
+    #[tokio::test]
     async fn repeated_failures_lock_the_username_for_a_while() {
         let (_dir, backend) = backend().await;
         backend
@@ -1022,6 +1169,51 @@ mod tests {
         assert!(!limiter.is_locked("x", start + LOGIN_LOCK + Duration::from_secs(1)));
         limiter.record_failure("x", start + LOGIN_LOCK + Duration::from_secs(1));
         assert!(!limiter.is_locked("x", start + LOGIN_LOCK + Duration::from_secs(1)));
+    }
+
+    /// 限流不能被并发绕过：一批同时到达的猜测都在第一次失败落账之前过了锁定检查，就会全部真的去
+    /// 校验密码，「5 次锁 30 秒」形同虚设。还没出结果的尝试也要算数：同一用户名同时在途的尝试
+    /// 到了上限，后来的请求（哪怕密码是对的）一律按失败处理。
+    #[tokio::test]
+    async fn concurrent_guesses_cannot_outrun_the_lock() {
+        let (_dir, backend) = backend().await;
+        backend
+            .bootstrap_admin(credentials("biliup", "password-1"))
+            .await
+            .unwrap();
+        // 占住全部 Argon2 许可：猜测都停在算哈希之前，没有一次失败来得及落账
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONCURRENT_PASSWORD_TASKS {
+            held.push(acquire_password_task_permit().await);
+        }
+        let guesses: Vec<_> = (0..MAX_LOGIN_FAILURES)
+            .map(|index| {
+                let backend = backend.clone();
+                tokio::spawn(async move {
+                    backend
+                        .authenticate(credentials("biliup", &format!("guess-{index}")))
+                        .await
+                })
+            })
+            .collect();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let late = tokio::spawn({
+            let backend = backend.clone();
+            async move {
+                backend
+                    .authenticate(credentials("biliup", "password-1"))
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        drop(held);
+        for guess in guesses {
+            assert!(guess.await.unwrap().unwrap().is_none());
+        }
+        assert!(
+            late.await.unwrap().unwrap().is_none(),
+            "上限个尝试还在途时，后来的请求不能再去校验密码"
+        );
     }
 
     #[test]

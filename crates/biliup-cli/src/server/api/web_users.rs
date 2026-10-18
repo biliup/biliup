@@ -522,4 +522,45 @@ mod tests {
         assert_eq!(status, StatusCode::UNAUTHORIZED, "其它会话下线");
         login(&app, "biliup", "new-password").await;
     }
+
+    #[tokio::test]
+    async fn re_enabling_a_user_does_not_restore_their_old_sessions() {
+        let (_dir, app) = app().await;
+        let (_, admin, _) = call(
+            &app,
+            None,
+            "POST",
+            "/v1/users/register",
+            Some(json!({ "username": "boss", "password": "admin-password" })),
+        )
+        .await;
+        let admin = admin.unwrap();
+        let (status, _, viewer) = call(
+            &app,
+            Some(&admin),
+            "POST",
+            "/v1/web-users",
+            Some(json!({ "username": "viewer", "password": "viewer-password", "role": "viewer" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let cookie = login(&app, "viewer", "viewer-password").await;
+        let uri = format!("/v1/web-users/{}", viewer["id"].as_i64().unwrap());
+        for disabled in [true, false] {
+            let (status, _, _) = call(
+                &app,
+                Some(&admin),
+                "PUT",
+                &uri,
+                Some(json!({ "disabled": disabled })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        // The user's browser remained idle throughout disable/re-enable, so it
+        // never had an opportunity to clear its session while disabled.
+        let (status, _, _) = call(&app, Some(&cookie), "GET", "/v1/me", None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        login(&app, "viewer", "viewer-password").await;
+    }
 }

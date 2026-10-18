@@ -2,7 +2,7 @@
 'use strict'
 
 // 按平台找到 optionalDependencies 里装上的那个子包，把参数、标准输入输出和退出码原样交给它的二进制。
-const { spawnSync } = require('child_process')
+const { spawn } = require('child_process')
 const fs = require('fs')
 const path = require('path')
 
@@ -92,13 +92,17 @@ function resolveBinary() {
   return bin
 }
 
-const result = spawnSync(resolveBinary(), process.argv.slice(2), { stdio: 'inherit' })
+const child = spawn(resolveBinary(), process.argv.slice(2), { stdio: 'inherit' })
+const signals = ['SIGINT', 'SIGTERM', 'SIGHUP']
+const handlers = new Map(signals.map((signal) => [signal, () => child.kill(signal)]))
+for (const [signal, handler] of handlers) process.on(signal, handler)
 
-if (result.error) {
-  fail([`biliup: 启动二进制失败：${result.error.message}`])
-}
-if (result.signal) {
-  process.kill(process.pid, result.signal)
-} else {
-  process.exit(result.status ?? 1)
-}
+child.on('error', (error) => fail([`biliup: 启动二进制失败：${error.message}`]))
+child.on('exit', (code, signal) => {
+  for (const [name, handler] of handlers) process.removeListener(name, handler)
+  if (signal && process.platform !== 'win32') {
+    process.kill(process.pid, signal)
+  } else {
+    process.exit(code ?? 1)
+  }
+})

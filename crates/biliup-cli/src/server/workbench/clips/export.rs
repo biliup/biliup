@@ -16,6 +16,7 @@ use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::dvr::{self, flv};
 use crate::server::workbench::index::Container;
 use crate::server::workbench::recorder::now_ms;
+use crate::server::workbench::renders::encoding::QualityPreset;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io;
@@ -194,6 +195,11 @@ impl ClipExports {
 
     /// 在后台导出 `clip`（调用方已经把它标成 `exporting`）。
     pub fn start(self: &Arc<Self>, clip: Clip) {
+        self.start_with_quality(clip, QualityPreset::default());
+    }
+
+    /// 精确剪按所选质量转码；快速剪复制原始流，忽略质量预设。
+    pub fn start_with_quality(self: &Arc<Self>, clip: Clip, quality: QualityPreset) {
         let token = self.next_token.fetch_add(1, Ordering::Relaxed);
         let progress = Arc::new(Mutex::new(Progress::phase("排队中")));
         let id = clip.id;
@@ -207,7 +213,7 @@ impl ClipExports {
         );
         let this = self.clone();
         let handle = tokio::spawn(async move {
-            this.run(clip, progress).await;
+            this.run(clip, quality, progress).await;
             let mut jobs = lock(&this.jobs);
             if jobs.get(&id).is_some_and(|job| job.token == token) {
                 jobs.remove(&id);
@@ -249,11 +255,11 @@ impl ClipExports {
         }
     }
 
-    async fn run(&self, clip: Clip, progress: Arc<Mutex<Progress>>) {
+    async fn run(&self, clip: Clip, quality: QualityPreset, progress: Arc<Mutex<Progress>>) {
         let mode = clip.mode.unwrap_or(Mode::Quick);
         let started = std::time::Instant::now();
         self.remove_outputs(clip.session_id, clip.id).await;
-        let result = self.export(&clip, mode, &progress).await;
+        let result = self.export(&clip, mode, quality, &progress).await;
         let now = now_ms();
         match result {
             Ok(done) => {
@@ -283,6 +289,7 @@ impl ClipExports {
         &self,
         clip: &Clip,
         mode: Mode,
+        quality: QualityPreset,
         progress: &Arc<Mutex<Progress>>,
     ) -> Result<Exported, String> {
         let slots = match mode {
@@ -290,6 +297,14 @@ impl ClipExports {
             Mode::Precise => &self.precise,
         };
         let _permit = slots.acquire().await.map_err(|e| e.to_string())?;
+        let _encoder = if mode == Mode::Precise {
+            Some(
+                crate::server::common::processing::transcode::acquire(&tokio_util::sync::CancellationToken::new())
+                    .await?,
+            )
+        } else {
+            None
+        };
         *lock(progress) = Progress::phase("准备中");
         if mode == Mode::Precise
             && let Some(error) = ffmpeg_unavailable().await
@@ -312,7 +327,7 @@ impl ClipExports {
             .map_err(|e| io_message(&e))?;
         match mode {
             Mode::Quick => self.quick_cut(clip, &plan, &dir, progress).await,
-            Mode::Precise => self.precise_cut(clip, &plan, &dir, progress).await,
+            Mode::Precise => self.precise_cut(clip, &plan, &dir, quality, progress).await,
         }
     }
 
@@ -354,6 +369,7 @@ impl ClipExports {
         clip: &Clip,
         plan: &Plan,
         dir: &Path,
+        quality: QualityPreset,
         progress: &Arc<Mutex<Progress>>,
     ) -> Result<Exported, String> {
         let cut_in = clip.in_ms.max(plan.cut_in_ms);
@@ -377,7 +393,14 @@ impl ClipExports {
             .args(["-f", remux::ffmpeg_format(plan.container), "-i", "pipe:0"])
             .args(["-ss", &secs(from), "-to", &secs(to)])
             .args(["-map", "0:v:0", "-map", "0:a:0?"])
-            .args(["-c:v", "libx264", "-preset", "veryfast", "-crf", "20"])
+            .args([
+                "-c:v",
+                "libx264",
+                "-preset",
+                "veryfast",
+                "-crf",
+                quality.x264_crf(),
+            ])
             .args(["-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k"])
             .args(["-movflags", "+faststart", "-f", "mp4", "-y"])
             .arg(&part)
@@ -451,7 +474,12 @@ impl ClipExports {
         let source = clip
             .output_path
             .as_deref()
-            .filter(|_| clip.state == super::State::Ready || clip.state == super::State::Published)
+            .filter(|_| {
+                matches!(
+                    clip.state,
+                    super::State::Ready | super::State::Published | super::State::Failed
+                )
+            })
             .map(PathBuf::from)
             .ok_or(DownloadError::NotReady)?;
         if !tokio::fs::try_exists(&source).await.unwrap_or(false) {

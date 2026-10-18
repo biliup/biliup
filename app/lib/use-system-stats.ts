@@ -22,6 +22,8 @@ export interface SystemSample {
   rx: number
   /** 上行字节/秒 */
   tx: number
+  disk_read_bytes_per_sec?: number | null
+  disk_write_bytes_per_sec?: number | null
 }
 
 export interface SystemMemory {
@@ -122,7 +124,11 @@ async function pollOnce() {
   const since = samples.length > 0 ? `?since=${samples[samples.length - 1].ts}` : ''
   let ok = false
   try {
-    const res = await fetch(`${API_BASE}/v1/system-stats${since}`, { cache: 'no-store', signal: controller.signal })
+    const res = await fetch(`${API_BASE}/v1/system-stats${since}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+      credentials: 'include',
+    })
     await handleResponse(res)
     const body = (await res.json()) as SystemStatsResponse
     if (controller.signal.aborted) return
@@ -183,10 +189,12 @@ export interface SystemSeries {
   cpu: (number | null)[]
   rx: (number | null)[]
   tx: (number | null)[]
+  diskRead: (number | null)[]
+  diskWrite: (number | null)[]
 }
 
 export function toSeries(samples: readonly SystemSample[], intervalMs: number): SystemSeries {
-  const out: SystemSeries = { xs: [], cpu: [], rx: [], tx: [] }
+  const out: SystemSeries = { xs: [], cpu: [], rx: [], tx: [], diskRead: [], diskWrite: [] }
   const gap = intervalMs * 2.5
   let prev: number | null = null
   for (const s of samples) {
@@ -195,11 +203,15 @@ export function toSeries(samples: readonly SystemSample[], intervalMs: number): 
       out.cpu.push(null)
       out.rx.push(null)
       out.tx.push(null)
+      out.diskRead.push(null)
+      out.diskWrite.push(null)
     }
     out.xs.push(s.ts / 1000)
     out.cpu.push(s.cpu)
     out.rx.push(s.rx)
     out.tx.push(s.tx)
+    out.diskRead.push(s.disk_read_bytes_per_sec ?? null)
+    out.diskWrite.push(s.disk_write_bytes_per_sec ?? null)
     prev = s.ts
   }
   return out

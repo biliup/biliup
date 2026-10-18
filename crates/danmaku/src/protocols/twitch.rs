@@ -103,6 +103,7 @@ impl Platform for Twitch {
             .map_err(|e| crate::error::DanmakuError::Decode(e.to_string()))?;
 
         let mut events = Vec::new();
+        let mut pong = None;
 
         for line in text.lines() {
             let line = line.trim();
@@ -110,9 +111,12 @@ impl Platform for Twitch {
                 continue;
             }
 
+            // 一个帧里可能有多条以 CRLF 分隔的 IRC 消息：回应 PING 的同时继续
+            // 解析同帧的其余消息，不能提前返回把它们丢掉
             if line.starts_with("PING") {
                 let pong_target = line.strip_prefix("PING ").unwrap_or(":tmi.twitch.tv");
-                return Ok(DecodeResult::empty().with_text_ack(format!("PONG {}", pong_target)));
+                pong = Some(format!("PONG {}", pong_target));
+                continue;
             }
 
             // Try to parse PRIVMSG
@@ -141,7 +145,11 @@ impl Platform for Twitch {
             }
         }
 
-        Ok(DecodeResult::with_events(events))
+        let result = DecodeResult::with_events(events);
+        Ok(match pong {
+            Some(pong) => result.with_text_ack(pong),
+            None => result,
+        })
     }
 
     fn is_text_protocol(&self) -> bool {
@@ -184,5 +192,39 @@ mod tests {
         } else {
             panic!("Expected Chat event");
         }
+    }
+
+    /// 一个 WebSocket 帧里可以有多条以 CRLF 分隔的 IRC 消息。修复前遇到 PING
+    /// 立即返回只带 PONG 的结果，同帧里其余的 PRIVMSG 全部被静默丢弃。
+    #[test]
+    fn ping_batched_with_privmsg_keeps_the_chat_messages() {
+        let twitch = Twitch::new();
+        let msg = b"@color=#FF0000;display-name=Alice;user-type= :alice!alice@alice.tmi.twitch.tv PRIVMSG #channel :first\r\n\
+PING :tmi.twitch.tv\r\n\
+@display-name=Bob;user-type= :bob!bob@bob.tmi.twitch.tv PRIVMSG #channel :second\r\n";
+
+        let result = twitch.decode_message(msg).unwrap();
+
+        let contents: Vec<&str> = result
+            .events
+            .iter()
+            .map(|event| match event {
+                DanmakuEvent::Chat(chat) => chat.content.as_str(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(contents, ["first", "second"]);
+        assert!(result.ack_is_text);
+        assert_eq!(result.ack.as_deref(), Some(&b"PONG :tmi.twitch.tv"[..]));
+    }
+
+    #[test]
+    fn lone_ping_is_answered_with_pong() {
+        let result = Twitch::new()
+            .decode_message(b"PING :tmi.twitch.tv\r\n")
+            .unwrap();
+        assert!(result.events.is_empty());
+        assert!(result.ack_is_text);
+        assert_eq!(result.ack.as_deref(), Some(&b"PONG :tmi.twitch.tv"[..]));
     }
 }

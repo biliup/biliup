@@ -388,6 +388,15 @@ impl Standby {
         self.link.lock().unwrap().is_some()
     }
 
+    /// 接着的就是这条连接
+    pub(crate) fn linked_to(&self, link: &Link) -> bool {
+        self.link
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|current| current.same(link))
+    }
+
     pub(crate) fn primary_message(self: &Arc<Self>, message: HaMessage) {
         debug!(
             kind = message.kind(),
@@ -613,14 +622,34 @@ impl Standby {
 
     /// 投这一场：`append` 为空时作为完整稿件投，否则追加为这个稿件的后续分 P。占上传池的一个槽位
     async fn run(self: Arc<Self>, id: String, append: Option<String>) {
-        let slots = self.services.managers.upload_slots();
-        let _slot = slots.acquire().await;
         let Some(session) = self.core.lock().unwrap().session(&id).cloned() else {
             return;
         };
+        let (source, group) = upload_observation_source(append.is_some());
+        let title = session
+            .unit
+            .stream
+            .as_ref()
+            .and_then(|stream| stream.get("title"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&session.unit.remark);
+        let guard = self.services.upload_observations.register(
+            crate::server::common::upload_observation::NewTask {
+                source,
+                scheduler_group: group,
+                title,
+                streamer_name: Some(&session.unit.remark),
+                session_id: Some(session.unit.stream_session),
+                template_name: None,
+                fifo: false,
+            },
+        );
+        let slots = self.services.managers.upload_slots();
+        let _slot = slots.acquire().await;
         let ctx = match self.context(&session).await {
             Ok(ctx) => ctx,
             Err(reason) => {
+                guard.finish("failed", Some(&reason), None);
                 self.update(|core, now| core.upload_failed(now, &id, &reason));
                 return;
             }
@@ -632,6 +661,12 @@ impl Standby {
             "HA：备机开始投这一场"
         );
         self.update(|core, now| core.upload_started(now, &id));
+        let observation = guard.observation();
+        observation.template_name(
+            ctx.upload_config()
+                .as_ref()
+                .map(|template| template.template_name.as_str()),
+        );
         let segments = session
             .unit
             .segments
@@ -646,9 +681,22 @@ impl Standby {
             })
             .collect();
         let result = match &append {
-            None => upload::run_standby(&self, &id, &ctx, segments).await,
-            Some(bvid) => upload::run_append(&self, &id, &ctx, segments, bvid).await,
+            None => {
+                observation
+                    .scope(upload::run_standby(&self, &id, &ctx, segments))
+                    .await
+            }
+            Some(bvid) => {
+                observation
+                    .scope(upload::run_append(&self, &id, &ctx, segments, bvid))
+                    .await
+            }
         };
+        match &result {
+            Ok(Submitted::Done { bvid, .. }) => guard.finish("succeeded", None, Some(bvid)),
+            Ok(Submitted::Fenced) => guard.finish("cancelled", None, None),
+            Err(error) => guard.finish_result(&Err::<(), _>(error.to_string())),
+        }
         match result {
             Ok(Submitted::Done { bvid, paths }) => {
                 match append {
@@ -665,6 +713,14 @@ impl Standby {
                 self.update(|core, now| core.upload_failed(now, &id, &reason));
             }
         }
+    }
+}
+
+fn upload_observation_source(append: bool) -> (&'static str, &'static str) {
+    if append {
+        ("ha_append", "ha-pool")
+    } else {
+        ("ha", "ha-pool")
     }
 }
 
@@ -1009,7 +1065,7 @@ impl NodeHa {
             }
             if let Some(primary) = self.primary.take() {
                 warn!("HA：控制面解除了配对，本机不再是上传主机");
-                primary.stop();
+                primary.stop_and_close().await;
                 set_role(None);
                 park(&self.path, &self.controller, None);
             }
@@ -1033,6 +1089,7 @@ impl NodeHa {
             return None;
         }
         if let Some(primary) = self.primary.take() {
+            // 换回控制面之后本机还要当备机，主库留给还在跑的补投任务写完，不在这里关
             info!("HA：上传主机换回控制面，本机改当备机");
             primary.stop();
         }
@@ -1123,8 +1180,9 @@ impl NodeHa {
         }
     }
 
-    /// 节点代理停止
-    pub fn shutdown(&mut self) {
+    /// 节点代理停止。主机这一侧顺手把主库的池关掉：节点离开控制面之后 `ha-primary.sqlite3`
+    /// 会被删掉，而 Windows 上还开着的文件删不掉。
+    pub async fn shutdown(&mut self) {
         if let Some(member) = self.pair.take() {
             member.stop();
         }
@@ -1134,7 +1192,7 @@ impl NodeHa {
         }
         if let Some(primary) = self.primary.take() {
             set_role(None);
-            primary.stop();
+            primary.stop_and_close().await;
         }
         if self.retired.take().is_some() {
             set_role(None);
@@ -1171,6 +1229,12 @@ mod tests {
     use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
     use serde_json::json;
     use tokio::sync::mpsc;
+
+    #[test]
+    fn standby_full_and_append_uploads_are_distinct_sources_without_fifo_claims() {
+        assert_eq!(upload_observation_source(false), ("ha", "ha-pool"));
+        assert_eq!(upload_observation_source(true), ("ha_append", "ha-pool"));
+    }
     use tracing_subscriber::{EnvFilter, reload};
 
     const URL: &str = "https://stuck.example/7";
@@ -1323,7 +1387,7 @@ mod tests {
         ha.link_down();
         assert_eq!(ha.assign(None, &[], &link).await, None);
         ha.set_rooms(f.reconciler.state());
-        ha.shutdown();
+        ha.shutdown().await;
         assert!(
             !f.state_file().exists(),
             "没被指定为备机就不建 ha-state.json"
@@ -1374,7 +1438,7 @@ mod tests {
         assert_eq!(crate::server::fleet::ha::hold_recording(URL), None);
         assert_eq!(crate::server::fleet::ha::busy(), None);
         ha.link_down();
-        ha.shutdown();
+        ha.shutdown().await;
         assert!(crate::server::fleet::ha::primary().is_none());
 
         // 重启：控制面连不上也照样当主机
@@ -1399,7 +1463,7 @@ mod tests {
         assert!(!ha.is_primary());
         assert!(crate::server::fleet::ha::primary().is_none());
         assert_eq!(load(&f.state_file()).unwrap().assignment, None);
-        ha.shutdown();
+        ha.shutdown().await;
 
         forget(&f.state_file());
         assert!(!f.state_file().exists());
@@ -1459,7 +1523,7 @@ mod tests {
             ),
             "同步端停下时加入记录一起清掉"
         );
-        ha.shutdown();
+        ha.shutdown().await;
     }
 
     /// 备机走真实的录制钩子收下分段；主机投稿失败后按场次记下的开播信息重建上下文、经测试替身投出，
@@ -1560,7 +1624,7 @@ mod tests {
         assert_eq!(stream["stream_headers"], json!({}));
 
         // 节点代理重启：按 ha-state.json 恢复，新连接上先上报投成的一场
-        ha.shutdown();
+        ha.shutdown().await;
         assert!(crate::server::fleet::ha::upload_plan(&ctx).await.is_none());
         let mut ha = f.resume(false).await;
         assert!(ha.is_standby());
@@ -1619,7 +1683,7 @@ mod tests {
         assert_eq!(saved.assignment, None);
         assert_eq!(saved.sessions.len(), 2);
         assert_eq!(double.entries().len(), submitted, "解除之后没有再投");
-        ha.shutdown();
+        ha.shutdown().await;
         assert!(
             crate::server::fleet::ha::upload_plan(&in_flight)
                 .await
@@ -1740,7 +1804,7 @@ mod tests {
         let saved = load(&f.state_file()).unwrap();
         assert_eq!(saved.sessions[0].state, State::Appended);
         assert_eq!(saved.sessions[0].bvid.as_deref(), Some("BVP0001"));
-        ha.shutdown();
+        ha.shutdown().await;
         double::install(None);
     }
 
@@ -1799,7 +1863,7 @@ mod tests {
                 .unwrap_err()
                 .contains("没有场次")
         );
-        ha.shutdown();
+        ha.shutdown().await;
         assert!(crate::server::fleet::ha::standby().is_none());
     }
 }

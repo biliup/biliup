@@ -71,6 +71,9 @@ impl Container {
     pub fn from_path(path: &Path) -> Option<Self> {
         let name = path.file_name()?.to_str()?.to_ascii_lowercase();
         let name = name.strip_suffix(".part").unwrap_or(&name);
+        // Mosaic keeps a side-by-side `.unmasked` source while the workbench
+        // continues to index the published container path.
+        let name = name.strip_suffix(".unmasked").unwrap_or(name);
         match name.rsplit_once('.')?.1 {
             "flv" => Some(Self::Flv),
             "ts" => Some(Self::Ts),

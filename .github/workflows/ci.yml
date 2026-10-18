@@ -26,15 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Build frontend
-        run: |
-          npm install
-          npm run build
-          # biliup-cli 编译时内嵌 out/，sdist 必须带上；pyproject 的 include 相对 crates/stream-gears，即 sdist 根目录
-          cp -r out crates/stream-gears/out
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:

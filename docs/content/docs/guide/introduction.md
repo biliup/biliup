@@ -23,11 +23,9 @@ top = false
 
 ## INSTALLATION
 0. 安装 __Python 3.7+__ 和 __pip__
- > 如需录制 斗鱼(Douyu) 平台，请额外安装至少一个 __JavaScript 解释器__。
- > 支持且不限于以下的  __JavaScript 解释器__，点击名字可跳转至下载页。
- > Please install at least one of the following Javascript interpreter.
- > python packages: [QuickJS](https://pypi.org/project/quickjs/)
- > applications: [Node.js](https://nodejs.org/zh-cn/download)
+ > 当前 Rust 版斗鱼插件内置网页播放签名，无需额外安装 JavaScript 解释器。
+ > 部分房间的原画需配置网页版 Cookie；HEVC 录制请使用 mesio 或兼容的新版 FFmpeg。
+ > 详见 [斗鱼 Cookie 与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
 1. 创建配置文件 **[config.toml](https://github.com/biliup/biliup/tree/master/public/config.toml)**
     ```toml
     # 以下为必填项
@@ -216,6 +214,21 @@ bupfetch模式支持的上传方式及线路有：
 - [AList](https://alist.nn.ci/zh/) 检测到同文件夹下的XML文件会自动挂载弹幕，实现带弹幕的录播效果
 - 使用 [弹弹play](https://www.dandanplay.com/) 可直接挂载XML弹幕文件观看
 
+### 5. 录制中断时的未完成录像
+biliup **不会删除未完成的录像**。断流、CDN 切换、下载器出错、暂停或删除房间、退出程序时，已经写下的内容都会保留：
+- FLV / TS（stream-gears、mesio、ffmpeg 录 FLV / TS 时）：截断后前面的内容仍可播放，照常作为一个分段保存，并照常进入上传和后处理（stream-gears 遇到读到一半断开的最后一个 tag 时只丢弃这一个 tag）。
+- HLS fMP4（stream-gears、mesio 录 fMP4 时）：整片收齐了才写进文件，截断在分片中间的最后一小段直接丢掉（半个分片会让整个文件的结尾解不出来）；init segment 加完整分片拼起来照常可播。
+- ffmpeg 录 MP4（`format: mp4`）：MP4 的索引（moov）在录制结束时才写，被中止的 MP4 无法播放，因此**不进入上传流程**；但文件不会被删除，会以 `.mp4.part` 的名字留在录像目录里，可以用 untrunc 等工具尝试修复，或自行删除。
+
+### 6. 录制分段、画面遮挡和本地合并
+
+录制分段时长可以使用预设或自定义值；启用画面遮挡时，可以在当前直播截帧上圈选区域，分段关闭后自动处理。程序默认不会将多个本地分段拼成单个文件；处理完成后可使用 FFmpeg `-c copy` 快速合并，也可自行配置后处理脚本。
+
+入口、截图说明、碎片过滤与无重编码合并步骤见[录制分段、画面遮挡与本地合并](@/docs/tutorials/recording-and-masking.md)。斗鱼账号和自动续期见[斗鱼登录、Cookie 续期与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
+
+### 7. 斗鱼录制中的 `Non-monotonous DTS` 日志
+斗鱼 CDN 切换节点或主播推流重连时，FLV 流里的时间戳常会归 0（日志形如 `Non-monotonous DTS ... previous: 4877, current: 0`），切换瞬间还可能夹着空的 tag、重发的 onMetaData / 序列头，甚至重发整个 FLV 文件头。stream-gears 会按音频、视频轨道分别把后续时间戳平移接上，跳过残缺的 tag，录制继续进行；连接在 tag 中间断开时按正常断流结束，已录内容全部保留。这条日志只是提示，不需要处理。
+
 
 ## 自定义插件
 下载整合了ykdl、youtube-dl、streamlink，不支持或者支持的不够好的网站可自行拓展。
@@ -272,4 +285,3 @@ $ systemctl --user start biliupd
 > 关于B站为什么不能多p上传\
 目前bilibili网页端是根据用户权重来限制分p数量的，权重不够的用户切换到客户端的提交接口即可解除这一限制。
 > 用户等级大于3，且粉丝数>1000，web端投稿不限制分p数量
-

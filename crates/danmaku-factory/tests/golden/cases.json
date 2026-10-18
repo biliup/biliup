@@ -1,0 +1,466 @@
+[
+ {
+  "name": "basic_cn-biliup",
+  "input": "basic_cn.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "long_text-biliup",
+  "input": "long_text.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "emoji-biliup",
+  "input": "emoji.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "special_chars-biliup",
+  "input": "special_chars.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "types-biliup",
+  "input": "types.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "dense-biliup",
+  "input": "dense.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "same_time-biliup",
+  "input": "same_time.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "sizes-biliup",
+  "input": "sizes.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "long_time-biliup",
+  "input": "long_time.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "unsorted-biliup",
+  "input": "unsorted.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "repeat-biliup",
+  "input": "repeat.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "basic_cn-small",
+  "input": "basic_cn.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 26,
+   "font_size_strict": true,
+   "opacity": 255,
+   "outline": 0.5,
+   "shadow": 0.0,
+   "scroll_time": 4.0,
+   "fix_time": 4.0,
+   "display_area": 1.0,
+   "density": 0,
+   "width": 320,
+   "height": 180
+  }
+ },
+ {
+  "name": "basic_cn-defaults",
+  "input": "basic_cn.xml",
+  "options": {}
+ },
+ {
+  "name": "dense-small",
+  "input": "dense.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 26,
+   "font_size_strict": true,
+   "opacity": 255,
+   "outline": 0.5,
+   "shadow": 0.0,
+   "scroll_time": 4.0,
+   "fix_time": 4.0,
+   "display_area": 1.0,
+   "density": 0,
+   "width": 320,
+   "height": 180
+  }
+ },
+ {
+  "name": "dense-defaults",
+  "input": "dense.xml",
+  "options": {}
+ },
+ {
+  "name": "same_time-small",
+  "input": "same_time.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 26,
+   "font_size_strict": true,
+   "opacity": 255,
+   "outline": 0.5,
+   "shadow": 0.0,
+   "scroll_time": 4.0,
+   "fix_time": 4.0,
+   "display_area": 1.0,
+   "density": 0,
+   "width": 320,
+   "height": 180
+  }
+ },
+ {
+  "name": "same_time-defaults",
+  "input": "same_time.xml",
+  "options": {}
+ },
+ {
+  "name": "types-small",
+  "input": "types.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 26,
+   "font_size_strict": true,
+   "opacity": 255,
+   "outline": 0.5,
+   "shadow": 0.0,
+   "scroll_time": 4.0,
+   "fix_time": 4.0,
+   "display_area": 1.0,
+   "density": 0,
+   "width": 320,
+   "height": 180
+  }
+ },
+ {
+  "name": "types-defaults",
+  "input": "types.xml",
+  "options": {}
+ },
+ {
+  "name": "dense-edge",
+  "input": "dense.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 8,
+   "font_size_strict": true,
+   "opacity": 1,
+   "outline": 4.0,
+   "shadow": 0.0,
+   "scroll_time": 2.0,
+   "fix_time": 2.0,
+   "display_area": 0.05,
+   "density": 1000,
+   "width": 96,
+   "height": 64
+  },
+  "upstream_bug": "F4: a 3 px display area with 8 px lines; the unmodified CLI corrupts the heap and aborts"
+ },
+ {
+  "name": "dense-large",
+  "input": "dense.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 200,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 3.5,
+   "shadow": 0.0,
+   "scroll_time": 60.0,
+   "fix_time": 60.0,
+   "display_area": 1.0,
+   "density": -1,
+   "width": 3840,
+   "height": 2160
+  }
+ },
+ {
+  "name": "sizes-not-strict",
+  "input": "sizes.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": false,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  }
+ },
+ {
+  "name": "sizes-extras",
+  "input": "sizes.xml",
+  "options": {
+   "line_spacing": 4,
+   "top_margin": 10,
+   "bottom_margin": 12,
+   "scroll_area": 0.5,
+   "bold": true,
+   "outline": 1.5,
+   "outline_blur": 2.0,
+   "outline_opacity": 128,
+   "font_size_norm": true,
+   "width": 1280,
+   "height": 720
+  }
+ },
+ {
+  "name": "dense-extras",
+  "input": "dense.xml",
+  "options": {
+   "line_spacing": 4,
+   "top_margin": 10,
+   "bottom_margin": 12,
+   "scroll_area": 0.5,
+   "bold": true,
+   "outline": 1.5,
+   "outline_blur": 2.0,
+   "outline_opacity": 128,
+   "font_size_norm": true,
+   "width": 1280,
+   "height": 720
+  }
+ },
+ {
+  "name": "repeat-block",
+  "input": "repeat.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": 5,
+   "block_mode": 64,
+   "save_blocked": false
+  }
+ },
+ {
+  "name": "types-block",
+  "input": "types.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1,
+   "block_mode": 22,
+   "save_blocked": true
+  }
+ },
+ {
+  "name": "basic_cn-block-color",
+  "input": "basic_cn.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1,
+   "block_mode": 32,
+   "save_blocked": false
+  }
+ },
+ {
+  "name": "tiny-line-fills-area",
+  "input": "tiny.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 1.0,
+   "density": -1,
+   "width": 64,
+   "height": 38
+  },
+  "upstream_bug": "F4: findMin reads array[-1]/array[height] and the caller writes fixEndTime[-1]"
+ },
+ {
+  "name": "tiny-one-pixel",
+  "input": "tiny.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.5,
+   "density": -1,
+   "width": 4,
+   "height": 1
+  },
+  "upstream_bug": "F4: zero-row occupancy arrays are read and written"
+ },
+ {
+  "name": "trailing_ref",
+  "input": "trailing_ref.xml",
+  "options": {
+   "font_name": "Noto Sans CJK SC",
+   "font_size": 38,
+   "font_size_strict": true,
+   "opacity": 204,
+   "outline": 2.0,
+   "shadow": 0.0,
+   "scroll_time": 12.0,
+   "fix_time": 12.0,
+   "display_area": 0.4,
+   "density": -1
+  },
+  "upstream_bug": "F3/F7: a trailing '&#' reads past the text; '&#55357;' is written as invalid UTF-8"
+ }
+]

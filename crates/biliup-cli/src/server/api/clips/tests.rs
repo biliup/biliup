@@ -17,6 +17,7 @@ use tower_sessions_sqlx_store::SqliteStore;
 
 #[derive(Clone, FromRef)]
 struct AppState {
+    renders: Arc<crate::server::workbench::renders::RenderJobs>,
     pool: ConnectionPool,
     clips: Arc<ClipExports>,
     publisher: Arc<ClipPublisher>,
@@ -26,6 +27,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     app: Router,
     pool: ConnectionPool,
+    publisher: Arc<ClipPublisher>,
     /// 录完的一场：两段 FLV `[0, 3965)`、`[3965, 7930)`
     ended: i64,
     /// 正在录的一场（登记了但还没有锚点）
@@ -94,13 +96,18 @@ async fn fixture() -> Fixture {
     )
     .build();
     let clips = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let publisher = Arc::new(ClipPublisher::new(
+        pool.clone(),
+        clips.clone(),
+        Arc::new(crate::server::workbench::clips::publish::queue::Offline),
+    ));
     let state = AppState {
-        pool: pool.clone(),
-        publisher: Arc::new(ClipPublisher::new(
+        renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
             pool.clone(),
-            clips.clone(),
-            Arc::new(crate::server::workbench::clips::publish::queue::Offline),
+            dir.path().join("renders"),
         )),
+        pool: pool.clone(),
+        publisher: publisher.clone(),
         clips,
     };
     let app = Router::new()
@@ -120,6 +127,7 @@ async fn fixture() -> Fixture {
         _dir: dir,
         app,
         pool,
+        publisher,
         ended,
         live: live_id,
         _guard: guard,
@@ -184,6 +192,137 @@ async fn text_of(response: Response, status: StatusCode) -> String {
         .await
         .unwrap();
     String::from_utf8(body.to_vec()).unwrap()
+}
+
+#[tokio::test]
+async fn grouped_clips_preserve_old_owners_and_export_across_sources() {
+    let f = fixture().await;
+    let admin = login(&f.app, "biliup", "admin-password").await;
+    sqlx::query("INSERT INTO livestreamers(id,url,remark) VALUES(1,'https://a','a')")
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE stream_sessions SET streamer_id=1 WHERE id=?")
+        .bind(f.ended)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let second:i64=sqlx::query_scalar("INSERT INTO stream_sessions(name,url,title,date,live_cover_path,streamer_id,started_at,ended_at)
+        VALUES('a','https://a','second','2026-09-24 00:00:00','',1,10000,20000) RETURNING id").fetch_one(&f.pool).await.unwrap();
+    let path = f._dir.path().join("second.flv");
+    std::fs::write(&path, build_flv(0, 100, 25, None).bytes).unwrap();
+    let segment = store::insert_segment(&f.pool, second, &path.to_string_lossy(), "flv", 0, 0)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE segments SET state='finished',end_ms=3965 WHERE id=?")
+        .bind(segment)
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    let marker = markers::insert(
+        &f.pool,
+        second,
+        &markers::NewMarker {
+            at_ms: 1000,
+            label: "old".into(),
+            color: None,
+            created_by: None,
+            created_at: 1,
+            lookback_ms: 0,
+            lookahead_ms: 0,
+        },
+    )
+    .await
+    .unwrap();
+    let old = clips::insert(
+        &f.pool,
+        second,
+        &NewClip {
+            marker_id: Some(marker.id),
+            in_ms: 1000,
+            out_ms: 2000,
+            title: "old clip".into(),
+            created_by: None,
+            created_at: 1,
+        },
+    )
+    .await
+    .unwrap();
+    let group = session_groups::create(&f.pool, &[f.ended, second])
+        .await
+        .unwrap();
+    let offset = 17928;
+    let list = json_of(
+        call(
+            &f.app,
+            Some(&admin),
+            "GET",
+            &format!("/v1/sessions/{group}/clips"),
+            None,
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(list["clips"][0]["session_id"], second);
+    assert_eq!(list["clips"][0]["view_session_id"], group);
+    assert_eq!(list["clips"][0]["in_ms"], offset + 1000);
+    let edited = json_of(
+        call(
+            &f.app,
+            Some(&admin),
+            "PATCH",
+            &format!("/v1/sessions/{group}/clips/{}", old.id),
+            Some(json!({"in_ms":offset+1100})),
+        )
+        .await,
+        StatusCode::OK,
+    )
+    .await;
+    assert_eq!(edited["in_ms"], offset + 1100);
+    assert_eq!(
+        clips::get(&f.pool, old.id).await.unwrap().unwrap().in_ms,
+        1100
+    );
+    let fresh = json_of(
+        call(
+            &f.app,
+            Some(&admin),
+            "POST",
+            &format!("/v1/sessions/{group}/clips"),
+            Some(json!({"in_ms":1000,"out_ms":offset+2500,"marker_id":marker.id})),
+        )
+        .await,
+        StatusCode::CREATED,
+    )
+    .await;
+    assert_eq!(fresh["session_id"], group);
+    let plan = crate::server::workbench::clips::plan::compute(&f.pool, group, 1000, offset + 2500)
+        .await
+        .unwrap();
+    let crate::server::workbench::clips::plan::Attempt::Ready(plan) = plan else {
+        panic!("finished group should resolve immediately");
+    };
+    assert_eq!(plan.pieces.len(), 3);
+    assert_eq!(plan.cut_out_ms, offset + 3000);
+    let pinned: i64 = sqlx::query_scalar("SELECT pin_count FROM segments WHERE id=?")
+        .bind(segment)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert!(
+        pinned >= 2,
+        "new group clip protects its actual source segments"
+    );
+    let response = call(
+        &f.app,
+        Some(&admin),
+        "DELETE",
+        &format!("/v1/sessions/{group}/clips/{}", old.id),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 }
 
 /// 切片路由的要求都由策略层按路由表给出：看列表、查一个、下载要 `file.view`，建 / 改 / 删 /
@@ -297,6 +436,53 @@ async fn wait_exported(f: &Fixture, cookie: &str, id: i64) -> Value {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("导出没有结束");
+}
+
+#[tokio::test]
+async fn publishing_clips_cannot_be_reexported_and_lose_the_upload_source() {
+    let f = fixture().await;
+    let operator = login(&f.app, "op", "operator-password").await;
+    let saved = json_of(
+        call(
+            &f.app,
+            Some(&operator),
+            "POST",
+            &format!("/v1/sessions/{}/clips", f.ended),
+            Some(json!({ "in_ms": 1000, "out_ms": 3000, "export": "quick" })),
+        )
+        .await,
+        StatusCode::CREATED,
+    )
+    .await;
+    let id = saved["id"].as_i64().unwrap();
+    let done = wait_exported(&f, &operator, id).await;
+    assert_eq!(done["state"], "ready", "{done}");
+    let clip = clips::get(&f.pool, id).await.unwrap().unwrap();
+    let source = clip.output_path.as_ref().unwrap();
+    let original = tokio::fs::read(source).await.unwrap();
+    let job = f
+        .publisher
+        .enqueue(
+            f.ended,
+            &[clip.clone()],
+            Default::default(),
+            Mode::Quick,
+            None,
+            false,
+        )
+        .unwrap();
+    let response = call(
+        &f.app,
+        Some(&operator),
+        "POST",
+        &format!("/v1/clips/{id}/export"),
+        Some(json!({ "mode": "precise" })),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(clips::get(&f.pool, id).await.unwrap().unwrap(), clip);
+    assert_eq!(tokio::fs::read(source).await.unwrap(), original);
+    f.publisher.remove(job.id).unwrap();
 }
 
 #[tokio::test]

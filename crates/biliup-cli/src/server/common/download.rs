@@ -1,4 +1,4 @@
-use crate::server::common::live_image::spawn_avatar_download;
+use crate::server::common::live_image::{spawn_avatar_download, spawn_cover_download};
 use crate::server::common::recording_policy;
 use crate::server::common::sync::SyncSession;
 use crate::server::common::throughput::{RateMeter, Sampler};
@@ -13,7 +13,7 @@ use crate::server::core::live::{danmaku_client, downloader_runtime, live_request
 use crate::server::core::monitor::Monitor;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::ha::UnitOutput;
-use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
+use crate::server::infrastructure::context::{Context, Stage};
 use crate::server::infrastructure::models::hook_step::process;
 use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
@@ -25,9 +25,10 @@ use biliup::downloader::live::{LivePlugin, LiveStatus, LiveStream, strip_ws_expi
 use biliup::downloader::preview::PreviewHub;
 use danmaku_client::DanmakuEvent;
 use error_stack::ResultExt;
+use futures::FutureExt;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_util::sync::CancellationToken;
@@ -58,6 +59,10 @@ pub struct SegmentEventProcessor {
     ctx: Context,
     file_validator: FileValidator,
     output: UnitOutput,
+    sent: Arc<AtomicUsize>,
+    processing_failed: Arc<AtomicBool>,
+    processing: Vec<tokio::task::JoinHandle<()>>,
+    last_processing: Option<futures::future::Shared<futures::future::BoxFuture<'static, ()>>>,
 }
 
 impl SegmentEventProcessor {
@@ -73,12 +78,47 @@ impl SegmentEventProcessor {
             .with_retention(Retention::without_delay(ctx.pool().clone())),
             ctx,
             output: UnitOutput::default(),
+            sent: Arc::new(AtomicUsize::new(0)),
+            processing_failed: Arc::new(AtomicBool::new(false)),
+            processing: Vec::new(),
+            last_processing: None,
         }
     }
 
     /// 录完的分段数与交给投稿流程的分段数
     pub fn output(&self) -> UnitOutput {
-        self.output
+        UnitOutput {
+            seen: self.output.seen,
+            sent: self.sent.load(Ordering::Acquire),
+        }
+    }
+
+    /// Finish checks before session hooks/automatic clips inspect completed
+    /// recordings. The bounded drain keeps a failed recording local and marks
+    /// the session so downloaded hooks are not run against an unchecked file.
+    pub(crate) async fn finish_processing(&mut self) -> bool {
+        let finish = async {
+            for task in self.processing.drain(..) {
+                if let Err(e) = task.await {
+                    error!(error = %e, "录制分段音频检查任务异常退出，保留原片");
+                    self.processing_failed.store(true, Ordering::Release);
+                }
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(120), finish)
+            .await
+            .is_err()
+        {
+            error!("等待已结束分段的音频检查超过 120 秒，取消尚未完成的检查并保留原片");
+            for task in &self.processing {
+                task.abort();
+            }
+            for task in self.processing.drain(..) {
+                let _ = task.await;
+            }
+            self.processing_failed.store(true, Ordering::Release);
+        }
+        !self.processing_failed.load(Ordering::Acquire)
     }
 
     /// 这个分段交给 [`Self::process`] 后会不会被过滤删除。
@@ -89,13 +129,38 @@ impl SegmentEventProcessor {
     /// 处理分段事件。`settled`：录制器处理完这次关段（过滤删除要等它）。
     pub fn process(
         &mut self,
-        event: SegmentInfo,
+        mut event: SegmentInfo,
         settled: impl Future<Output = ()> + Send + 'static,
     ) -> AppResult<()> {
         self.output.seen += 1;
         // 验证文件有效性
+        let settled = settled.boxed().shared();
+        let protected =
+            crate::server::common::processing::masking::masking_required(
+                &self.ctx.config(),
+                &self.ctx.live_streamer().override_cfg,
+            ) || crate::server::common::processing::requires_masking(
+                self.ctx
+                    .live_streamer()
+                    .segment_processor
+                    .as_deref()
+                    .unwrap_or_default(),
+            ) || crate::server::common::processing::masking::is_unmasked(&event.prev_file_path);
+        // A filtered segment can still be kept by a marker/retention pin. Check
+        // its audio before retention decides whether to retain or delete it.
+        let filtered = !protected && self.file_validator.will_delete(&event.prev_file_path);
         self.file_validator
-            .validate(&event.prev_file_path, settled)?;
+            .validate_without_size(&event.prev_file_path)?;
+        if protected || self.ctx.live_streamer().segment_processor.as_ref().is_some_and(|steps| steps.iter().any(|s| matches!(s, crate::server::infrastructure::models::hook_step::HookStep::Render { .. }))) {
+            event.ready = Some(crate::server::core::downloader::SegmentReady(
+                settled.clone(),
+            ));
+        }
+
+        if filtered {
+            self.spawn_audio_check(event, settled, None);
+            return Ok(());
+        }
 
         // 上一轮 process_with_upload 可能因上传失败提前返回，UActor 已 drop rx，
         // 这里挂着的 tx 是死的；丢弃后下面会重建一条新的管道。
@@ -109,41 +174,94 @@ impl SegmentEventProcessor {
             self.channel = None;
         }
 
-        match &self.channel {
+        let tx = match &self.channel {
             None => {
-                let (tx, rx) = async_channel::bounded(32); // Use tokio channel for async
+                // 不设上限：投稿流程可能整场都轮不到上传槽位（槽位由别的房间整场占着），
+                // 有界通道满了 `force_send` 会挤掉最早的分段，那一段就再也不会投稿或后处理
+                let (tx, rx) = async_channel::unbounded();
 
                 // 发送到上传器
                 let res = self
                     .uploader
-                    .force_send(UploaderMessage::SegmentEvent(rx.clone(), self.ctx.clone()))
+                    .force_send(UploaderMessage::segment_event(rx.clone(), self.ctx.clone()))
                     .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
                 if let Some(prev) = res {
                     warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
                 }
 
-                // 发送到缓冲区
-                let res = tx
-                    .force_send(event)
-                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
-                if let Some(prev) = res {
-                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-                }
-                self.channel = Some(tx);
+                self.channel = Some(tx.clone());
+                tx
             }
-            Some(tx) => {
-                // 发送到缓冲区
-                let res = tx
-                    .force_send(event)
-                    .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
-                if let Some(prev) = res {
-                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-                }
-            }
+            Some(tx) => tx.clone(),
+        };
+        if protected {
+            tx.force_send(event)
+                .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
+            self.sent.fetch_add(1, Ordering::Release);
+        } else {
+            // Independent of the uploader's login/slot availability, and off
+            // the downloader's synchronous segment callback.
+            self.spawn_audio_check(event, settled, Some(tx));
         }
-        self.output.sent += 1;
 
         Ok(())
+    }
+
+    fn spawn_audio_check(
+        &mut self,
+        event: SegmentInfo,
+        settled: futures::future::Shared<futures::future::BoxFuture<'static, ()>>,
+        output: Option<Sender<SegmentInfo>>,
+    ) {
+        // Preserve recording order even if recorder barriers settle together.
+        let previous = self.last_processing.take();
+        let (completion, completed) = tokio::sync::oneshot::channel::<()>();
+        self.last_processing = Some(
+            async move {
+                let _ = completed.await;
+            }
+            .boxed()
+            .shared(),
+        );
+        self.processing.retain(|task| !task.is_finished());
+        let ctx = self.ctx.clone();
+        let failed = self.processing_failed.clone();
+        let sent = self.sent.clone();
+        self.processing.push(tokio::spawn(async move {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            settled.await;
+            if let Err(e) =
+                crate::server::common::upload::prepare_segment_audio(&ctx, &event.prev_file_path)
+                    .await
+            {
+                failed.store(true, Ordering::Release);
+                error!(file = ?event.prev_file_path, error = %e,
+                    "分段音频检查或修复失败，保留原片并阻止投稿和后处理");
+                let _ = completion.send(());
+                return;
+            }
+            if let Some(output) = output {
+                if output.send(event).await.is_ok() {
+                    sent.fetch_add(1, Ordering::Release);
+                } else {
+                    failed.store(true, Ordering::Release);
+                    warn!("分段音频检查已完成，但投稿管道关闭，保留检查后的本地录像");
+                }
+            } else {
+                let paths = crate::server::common::upload::segment_paths(&event);
+                let refs: Vec<_> = paths.iter().map(std::path::PathBuf::as_path).collect();
+                let retention = Retention::without_delay(ctx.pool().clone());
+                if let Err(e) = crate::server::workbench::retention::remove(&retention, &refs).await
+                {
+                    failed.store(true, Ordering::Release);
+                    error!(file = ?event.prev_file_path, error = %e,
+                    "音频检查完成后碎片过滤失败，保留录像并跳过后处理");
+                }
+            }
+            let _ = completion.send(());
+        }));
     }
 }
 
@@ -207,6 +325,9 @@ pub struct DownloadTask {
     /// 追加 `expire=0` 的网宿直链探测通过、下载器却一个字节没拿到就失败过：
     /// 本任务余下的拉流不再追加，直接用原直链（stream-gears 有自己的首连兜底，不受影响）。
     ws_expire_rejected: AtomicBool,
+    audio_processing_failed: Arc<AtomicBool>,
+    #[cfg(test)]
+    recorder_handle: std::sync::RwLock<Option<RecorderHandle>>,
 }
 
 /// 每路实时弹幕广播的槽位数；掉队的订阅者跳过丢掉的那几条继续收，不断开。
@@ -232,7 +353,21 @@ impl DownloadTask {
             preview,
             danmaku_tx,
             ws_expire_rejected: AtomicBool::new(false),
+            audio_processing_failed: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            recorder_handle: Default::default(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn settle_recorder(&self) {
+        let handle = self
+            .recorder_handle
+            .read()
+            .unwrap()
+            .clone()
+            .expect("the recording should already have started its recorder");
+        handle.settled().await;
     }
 
     /// 当前正在录制的那条流的平台名与 CDN 直链。
@@ -280,6 +415,7 @@ impl DownloadTask {
         *self.source.write().unwrap() = LiveSource::from_stream(stream);
         let media = LiveMedia::from_stream(stream);
         let changed = self.media.read().unwrap().avatar_url != media.avatar_url;
+        let cover_changed = self.media.read().unwrap().cover_url != media.cover_url;
         if changed {
             spawn_avatar_download(
                 ctx.live_streamer().id,
@@ -287,11 +423,18 @@ impl DownloadTask {
                 ctx.live_streamer().url.clone(),
             );
         }
+        if cover_changed {
+            spawn_cover_download(
+                ctx.live_streamer().id,
+                media.cover_url.clone(),
+                ctx.live_streamer().url.clone(),
+            );
+        }
         *self.media.write().unwrap() = media;
     }
 
     pub(self) async fn execute(
-        &self,
+        self: &Arc<Self>,
         ctx: &Context,
         sender: Sender<UploaderMessage>,
         plugin: Arc<dyn LivePlugin + Send + Sync>,
@@ -330,6 +473,10 @@ impl DownloadTask {
             },
             live_index,
         );
+        #[cfg(test)]
+        {
+            *self.recorder_handle.write().unwrap() = Some(workbench.handle());
+        }
         let danmaku_client = danmaku_client(
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
@@ -340,7 +487,11 @@ impl DownloadTask {
         if let Some(ref client) = danmaku_client {
             // 启动弹幕下载逻辑
             info!("Starting danmaku client for stream: {}", url);
-            client.download().await?;
+            // 弹幕是附带的：起不来（如插件接受、弹幕端不认的房间地址）也照常录像。
+            // 用 `?` 直接返回会跳过下面的收尾，房间不再交回监控循环，直到重启都不会被检测
+            if let Err(e) = client.download().await {
+                error!(url = url, error = ?e, "弹幕客户端启动失败，本场只录像不录弹幕");
+            }
         }
 
         if let Some(session) = &self.sync_session {
@@ -458,6 +609,13 @@ impl DownloadTask {
                 }
             }
 
+            // 复检开播期间被停止（暂停、删除房间、退出）：stop 时没有在跑的拉流可停，
+            // 这里再开一次的话会一直录到分段结束甚至直播结束
+            if self.token.is_cancelled() {
+                info!(url = url, "task is cancelled");
+                break components;
+            }
+
             // 录制策略：条件已不成立就不再续录，把房间交回监控循环。
             // 少了这一步，下载器按边界收尾后循环会立刻重开一段，等于策略形同虚设。
             // 每轮都重新判定，对齐 Python 版每轮 `run()` 前重新调用 `should_record()`。
@@ -490,7 +648,13 @@ impl DownloadTask {
             let delay = retry_delay(retry_count, base_delay, max_delay);
 
             info!("Retrying download in {:?}...", delay);
-            tokio::time::sleep(delay).await;
+            tokio::select! {
+                () = self.token.cancelled() => {
+                    info!(url = url, "task is cancelled");
+                    break components;
+                }
+                () = tokio::time::sleep(delay) => {}
+            }
             if crate::server::fleet::ha::yield_recording(ctx) {
                 info!(url = url, "一主一备：备机已接手这个房间，主机不续录");
                 break components;
@@ -509,6 +673,13 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
+        if !processor.finish_processing().await {
+            self.audio_processing_failed.store(true, Ordering::Release);
+            warn!(
+                url = url,
+                "部分录制分段音频检查失败；失败分段已保留且未进入投稿或后处理"
+            );
+        }
         crate::server::fleet::ha::unit_ended(ctx, processor.output());
         if crate::server::fleet::ha::auto_clip_allowed(ctx) {
             crate::server::auto_clip::runner::session_finished(
@@ -520,7 +691,7 @@ impl DownloadTask {
         }
         // 清理资源
         // 确保状态更新和资源清理
-        rooms_handle.wake_waker(ctx.worker_id()).await;
+        rooms_handle.wake_download(ctx.worker(), self).await;
         info!("Download task completed: {:?}", result);
         self.done_notify.notify_one();
         Ok(())
@@ -538,6 +709,22 @@ impl DownloadTask {
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
         let mut download_config = ctx.download_config(stream);
+        if crate::server::common::processing::masking::masking_required(
+            &ctx.config(),
+            &streamer.override_cfg,
+        ) || crate::server::common::processing::requires_masking(
+            streamer.segment_processor.as_deref().unwrap_or_default(),
+        ) {
+            // Put a durable raw marker in the basename before any byte is written.
+            // A crash/restart or later config change must not make a `.part` raw
+            // recording eligible for HA recovery uploads.
+            let prefix = download_config
+                .recorder
+                .filename_prefix
+                .as_deref()
+                .unwrap_or("{streamer}%Y-%m-%dT%H_%M_%S");
+            download_config.recorder.filename_prefix = Some(format!("{prefix}.unmasked"));
+        }
         // stream-gears 在自己的首连里处理网宿 403，其它下载器拉流前先探一次
         if !matches!(self.downloader, DownloaderRuntime::StreamGears(_)) {
             download_config.url = match strip_ws_expire_override(&download_config.url) {
@@ -553,6 +740,21 @@ impl DownloadTask {
         download_config.preview = self.preview.clone();
         download_config.index_tap = workbench.index_tap();
         if let crate::server::core::downloader::DownloaderRuntime::Sync(sync) = &self.downloader {
+            if crate::server::common::processing::masking::masking_required(
+                &ctx.config(),
+                &streamer.override_cfg,
+            ) || streamer.segment_processor.as_ref().is_some_and(|steps| {
+                steps.iter().any(|s| {
+                    matches!(
+                        s,
+                        crate::server::infrastructure::models::hook_step::HookStep::Render { .. }
+                    )
+                })
+            }) {
+                return Err(AppError::Custom(
+                    "画面遮挡需要落盘处理，不能与边录边传同时启用；请选择 mesio、stream-gears 或 ffmpeg 下载器".into(),
+                ).into());
+            }
             info!(
                 page_url = streamer.url,
                 stream_url = download_config.url,
@@ -579,6 +781,12 @@ impl DownloadTask {
                     workbench.opened(&next_file_path);
                 }
                 SegmentEvent::Segment(mut event) => {
+                    let protect = crate::server::common::processing::masking::masking_required(
+                        &ctx.config(),
+                        &streamer.override_cfg,
+                    ) || crate::server::common::processing::requires_masking(
+                        streamer.segment_processor.as_deref().unwrap_or_default(),
+                    );
                     // 分段时，获取到的是已下载的文件名
                     // 触发弹幕滚动保存
                     if let Some(ref client) = danmaku_client {
@@ -589,6 +797,25 @@ impl DownloadTask {
                             Err(e) => error!("Danmaku rolling error: {}", e),
                         }
                     }
+                    // Rename the actual closed file before enqueueing it. A failed
+                    // processor/restart must never leave raw media at a normal
+                    // uploadable filename. All disk downloaders share this hook.
+                    let quarantined = if protect {
+                        match crate::server::common::processing::masking::quarantine(
+                            &event.prev_file_path,
+                        ) {
+                            Ok(path) => {
+                                event.prev_file_path = path;
+                                true
+                            }
+                            Err(e) => {
+                                error!(path = ?event.prev_file_path, error = %e, "无法隔离未遮挡录像，本段停止投稿");
+                                false
+                            }
+                        }
+                    } else {
+                        true
+                    };
                     workbench.closed(
                         &event.prev_file_path,
                         ClosedSegment {
@@ -603,12 +830,17 @@ impl DownloadTask {
                     );
                     // 异步处理事件
                     // let processor = processor.clone();
-                    if let Err(e) = processor.process(event, workbench.settled()) {
+                    if quarantined && let Err(e) = processor.process(event, workbench.settled()) {
                         error!("Failed to process segment event: {}", e);
                     }
                 }
             }
         };
+
+        // 拉流前的探测（网宿 expire=0）期间可能已被停止：下载器还没启动，stop 停不到它
+        if self.token.is_cancelled() {
+            return Ok(DownloadStatus::StreamEnded);
+        }
 
         info!(
             page_url = streamer.url,
@@ -712,18 +944,40 @@ pub async fn start_download_workflow(
     ctx: Context,
     sender: Sender<UploaderMessage>,
     rooms_handle: Arc<Monitor>,
+    monitor_changes: tokio::sync::watch::Receiver<()>,
+    resumed_session: bool,
 ) {
     let task = Arc::new(DownloadTask::new(
-        downloader_runtime(ctx.config().downloader, ctx.live_stream()),
+        downloader_runtime(
+            ctx.config().downloader,
+            ctx.live_stream(),
+            ctx.live_streamer().format.as_deref(),
+        ),
         ctx.live_stream(),
     ));
-    ctx.change_status(Stage::Download, WorkerStatus::Working(task.clone()))
-        .await;
+    if !ctx.worker().start_download(task.clone(), &monitor_changes) {
+        if !resumed_session
+            && let Err(e) = crate::server::workbench::store::close_session(
+                ctx.pool(),
+                ctx.id(),
+                crate::server::workbench::recorder::now_ms(),
+            )
+            .await
+        {
+            error!(e = ?e, "关闭取消启动的场次失败");
+        }
+        return;
+    }
 
     // 主播头像几乎不变：开播时下载一次存到 data/avatar/，地址没变就不再下载
     spawn_avatar_download(
         ctx.live_streamer().id,
         task.live_media().avatar_url,
+        ctx.live_streamer().url.clone(),
+    );
+    spawn_cover_download(
+        ctx.live_streamer().id,
+        task.live_media().cover_url,
         ctx.live_streamer().url.clone(),
     );
 
@@ -752,7 +1006,14 @@ pub async fn start_download_workflow(
 
     let _ = task.execute(&ctx, sender, downloader, rooms_handle).await;
 
-    process(&[], &ctx.live_streamer().downloaded_processor).await;
+    if task.audio_processing_failed.load(Ordering::Acquire) {
+        error!(
+            url = ctx.live_streamer().url,
+            "音频检查未能全部完成，跳过场次后处理"
+        );
+    } else {
+        process(&[], &ctx.live_streamer().downloaded_processor).await;
+    }
 
     info!(
         "Download workflow completed {} => {:?}",
@@ -815,5 +1076,335 @@ mod tests {
         assert_eq!(retry_delay(1, base, max), Duration::from_secs(4));
         assert_eq!(retry_delay(2, base, max), Duration::from_secs(8));
         assert_eq!(retry_delay(10, base, max), max);
+    }
+
+    /// 投稿流程暂时没在收（上传池被别的房间整场占着、或上传比录制慢）时，分段要排队等着，
+    /// 不能被新分段挤掉：挤掉的分段既不投稿也不跑后处理，只留下一行 warn。
+    #[tokio::test]
+    async fn segments_queue_up_while_the_uploader_is_not_reading() {
+        use crate::server::config::Config;
+        use crate::server::infrastructure::connection_pool::ConnectionManager;
+        use crate::server::infrastructure::context::Worker;
+        use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+        use biliup::downloader::live::DownloaderHint;
+        use std::path::PathBuf;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let mut config = Config::default();
+        config.filtering_threshold = 0;
+        let streamer = LiveStreamer {
+            id: 1,
+            url: "https://queue.example/1".to_string(),
+            remark: "queue".to_string(),
+            filename_prefix: None,
+            time_range: None,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: None,
+            excluded_keywords: None,
+        };
+        let worker = Arc::new(Worker::new(
+            streamer,
+            None,
+            Arc::new(std::sync::RwLock::new(config)),
+            Default::default(),
+        ));
+        let stream = LiveStream {
+            name: "queue".into(),
+            url: "https://queue.example/1".into(),
+            title: "t".into(),
+            date: chrono::Utc::now(),
+            live_cover_url: String::new(),
+            avatar_url: None,
+            raw_stream_url: "http://127.0.0.1:9/x.flv".into(),
+            platform: "queue".into(),
+            stream_headers: Default::default(),
+            suffix: "flv".into(),
+            danmaku: None,
+            downloader_hint: DownloaderHint::StreamGears,
+            runtime_options: None,
+        };
+        let ctx = Context::new(1, worker, pool, stream);
+        let (uploader, uploads) = async_channel::unbounded();
+        let mut processor = SegmentEventProcessor::new(uploader, ctx);
+
+        let mut recorded = Vec::new();
+        for i in 0..40 {
+            let path = dir.path().join(format!("seg-{i}.flv"));
+            std::fs::write(&path, b"flv").unwrap();
+            processor
+                .process(SegmentInfo::new(path.clone(), None, None, i), async {})
+                .unwrap();
+            recorded.push(path);
+        }
+        assert!(processor.finish_processing().await);
+
+        let (segments, _, _) = uploads.try_recv().unwrap().into_parts();
+        let queued: Vec<PathBuf> = std::iter::from_fn(|| segments.try_recv().ok())
+            .map(|segment| segment.prev_file_path)
+            .collect();
+        assert_eq!(queued, recorded, "每个录好的分段都要交给投稿流程");
+    }
+
+    /// 跑真实的 `DownloadTask::execute`：mesio 拉一个本地必然 404 的直链（首连即失败、不落盘），
+    /// 续录前的开播复检由测试放行。
+    mod execute {
+        use super::*;
+        use crate::server::config::Config;
+        use crate::server::core::downloader::mesio::Mesio;
+        use crate::server::core::slots::Slots;
+        use crate::server::infrastructure::connection_pool::ConnectionManager;
+        use crate::server::infrastructure::context::Worker;
+        use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+        use async_trait::async_trait;
+        use axum::Router;
+        use axum::http::StatusCode;
+        use axum::routing::get;
+        use biliup::downloader::live::{DanmakuSource, DownloaderHint, LiveRequest, LiveResult};
+        use std::collections::HashMap;
+        use std::sync::atomic::AtomicUsize;
+        use tokio::sync::mpsc;
+
+        const ROOM: &str = "https://gated.example/1";
+
+        /// 本地「CDN」：数拉流请求，一律 404
+        async fn counting_cdn() -> (String, Arc<AtomicUsize>) {
+            let hits = Arc::new(AtomicUsize::new(0));
+            let counter = hits.clone();
+            let app = Router::new().route(
+                "/live.flv",
+                get(move || {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    async { StatusCode::NOT_FOUND }
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            (format!("http://{addr}/live.flv"), hits)
+        }
+
+        /// 续录前的开播复检：先报给测试，等测试放行后报仍在直播
+        struct GatedLive {
+            stream: LiveStream,
+            probing: mpsc::UnboundedSender<()>,
+            gate: Arc<Notify>,
+        }
+
+        #[async_trait]
+        impl LivePlugin for GatedLive {
+            fn name(&self) -> &'static str {
+                "gated"
+            }
+
+            fn matches(&self, url: &str) -> bool {
+                url.starts_with("https://gated.example/")
+            }
+
+            async fn check_stream(&self, _request: LiveRequest) -> LiveResult<LiveStatus> {
+                let _ = self.probing.send(());
+                self.gate.notified().await;
+                Ok(LiveStatus::Live {
+                    stream: Box::new(self.stream.clone()),
+                })
+            }
+        }
+
+        struct Harness {
+            task: Arc<DownloadTask>,
+            run: tokio::task::JoinHandle<AppResult<()>>,
+            probing: mpsc::UnboundedReceiver<()>,
+            gate: Arc<Notify>,
+            hits: Arc<AtomicUsize>,
+            _dir: tempfile::TempDir,
+        }
+
+        /// `delay`：退避上限（秒），即 `Config::delay`
+        async fn start(danmaku: Option<DanmakuSource>, delay: u64) -> Harness {
+            let dir = tempfile::tempdir().unwrap();
+            let db = dir.path().join("data.sqlite3");
+            let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+                .await
+                .unwrap();
+            sqlx::query("INSERT INTO livestreamers (id, url, remark) VALUES (1, ?, 'gated')")
+                .bind(ROOM)
+                .execute(&pool)
+                .await
+                .unwrap();
+            let (stream_url, hits) = counting_cdn().await;
+            let stream = LiveStream {
+                name: "gated".into(),
+                url: ROOM.into(),
+                title: "t".into(),
+                date: chrono::Utc::now(),
+                live_cover_url: String::new(),
+                avatar_url: None,
+                raw_stream_url: stream_url,
+                platform: "gated".into(),
+                stream_headers: HashMap::new(),
+                suffix: "flv".into(),
+                danmaku,
+                downloader_hint: DownloaderHint::StreamGears,
+                runtime_options: None,
+            };
+            let session = crate::server::workbench::store::open_session(
+                &pool,
+                1,
+                &crate::server::core::live::streamer_info(&stream),
+                crate::server::workbench::recorder::now_ms(),
+                0,
+            )
+            .await
+            .unwrap();
+            let mut config = Config::default();
+            config.delay = delay;
+            let streamer = LiveStreamer {
+                id: 1,
+                url: ROOM.to_string(),
+                remark: "gated".to_string(),
+                filename_prefix: None,
+                time_range: None,
+                upload_streamers_id: None,
+                format: None,
+                override_cfg: None,
+                preprocessor: None,
+                segment_processor: None,
+                downloaded_processor: None,
+                postprocessor: None,
+                opt_args: None,
+                excluded_keywords: None,
+            };
+            let worker = Arc::new(Worker::new(
+                streamer,
+                None,
+                Arc::new(std::sync::RwLock::new(config)),
+                Default::default(),
+            ));
+            let ctx = Context::new(session.id, worker, pool.clone(), stream.clone());
+            let (probing_tx, probing) = mpsc::unbounded_channel();
+            let gate = Arc::new(Notify::new());
+            let plugin = Arc::new(GatedLive {
+                stream: stream.clone(),
+                probing: probing_tx,
+                gate: gate.clone(),
+            });
+            let (uploader, _) = async_channel::bounded(1);
+            let monitor = Arc::new(Monitor::new(
+                uploader.clone(),
+                Arc::new(Slots::new(1)),
+                pool,
+            ));
+            let task = Arc::new(DownloadTask::new(
+                DownloaderRuntime::Mesio(Mesio::new()),
+                &stream,
+            ));
+            let run = tokio::spawn({
+                let task = task.clone();
+                async move { task.execute(&ctx, uploader, plugin, monitor).await }
+            });
+            Harness {
+                task,
+                run,
+                probing,
+                gate,
+                hits,
+                _dir: dir,
+            }
+        }
+
+        async fn first_recheck(h: &mut Harness) {
+            let probed = tokio::time::timeout(Duration::from_secs(10), h.probing.recv()).await;
+            assert!(
+                matches!(probed, Ok(Some(()))),
+                "拉流结束后应复检开播：{probed:?}"
+            );
+            assert_eq!(h.hits.load(Ordering::SeqCst), 1);
+        }
+
+        async fn stop(h: &Harness) -> tokio::task::JoinHandle<AppResult<()>> {
+            let task = h.task.clone();
+            let stop = tokio::spawn(async move { task.stop().await });
+            tokio::time::timeout(Duration::from_secs(5), h.task.token.cancelled())
+                .await
+                .expect("stop 应立即取消任务");
+            stop
+        }
+
+        async fn finished_within(h: Harness, limit: Duration) -> usize {
+            tokio::time::timeout(limit, h.run)
+                .await
+                .expect("停止后下载任务应很快结束")
+                .unwrap()
+                .unwrap();
+            h.hits.load(Ordering::SeqCst)
+        }
+
+        /// 停止发生在续录前的开播复检期间：复检报「仍在直播」后不能再开一次拉流。
+        /// mesio / stream-gears 每次拉流换新令牌、ffmpeg 每次起新进程，stop 停不到这一次，
+        /// 它会一直录到分段结束或直播结束，用户点的停止 / 暂停形同虚设。
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn stopping_during_the_live_recheck_starts_no_further_download() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            let mut h = start(None, 1).await;
+            first_recheck(&mut h).await;
+
+            let stop = stop(&h).await;
+            h.gate.notify_one();
+
+            let hits = finished_within(h, Duration::from_secs(10)).await;
+            stop.await.unwrap().unwrap();
+            assert_eq!(hits, 1, "停止之后不应再拉流");
+        }
+
+        /// 停止发生在失败重试的退避等待期间：立即结束，不等退避睡完再拉一次流。
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn stopping_during_the_retry_backoff_ends_the_task_at_once() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            // 第一次失败后退避 2s * 2 = 4s
+            let mut h = start(None, 60).await;
+            first_recheck(&mut h).await;
+            h.gate.notify_one();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            let stop = stop(&h).await;
+            let hits = finished_within(h, Duration::from_secs(2)).await;
+            stop.await.unwrap().unwrap();
+            assert_eq!(hits, 1, "停止之后不应再拉流");
+        }
+
+        /// 插件给了弹幕源、弹幕客户端却起不来（抖音插件接受 www.douyin.com 的房间地址，
+        /// 弹幕端只认 live.douyin.com）：照常录像。不能让整个下载任务直接返回——那样既不录，
+        /// 也不把房间交回监控循环，这个房间直到重启都不会再被检测。
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn a_danmaku_client_that_fails_to_start_does_not_abort_the_recording() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            let danmaku = DanmakuSource {
+                platform: "douyin".into(),
+                url: "https://www.douyin.com/user/someone".into(),
+                room_id: None,
+                cookie: None,
+                raw: false,
+                detail: false,
+                extra: HashMap::new(),
+                movie_id: None,
+                password: None,
+            };
+            let mut h = start(Some(danmaku), 1).await;
+            first_recheck(&mut h).await;
+
+            let stop = stop(&h).await;
+            h.gate.notify_one();
+            finished_within(h, Duration::from_secs(10)).await;
+            stop.await.unwrap().unwrap();
+        }
     }
 }

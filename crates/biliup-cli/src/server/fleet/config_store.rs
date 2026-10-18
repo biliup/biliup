@@ -94,6 +94,68 @@ pub async fn save_config(
     row.decode()
 }
 
+/// Conditional global write used by the configuration editor.  The version
+/// check and insert share one write transaction, so two editors based on the
+/// same version cannot silently overwrite one another.
+pub async fn save_config_if_version(
+    pool: &ConnectionPool,
+    expected_version: i64,
+    config: &Map<String, Value>,
+    updated_by: Option<i64>,
+    now: i64,
+) -> AppResult<ConditionalGlobal> {
+    let text = encode(config)?;
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .change_context(db_error("begin conditional transaction"))?;
+    let current: Option<ConfigRow> =
+        sqlx::query_as("SELECT * FROM fleet_config ORDER BY version DESC LIMIT 1")
+            .fetch_optional(&mut *tx)
+            .await
+            .change_context(db_error("read fleet config version"))?;
+    if current.as_ref().map_or(0, |current| current.version) != expected_version {
+        tx.rollback()
+            .await
+            .change_context(db_error("rollback stale fleet config"))?;
+        return Ok(ConditionalGlobal::Conflict);
+    }
+    if let Some(current) = current {
+        let current = current.decode()?;
+        if current.config == *config {
+            tx.rollback()
+                .await
+                .change_context(db_error("rollback unchanged fleet config"))?;
+            return Ok(ConditionalGlobal::Unchanged(current));
+        }
+    }
+    let row: ConfigRow = sqlx::query_as(
+        "INSERT INTO fleet_config (config, updated_at, updated_by) VALUES (?, ?, ?) RETURNING *",
+    )
+    .bind(&text)
+    .bind(now)
+    .bind(updated_by)
+    .fetch_one(&mut *tx)
+    .await
+    .change_context(db_error("insert conditional fleet config"))?;
+    sqlx::query("DELETE FROM fleet_config WHERE version <= ?")
+        .bind(row.version - KEEP_VERSIONS)
+        .execute(&mut *tx)
+        .await
+        .change_context(db_error("prune conditional fleet config history"))?;
+    tx.commit()
+        .await
+        .change_context(db_error("commit conditional fleet config"))?;
+    Ok(ConditionalGlobal::Saved(row.decode()?))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConditionalGlobal {
+    Saved(ConfigVersion),
+    Unchanged(ConfigVersion),
+    Conflict,
+}
+
 /// 保留着的全局配置版本，新的在前
 pub async fn config_history(pool: &ConnectionPool) -> AppResult<Vec<ConfigVersion>> {
     let rows: Vec<ConfigRow> = sqlx::query_as("SELECT * FROM fleet_config ORDER BY version DESC")
@@ -151,6 +213,77 @@ pub async fn set_node_override(
     .change_context(db_error("write node config override"))?
     .rows_affected();
     Ok(affected > 0)
+}
+
+/// Result of a conditional node override write.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConditionalOverride {
+    Saved,
+    Conflict,
+    NotFound,
+}
+
+/// Compare the parsed JSON object and replace the override in one write
+/// transaction.  Comparing decoded objects avoids rejecting a valid match
+/// merely because SQLite stored object keys in a different order.
+pub async fn set_node_override_if_current(
+    pool: &ConnectionPool,
+    node_id: i64,
+    expected: &Map<String, Value>,
+    expected_global_version: i64,
+    patch: &Map<String, Value>,
+) -> AppResult<ConditionalOverride> {
+    let mut tx = pool
+        .begin_with("BEGIN IMMEDIATE")
+        .await
+        .change_context(db_error("begin conditional override transaction"))?;
+    let current: Option<String> = sqlx::query_scalar(
+        "SELECT config_override FROM fleet_nodes WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(node_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .change_context(db_error("read conditional node override"))?;
+    let Some(current) = current else {
+        tx.rollback()
+            .await
+            .change_context(db_error("rollback missing node override"))?;
+        return Ok(ConditionalOverride::NotFound);
+    };
+    if parse_object(&current)? != *expected {
+        tx.rollback()
+            .await
+            .change_context(db_error("rollback stale node override"))?;
+        return Ok(ConditionalOverride::Conflict);
+    }
+    let current_global: Option<i64> =
+        sqlx::query_scalar("SELECT version FROM fleet_config ORDER BY version DESC LIMIT 1")
+            .fetch_optional(&mut *tx)
+            .await
+            .change_context(db_error("read conditional override global version"))?;
+    if current_global.unwrap_or(0) != expected_global_version {
+        tx.rollback()
+            .await
+            .change_context(db_error("rollback stale override global version"))?;
+        return Ok(ConditionalOverride::Conflict);
+    }
+    let affected = sqlx::query(
+        "UPDATE fleet_nodes SET config_override = ? WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(encode(patch)?)
+    .bind(node_id)
+    .execute(&mut *tx)
+    .await
+    .change_context(db_error("write conditional node override"))?
+    .rows_affected();
+    tx.commit()
+        .await
+        .change_context(db_error("commit conditional node override"))?;
+    Ok(if affected > 0 {
+        ConditionalOverride::Saved
+    } else {
+        ConditionalOverride::NotFound
+    })
 }
 
 #[cfg(test)]
@@ -232,6 +365,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn conditional_global_save_is_compare_and_swap() {
+        let (_dir, pool) = pool().await;
+        let initial = save_config(&pool, &object(json!({"delay": 1})), None, 1)
+            .await
+            .unwrap();
+        let first = save_config_if_version(
+            &pool,
+            initial.version,
+            &object(json!({"delay": 2})),
+            None,
+            2,
+        )
+        .await
+        .unwrap();
+        let ConditionalGlobal::Saved(first) = first else {
+            panic!("expected a saved conditional config")
+        };
+        assert_eq!(first.version, initial.version + 1);
+        assert!(matches!(
+            save_config_if_version(&pool, first.version, &first.config, None, 3)
+                .await
+                .unwrap(),
+            ConditionalGlobal::Unchanged(_)
+        ));
+        assert_eq!(
+            save_config_if_version(
+                &pool,
+                initial.version,
+                &object(json!({"delay": 3})),
+                None,
+                3,
+            )
+            .await
+            .unwrap(),
+            ConditionalGlobal::Conflict
+        );
+        assert_eq!(latest_config(&pool).await.unwrap(), Some(first));
+    }
+
+    #[tokio::test]
+    async fn concurrent_conditional_global_writers_have_one_winner() {
+        let (_dir, pool) = pool().await;
+        let initial = save_config(&pool, &object(json!({"delay": 1})), None, 1)
+            .await
+            .unwrap();
+        let first_config = object(json!({"delay": 2}));
+        let second_config = object(json!({"delay": 3}));
+        let (first, second) = tokio::join!(
+            save_config_if_version(&pool, initial.version, &first_config, None, 2,),
+            save_config_if_version(&pool, initial.version, &second_config, None, 3,),
+        );
+        let results = [first.unwrap(), second.unwrap()];
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, ConditionalGlobal::Saved(_)))
+                .count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|result| matches!(result, ConditionalGlobal::Conflict))
+                .count(),
+            1,
+            "{results:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn node_override_defaults_to_empty_and_is_replaced_whole() {
         let (_dir, pool) = pool().await;
         let node = join(&pool, "aa").await;
@@ -269,6 +473,69 @@ mod tests {
             !set_node_override(&pool, node.id, &Map::new())
                 .await
                 .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn conditional_node_override_rejects_a_stale_writer() {
+        let (_dir, pool) = pool().await;
+        let node = join(&pool, "conditional-override").await;
+        let expected = object(json!({}));
+        let first_override = object(json!({"pool1_size": 2}));
+        let second_override = object(json!({"pool1_size": 3}));
+        let (first, second) = tokio::join!(
+            set_node_override_if_current(&pool, node.id, &expected, 0, &first_override,),
+            set_node_override_if_current(&pool, node.id, &expected, 0, &second_override,),
+        );
+        let results = [first.unwrap(), second.unwrap()];
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| **r == ConditionalOverride::Saved)
+                .count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(
+            results
+                .iter()
+                .filter(|r| **r == ConditionalOverride::Conflict)
+                .count(),
+            1,
+            "{results:?}"
+        );
+        // Formatting and key order in stored JSON do not affect the expected-state comparison.
+        let mut expected = node_override(&pool, node.id).await.unwrap().unwrap();
+        let pool1_size = expected["pool1_size"].as_i64().unwrap();
+        expected.insert("file_size".into(), json!(10));
+        sqlx::query("UPDATE fleet_nodes SET config_override = ? WHERE id = ?")
+            .bind(format!(
+                r#"{{ "file_size": 10, "pool1_size": {pool1_size} }}"#
+            ))
+            .bind(node.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            set_node_override_if_current(&pool, node.id, &expected, 0, &Map::new())
+                .await
+                .unwrap(),
+            ConditionalOverride::Saved
+        );
+        save_config(&pool, &object(json!({"delay": 4})), None, 4)
+            .await
+            .unwrap();
+        assert_eq!(
+            set_node_override_if_current(
+                &pool,
+                node.id,
+                &Map::new(),
+                0,
+                &object(json!({"pool1_size": 4}))
+            )
+            .await
+            .unwrap(),
+            ConditionalOverride::Conflict
         );
     }
 }

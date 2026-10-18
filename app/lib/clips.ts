@@ -1,7 +1,7 @@
 'use client'
 import { useState } from 'react'
 import useSWR, { mutate, type SWRConfiguration } from 'swr'
-import { API_BASE, fetcher, handleResponse } from './api-streamer'
+import { API_BASE, apiFetch, fetcher, handleResponse } from './api-streamer'
 import { ReportedError } from './markers'
 import type { StudioOverride } from './publish'
 
@@ -18,6 +18,8 @@ export interface ClipProgress {
 export interface Clip {
   id: number
   session_id: number
+  view_session_id?: number | null
+  source_session_id?: number | null
   marker_id: number | null
   /** 选段（场次时间，毫秒） */
   in_ms: number
@@ -64,6 +66,13 @@ export const LAST_CLIP_OPTIONS = [
 
 export const clipsUrl = (sessionId: number) => `/v1/sessions/${sessionId}/clips`
 export const clipUrl = (id: number) => `/v1/clips/${id}`
+
+/** 投稿的封面、缩图和模板按切片真实归属定位；保留合并视图里的选择顺序。 */
+export async function canonicalPublishClips(clips: Clip[]): Promise<Clip[]> {
+  return Promise.all(clips.map(clip => clip.view_session_id != null && clip.view_session_id !== clip.session_id
+    ? fetcher(clipUrl(clip.id)) as Promise<Clip>
+    : Promise.resolve(clip)))
+}
 export const downloadUrl = (id: number, format: 'source' | 'mp4') =>
   `${API_BASE}/v1/clips/${id}/download?format=${format}`
 
@@ -108,7 +117,7 @@ export function clipModeText(mode: ClipMode | null): string {
 }
 
 export async function send(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(API_BASE + url, init)
+  const res = await apiFetch(url, init)
   try {
     return await handleResponse(res)
   } catch (e) {
@@ -129,18 +138,21 @@ export async function sendJson<T>(url: string, method: string, body?: unknown): 
   return res.json()
 }
 
-export function refresh(clip: Pick<Clip, 'id' | 'session_id'>) {
+export function refresh(clip: Pick<Clip, 'id' | 'session_id' | 'view_session_id'>) {
   void mutate(clipsUrl(clip.session_id))
   void mutate(clipUrl(clip.id))
+  if (clip.view_session_id != null && clip.view_session_id !== clip.session_id) void mutate(clipsUrl(clip.view_session_id))
 }
 
 /** 按入点、出点建一个切片；给了 `export` 就建好立即导出，否则是草稿 */
 export async function createClip(
   sessionId: number,
-  body: { in_ms: number; out_ms: number; title?: string; marker_id?: number | null; export?: ClipMode }
+  body: { in_ms: number; out_ms: number; title?: string; marker_id?: number | null; export?: ClipMode; quality?: import('./renders').RenderQuality }
 ): Promise<Clip> {
+  const { quality, ...clipBody } = body
   const clip = await sendJson<Clip>(clipsUrl(sessionId), 'POST', {
-    ...body,
+    ...clipBody,
+    ...(body.export === 'precise' && quality ? { quality } : {}),
     in_ms: Math.max(0, Math.round(body.in_ms)),
     out_ms: Math.round(body.out_ms),
   })
@@ -168,7 +180,7 @@ export async function createLiveClip(
 }
 
 export async function updateClip(
-  clip: Pick<Clip, 'id' | 'session_id'>,
+  clip: Pick<Clip, 'id' | 'session_id' | 'view_session_id'>,
   patch: {
     in_ms?: number
     out_ms?: number
@@ -177,21 +189,32 @@ export async function updateClip(
     studio_override?: StudioOverride | null
   }
 ): Promise<Clip> {
-  const updated = await sendJson<Clip>(`${clipsUrl(clip.session_id)}/${clip.id}`, 'PATCH', patch)
+  const updated = await sendJson<Clip>(`${clipsUrl(clip.view_session_id ?? clip.session_id)}/${clip.id}`, 'PATCH', patch)
   refresh(updated)
+  refresh(clip)
   return updated
 }
 
 /** 删除切片：正在进行的导出停下，导出的文件一起删掉（切片是文件的唯一归属，不删切片文件就一直留着） */
-export async function deleteClip(clip: Pick<Clip, 'id' | 'session_id'>): Promise<void> {
-  await send(`${clipsUrl(clip.session_id)}/${clip.id}`, { method: 'DELETE' })
+export async function deleteClip(clip: Pick<Clip, 'id' | 'session_id' | 'view_session_id'>): Promise<void> {
+  await send(`${clipsUrl(clip.view_session_id ?? clip.session_id)}/${clip.id}`, { method: 'DELETE' })
   refresh(clip)
 }
 
 /** 开始导出（失败后重试也是它）；导出在后台进行，列表按导出中自动轮询 */
-export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: ClipMode): Promise<Clip> {
-  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', { mode })
+export async function exportClip(
+  clip: Pick<Clip, 'id' | 'session_id' | 'view_session_id'>,
+  mode: ClipMode,
+  recipe?: import('./renders').RenderRecipe,
+  quality?: import('./renders').RenderQuality,
+): Promise<Clip> {
+  const exporting = await sendJson<Clip>(`${clipUrl(clip.id)}/export`, 'POST', {
+    mode,
+    ...(recipe ? { recipe } : {}),
+    ...(!recipe && mode === 'precise' && quality ? { quality } : {}),
+  })
   refresh(exporting)
+  refresh(clip)
   return exporting
 }
 
@@ -201,10 +224,10 @@ export async function exportClip(clip: Pick<Clip, 'id' | 'session_id'>, mode: Cl
  */
 export async function downloadClip(clip: Pick<Clip, 'id'>, format: 'source' | 'mp4'): Promise<void> {
   const url = downloadUrl(clip.id, format)
-  const head = await fetch(url, { method: 'HEAD' })
+  const head = await fetch(url, { method: 'HEAD', credentials: 'include' })
   if (!head.ok) {
     const abort = new AbortController()
-    const res = await fetch(url, { signal: abort.signal })
+    const res = await fetch(url, { signal: abort.signal, credentials: 'include' })
     if (!res.ok) {
       try {
         await handleResponse(res)

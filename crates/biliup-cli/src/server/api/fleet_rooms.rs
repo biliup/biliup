@@ -143,26 +143,67 @@ pub async fn pause_room(
     respond(controller.pause_room(id, request.paused).await)
 }
 
-pub async fn list_templates(State(controller): State<Arc<Controller>>) -> Response {
-    respond(controller.templates().await)
+pub async fn list_templates(State(controller): State<Arc<Controller>>, caller: Caller) -> Response {
+    match controller.templates().await {
+        Ok(mut templates) => {
+            if !caller.can_access(Field::TemplateCoverPath) {
+                for template in &mut templates {
+                    template.spec.cover_path = None;
+                }
+            }
+            Json(templates).into_response()
+        }
+        Err(error) => error_response(error),
+    }
 }
 
 pub async fn create_template(
     State(controller): State<Arc<Controller>>,
-    Json(spec): Json<TemplateSpec>,
+    caller: Caller,
+    Json(mut spec): Json<TemplateSpec>,
 ) -> Response {
+    let can_cover = caller.can_access(Field::TemplateCoverPath);
+    if !can_cover {
+        spec.cover_path = None;
+    }
     match controller.create_template(spec).await {
-        Ok(template) => (StatusCode::CREATED, Json(template)).into_response(),
+        Ok(mut template) => {
+            if !can_cover {
+                template.spec.cover_path = None;
+            }
+            (StatusCode::CREATED, Json(template)).into_response()
+        }
         Err(error) => error_response(error),
     }
 }
 
 pub async fn update_template(
     State(controller): State<Arc<Controller>>,
+    caller: Caller,
     Path(id): Path<i64>,
-    Json(spec): Json<TemplateSpec>,
+    Json(mut spec): Json<TemplateSpec>,
 ) -> Response {
-    respond(controller.update_template(id, spec).await)
+    let can_cover = caller.can_access(Field::TemplateCoverPath);
+    if !can_cover {
+        match controller.templates().await {
+            Ok(templates) => {
+                spec.cover_path = templates
+                    .into_iter()
+                    .find(|template| template.id == id)
+                    .and_then(|template| template.spec.cover_path);
+            }
+            Err(error) => return error_response(error),
+        }
+    }
+    match controller.update_template(id, spec).await {
+        Ok(mut template) => {
+            if !can_cover {
+                template.spec.cover_path = None;
+            }
+            Json(template).into_response()
+        }
+        Err(error) => error_response(error),
+    }
 }
 
 pub async fn delete_template(

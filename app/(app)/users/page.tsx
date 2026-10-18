@@ -56,6 +56,7 @@ const ROLE_COLORS: Record<Role, 'red' | 'blue' | 'grey'> = {
 async function call(method: string, url: string, body?: unknown) {
   const res = await fetch(API_BASE + url, {
     method,
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
