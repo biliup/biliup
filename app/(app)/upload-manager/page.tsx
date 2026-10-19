@@ -53,7 +53,7 @@ export default function UploadManager() {
   const managedIds = new Set(fleet?.templates ?? [])
   const managedHint = fleet
     ? fleet.local
-      ? '这是 Fleet 投稿模板，请到「节点 › 投稿模板」修改'
+      ? '这是 Fleet 投稿模板，请到「任务平台 › 节点管理 › 投稿模板」修改'
       : `由控制面 ${fleet.controller} 管理，请到控制面修改`
     : undefined
   // 一主一备里的节点：配对里的模板照常修改，改动与对端双向同步；配对里的直播间在用，删除仍返回 409
@@ -205,8 +205,8 @@ export default function UploadManager() {
             description={
               fleet.local
                 ? managedIds.size > 0
-                  ? `标着「托管」的 ${managedIds.size} 个模板是随房间分派到本机的 Fleet 投稿模板，这里只能查看和用来投稿，修改请到「节点 › 投稿模板」。这里自己的模板不受影响。`
-                  : '已启用「本机」节点：Fleet 投稿模板会随房间分派到这里并标为「托管」，请到「节点 › 投稿模板」修改。'
+                  ? `标着「托管」的 ${managedIds.size} 个模板是随房间分派到本机的 Fleet 投稿模板，这里只能查看和用来投稿，修改请到「任务平台 › 节点管理 › 投稿模板」。这里自己的模板不受影响。`
+                  : '已启用「本机」节点：Fleet 投稿模板会随房间分派到这里并标为「托管」，请到「任务平台 › 节点管理 › 投稿模板」修改。'
                 : managedIds.size > 0
                   ? `标着「托管」的 ${managedIds.size} 个模板由控制面 ${fleet.controller} 管理，这里只能查看和用来投稿，修改请到控制面。本机自己的模板不受影响。`
                   : `本机已加入控制面 ${fleet.controller}；控制面下发的投稿模板会由控制面 ${fleet.controller} 管理，这里只能查看。`

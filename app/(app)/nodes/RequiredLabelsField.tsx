@@ -36,7 +36,7 @@ export default function RequiredLabelsField({ nodes }: { nodes: FleetNode[] }) {
       emptyContent="输入标签后回车"
       extraText={
         <>
-          只会分派到带齐这些标签的节点（手动分派与「自动」都是）；节点的标签在「节点」页编辑。之后节点标签改了不会挪走房间，只会标成「标签不满足」。
+          只会分派到带齐这些标签的节点（手动分派与「自动」都是）；节点的标签在「任务平台 › 节点管理」页编辑。之后节点标签改了不会挪走房间，只会标成「标签不满足」。
           {suggest ? (
             <>
               <br />

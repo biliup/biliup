@@ -4,7 +4,6 @@ import useSWR from 'swr'
 import {
   Button,
   Empty,
-  Form,
   Popconfirm,
   Select,
   Spin,
@@ -12,35 +11,28 @@ import {
   Toast,
   Tooltip,
   Typography,
-  useFormState,
 } from '@douyinfe/semi-ui'
 import { IconDeleteStroked, IconEdit2Stroked, IconPause, IconPlay, IconSend, IconVideo } from '@douyinfe/semi-icons'
-import TemplateModal from '@/app/ui/TemplateModal'
+import { useRouter } from 'next/navigation'
 import { fetcher } from '@/app/lib/api-streamer'
-import { formListToHookStep, hookStepListToForm } from '@/app/lib/postprocessor'
 import { platformName } from '@/app/lib/status'
 import { useIsMobile } from '@/app/lib/useIsMobile'
 import {
   DESIRED_STATE_SINCE,
   FLEET_REFRESH_MS,
   FLEET_ROOMS_KEY,
-  createRoom,
   deleteRoom,
   errorMessage,
   forceRelease,
-  missingLabels,
   pauseRoom,
   quoteLabels,
-  updateRoom,
   type FleetNode,
   type FleetRoom,
   type FleetRooms,
   type FleetTemplate,
-  type RoomInput,
   type RoomStatus,
 } from '@/app/lib/use-fleet'
 import AssignModal from './AssignModal'
-import RequiredLabelsField from './RequiredLabelsField'
 import styles from './page.module.scss'
 import labelStyles from './labels.module.scss'
 
@@ -61,38 +53,6 @@ const STATUS: Record<RoomStatus, { label: string; color: React.ComponentProps<ty
   monitoring: { label: '监控中', color: 'green', hint: '节点在监控，未开播' },
   recording: { label: '录制中', color: 'red', hint: '节点正在录' },
   paused: { label: '已暂停', color: 'amber', hint: '已暂停监控' },
-}
-
-const ROOM_KEYS = [
-  'url',
-  'remark',
-  'filename_prefix',
-  'time_range',
-  'format',
-  'override',
-  'preprocessor',
-  'segment_processor',
-  'downloaded_processor',
-  'opt_args',
-  'excluded_keywords',
-] as const
-
-/** 录制表单（与本机「直播管理」共用 `TemplateModal`）的值 → 房间 */
-function roomFromForm(values: Record<string, any>): RoomInput {
-  const room: Record<string, unknown> = {}
-  for (const key of ROOM_KEYS) room[key] = values[key] ?? null
-  room.postprocessor = values.postprocessor ? formListToHookStep(values.postprocessor) : null
-  room.template_id = values.upload_streamers_id ?? null
-  room.required_labels = Array.isArray(values.required_labels) ? values.required_labels : []
-  return room as unknown as RoomInput
-}
-
-function roomToForm(room: FleetRoom) {
-  return {
-    ...room,
-    upload_streamers_id: room.template_id ?? undefined,
-    postprocessor: room.postprocessor ? hookStepListToForm(room.postprocessor) : room.postprocessor,
-  } as any
 }
 
 const FILTER_ALL = 'all'
@@ -126,10 +86,7 @@ export default function RoomsPanel({
 
   const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes])
   const templateById = useMemo(() => new Map(templates.map((t) => [t.id, t])), [templates])
-  const templateOptions = useMemo(
-    () => templates.map((t) => ({ value: t.id, label: t.template_name })),
-    [templates]
-  )
+  const router = useRouter()
   const refresh = () => {
     mutate().catch(() => undefined)
     onChanged()
@@ -175,17 +132,6 @@ export default function RoomsPanel({
       Toast.error({ content: errorMessage(e), duration: 6 })
     }
     refresh()
-  }
-
-  const handleUpdate = (room: FleetRoom) => async (values: Record<string, any>) => {
-    try {
-      await updateRoom(room.id, roomFromForm(values))
-      Toast.success('已保存，已下发到节点')
-      refresh()
-    } catch (e) {
-      Toast.error({ content: errorMessage(e), duration: 6 })
-      throw e
-    }
   }
 
   const remove = async (room: FleetRoom, force: boolean) => {
@@ -296,15 +242,8 @@ export default function RoomsPanel({
             </Button>
           </Popconfirm>
         ) : null}
-        <TemplateModal
-          title={`编辑房间「${room.remark}」`}
-          entity={roomToForm(room)}
-          templateOptions={templateOptions}
-          onOk={handleUpdate(room)}
-          extraFields={<RequiredLabelsField nodes={nodes} />}
-        >
-          <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" title="编辑" />
-        </TemplateModal>
+        <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" title="编辑"
+          onClick={() => router.push(`/nodes/room?id=${room.id}`)} />
         <Button
           theme="borderless"
           type="primary"
@@ -507,87 +446,8 @@ export default function RoomsPanel({
   )
 }
 
-/** 「分派到节点」里的「自动」，由控制面按负载选 */
-const AUTO_NODE = -1
-
-/** 页头的「新建房间」：录制设置与本机共用表单，外加「分派到节点」 */
-export function CreateRoomButton({
-  nodes,
-  templates,
-  onCreated,
-  children,
-}: {
-  nodes: FleetNode[]
-  templates: FleetTemplate[]
-  onCreated: () => void
-  children: React.ReactElement
-}) {
-  const templateOptions = templates.map((t) => ({ value: t.id, label: t.template_name }))
-  const create = async (values: Record<string, any>) => {
-    const auto = values.node_id === AUTO_NODE
-    try {
-      const room = await createRoom({
-        ...roomFromForm(values),
-        node_id: auto ? null : (values.node_id ?? null),
-        auto_node: auto,
-      })
-      const picked = nodes.find((n) => n.id === room?.node_id)?.name
-      Toast.success(
-        room?.node_id == null
-          ? '已添加，还没分派到节点'
-          : auto
-            ? `已添加，自动分派到 ${picked ?? '节点'}`
-            : '已添加，已下发到节点',
-      )
-      onCreated()
-    } catch (e) {
-      Toast.error({ content: errorMessage(e), duration: 6 })
-      throw e
-    }
-  }
-  return (
-    <TemplateModal
-      title="新建房间"
-      templateOptions={templateOptions}
-      onOk={create}
-      extraFields={
-        <>
-          <RequiredLabelsField nodes={nodes} />
-          <TargetNodeField nodes={nodes} />
-        </>
-      }
-    >
-      {children}
-    </TemplateModal>
-  )
-}
-
-/** 新建房间的「分派到节点」：缺少所填标签的节点标出来、不能选 */
-function TargetNodeField({ nodes }: { nodes: FleetNode[] }) {
-  const { values } = useFormState()
-  const required: string[] = Array.isArray(values?.required_labels) ? values.required_labels : []
-  const nodeOptions = [
-    ...(nodes.length > 0 ? [{ value: AUTO_NODE, label: '自动（按负载选）' }] : []),
-    ...[...nodes]
-      .sort((a, b) => Number(b.online) - Number(a.online) || a.id - b.id)
-      .map((n) => {
-        const missing = missingLabels(n.labels, required)
-        return {
-          value: n.id,
-          disabled: missing.length > 0,
-          label: `${n.name}${n.online ? '' : '（离线）'}${missing.length ? `（缺少标签${quoteLabels(missing)}）` : ''}`,
-        }
-      }),
-  ]
-  return (
-    <Form.Select
-      field="node_id"
-      label={{ text: '分派到节点', optional: true }}
-      style={{ width: 'min(320px, 100%)' }}
-      optionList={nodeOptions}
-      showClear
-      placeholder="暂不分派"
-      extraText="模板要用的 B 站账号必须在节点上登记过；处理器里带 run 命令的房间只能派给允许钩子的节点（rm、mv 等文件操作不算）；节点要带齐房间要求的标签。「自动」在满足这些条件的在线节点里挑空闲下载位多、房间少、磁盘余量大的一台，之后不会因负载变化挪走"
-    />
-  )
+/** 新建房间使用与本机相同的完整流程编辑页。 */
+export function CreateRoomButton({ children }: { children: React.ReactElement<{ onClick?: () => void }> }) {
+  const router = useRouter()
+  return React.cloneElement(children, { onClick: () => router.push('/nodes/room') })
 }

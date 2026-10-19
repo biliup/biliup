@@ -48,6 +48,7 @@ export interface FleetAlerts {
 /** 与后端 `FleetSummary` 一致：控制台的 Fleet 汇总 */
 export interface FleetSummary {
   nodes_total: number
+  remote_nodes?: number
   nodes_online: number
   recording: number
   /** 还没「知道了」的告警 */

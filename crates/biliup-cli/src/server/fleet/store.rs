@@ -79,7 +79,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-/// 控制面的 iroh 私钥；首次以 `--controller` 启动时生成并落库。
+/// 控制面的 iroh 私钥；首次以控制面角色启动时生成并落库。
 pub async fn identity(pool: &ConnectionPool, now: i64) -> AppResult<SecretKey> {
     let existing: Option<Vec<u8>> =
         sqlx::query_scalar("SELECT secret_key FROM fleet_identity WHERE id = 1")

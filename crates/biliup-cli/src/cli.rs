@@ -182,17 +182,17 @@ pub enum Commands {
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
 
-        /// 以 Fleet 控制面运行：接受其他 biliup 节点加入并显示它们的状态（数据在 data/fleet.sqlite3）
+        /// 显式以 Fleet 控制面运行（默认自动开启；已有节点身份时作为节点运行）
         #[arg(long)]
         controller: bool,
 
         /// 控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它；
-        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。只在 --controller 时生效
+        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。作为节点运行时忽略
         #[arg(long, value_name = "ADDR|off")]
         relay_listen: Option<RelayListen>,
 
         /// 写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。
-        /// 用于域名、端口转发、反向代理或外部 relay。只在 --controller 时生效
+        /// 用于域名、端口转发、反向代理或外部 relay。作为节点运行时忽略
         #[arg(long, value_name = "URL")]
         relay_url: Vec<Url>,
     },

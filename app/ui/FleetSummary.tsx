@@ -10,36 +10,16 @@ import styles from './fleet-summary.module.scss'
 const REFRESH_MS = 10_000
 
 /**
- * 控制台上的 Fleet 汇总，只在以 `--controller` 启动的实例上出现（普通实例不发请求、不渲染）。
+ * 有远端节点加入后才显示多机汇总；默认控制面不改变单机首页。
  * 整块点进节点页。
  */
 export default function FleetSummary({ className }: { className?: string }) {
   const { me } = useMe()
   const controller = me?.fleet_controller === true
-  const { data, error, isLoading, mutate } = useSWR<Summary>(controller ? FLEET_SUMMARY_KEY : null, fetcher, {
+  const { data } = useSWR<Summary>(controller ? FLEET_SUMMARY_KEY : null, fetcher, {
     refreshInterval: REFRESH_MS,
   })
-  if (!controller) return null
-
-  if (!data) {
-    return (
-      <div className={`${styles.bar} ${className ?? ''}`} aria-busy={isLoading} aria-label="Fleet 汇总">
-        <span className={styles.title}>
-          <IconServer aria-hidden="true" /> Fleet
-        </span>
-        {error && !isLoading ? (
-          <>
-            <span className={styles.error}>汇总加载失败</span>
-            <button type="button" className={styles.retry} onClick={() => mutate().catch(() => undefined)}>
-              重试
-            </button>
-          </>
-        ) : (
-          <span className={styles.loading}>加载中…</span>
-        )}
-      </div>
-    )
-  }
+  if (!controller || !data || (data.remote_nodes ?? data.nodes_total) === 0) return null
 
   const alerting = data.alerts_open > 0
   return (

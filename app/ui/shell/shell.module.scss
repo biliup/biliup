@@ -195,6 +195,15 @@
   box-sizing: border-box;
 }
 
+.pageCanvas {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  overflow: hidden;
+}
+
 @media (max-width: 880px) {
   .pageBody {
     padding: 12px 16px 36px;

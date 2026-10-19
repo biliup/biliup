@@ -1,31 +1,34 @@
 'use client'
 
-import React, { useState } from 'react'
-import { withField } from '@douyinfe/semi-ui'
+import React, { useId, useLayoutEffect, useRef, useState } from 'react'
+import { Button, Input, Select, withField } from '@douyinfe/semi-ui'
+import { IconDownloadStroked, IconCloudUploadStroked, IconCodeStroked, IconFlowChartStroked, IconCheckCircleStroked, IconPlayCircle, IconLayers, IconExpand, IconShrink } from '@douyinfe/semi-icons'
 import type { CommonFieldProps } from '@douyinfe/semi-ui/lib/es/form/interface'
-import { defaultRecipe, type RenderRecipe, type MaskRegion, type DanmakuSettings } from '../lib/renders'
+import { defaultRecipe } from '../lib/renders'
 import type { PostprocessorFormStep } from '../lib/postprocessor'
-import {
-  PROCESSING_STAGES, moveProcessingStep, stageSteps, validateProcessingFlow,
-  type ProcessingFlow, type ProcessingStage,
-} from '../lib/processing-flow'
+import { PROCESSING_STAGES, moveProcessingStep, stageSteps, type ProcessingFlow, type ProcessingStage } from '../lib/processing-flow'
+import RecipeFields from './ProcessingRecipeFields'
+import { useFlowViewport } from './useFlowViewport'
 import styles from './ProcessingFlowEditor.module.css'
 
-/** 每种操作的名称、图标、一句约束说明，类型色由 CSS 按 `tone` 给出。 */
-const COMMANDS: Record<string, { title: string; icon: string; tone: string; hint?: string }> = {
-  run: { title: 'Shell 命令', icon: '>_', tone: styles.typeRun, hint: '视频路径按行写入标准输入；没有视频的阶段为空。' },
-  remux: { title: '转封装', icon: '⇄', tone: styles.typeRemux, hint: '仅 TS / M2TS 生效并重建时间戳，其他格式跳过。' },
-  render: { title: '画面与弹幕', icon: '▧', tone: styles.typeRender, hint: '遮挡与弹幕一次编码完成，需要该主播已开启录制。' },
-  mv: { title: '移动文件', icon: '↗', tone: styles.typeMv },
-  rm: { title: '删除文件', icon: '−', tone: styles.typeRm, hint: '按素材保留规则清理，被引用的文件延后删除。' },
+export type FlowNode = 'start' | 'download' | 'upload' | ProcessingStage
+export const FLOW_NODES: Record<FlowNode, { title: string; description: string; icon: React.ReactNode }> = {
+  start: { title: '直播开始', description: '设置录播备注、直播链接、文件名模板和视频格式。', icon: <IconPlayCircle /> },
+  download: { title: '下载', description: '设置录制时间范围、不录制关键词与 ffmpeg 参数。', icon: <IconDownloadStroked /> },
+  upload: { title: '上传', description: '为这个直播间选择投稿模板，分段上传后统一投稿。', icon: <IconCloudUploadStroked /> },
+  preprocessor: { title: '下载前处理', description: '下载直播前触发，按顺序执行 run 命令。', icon: <IconCodeStroked /> },
+  segment_processor: { title: '分段时后处理', description: '每个分段上传前触发，按顺序执行操作。弹幕与遮挡可在同一个 render 步骤中完成。', icon: <IconFlowChartStroked /> },
+  downloaded_processor: { title: '下载后处理', description: '整场下载结束时执行 run 命令，不等待分段处理或上传完成，不传入视频文件。', icon: <IconCodeStroked /> },
+  postprocessor: { title: '后处理', description: '上传、投稿成功后处理视频文件；未配置上传时，在分段处理成功后执行。默认 rm 删除文件，mv 将文件移动到指定目录。', icon: <IconCheckCircleStroked /> },
 }
-
-type Props = { value?: ProcessingFlow; onChange?: (value: ProcessingFlow) => void; disabled?: boolean; id?: string }
-type Selection = { stage: ProcessingStage; index: number | null }
-
-const tone = (cmd?: string) => COMMANDS[cmd || '']?.tone ?? ''
-
-/** 新步骤的初始值，与后端 HookStep 的四种写法一致。 */
+export const isInnerNode = (node: FlowNode) => node === 'download' || node === 'segment_processor' || node === 'upload'
+const COMMANDS: Record<string, { label: string; placeholder?: string; description: string }> = {
+  run: { label: 'run（运行）', placeholder: 'echo hello!', description: '使用当前运行用户在 shell 执行命令，例如 echo hello!。' },
+  mv: { label: 'mv（移动到）', placeholder: 'backup/', description: '移动文件到指定目录，例如 backup/。' },
+  rm: { label: 'rm（删除文件）', description: '删除文件，为默认操作。' },
+  remux: { label: 'remux（转封装）', placeholder: 'mp4', description: '将视频转封装为 MP4，保留原文件。' },
+  render: { label: 'render（画面与弹幕）', description: '将弹幕烧录、遮挡等操作应用到视频。' },
+}
 function newStep(cmd: string): PostprocessorFormStep {
   if (cmd === 'rm') return { cmd }
   if (cmd === 'remux') return { cmd, value: 'mp4' }
@@ -37,219 +40,164 @@ function newStep(cmd: string): PostprocessorFormStep {
   return { cmd, value: '' }
 }
 
-function summary(step: PostprocessorFormStep): string {
-  if (step.cmd !== 'render') return step.value || (step.cmd === 'rm' ? '按保留规则清理' : '尚未填写')
-  try {
-    const r = JSON.parse(step.value || '{}')
-    return [r.danmaku?.enabled ? '压制弹幕' : '', r.regions?.length ? `${r.regions.length} 个遮挡区域` : '']
-      .filter(Boolean).join(' · ') || '未启用画面效果'
-  } catch { return '配置格式需要修正' }
-}
-
-export function ProcessingFlowEditor({ value = {}, onChange, disabled, id }: Props) {
-  const [selection, setSelection] = useState<Selection>({ stage: 'segment_processor', index: null })
-  const [dragging, setDragging] = useState<Selection | null>(null)
-  const [dropAt, setDropAt] = useState<Selection | null>(null)
-  const stage = PROCESSING_STAGES.find(s => s.key === selection.stage)!
-  const steps = stageSteps(value, stage.key)
-  const index = selection.index
-  const step = index === null ? undefined : steps[index]
-  const replaceSteps = (key: ProcessingStage, next: PostprocessorFormStep[]) => onChange?.({ ...value, [key]: next })
-  const replace = (next: PostprocessorFormStep[]) => replaceSteps(stage.key, next)
-  const change = (next: PostprocessorFormStep) => {
-    if (index !== null) replace(steps.map((s, i) => i === index ? next : s))
+/** One persistent world: opening the group moves the camera, never swaps scenes. */
+export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, expanded, onExpandedChange }: {
+  value: ProcessingFlow; selected: FlowNode; onSelect: (node: FlowNode) => void; uploadLabel?: string
+  expanded: boolean; onExpandedChange: (expanded: boolean) => void
+}) {
+  const marker = useId().replace(/:/g, '')
+  const { viewportRef, camera, ready, dragging, fit, focus, zoom, handlers } = useFlowViewport()
+  const detailed = camera.zoom > 2
+  const previousExpanded = useRef(expanded)
+  useLayoutEffect(() => {
+    if (!ready || previousExpanded.current === expanded) return
+    previousExpanded.current = expanded
+    if (expanded) focus()
+    else fit()
+    viewportRef.current?.focus({ preventScroll: true })
+  }, [expanded, ready, focus, fit, viewportRef])
+  const toggle = (open: boolean) => {
+    onExpandedChange(open)
+    if (open === expanded) { if (open) focus(); else fit() }
+    viewportRef.current?.focus({ preventScroll: true })
+    if (open && !isInnerNode(selected)) onSelect('download')
   }
-  const add = (key: ProcessingStage, cmd: string) => {
-    const list = stageSteps(value, key)
-    replaceSteps(key, [...list, newStep(cmd)])
-    setSelection({ stage: key, index: list.length })
+  const select = (key: FlowNode) => {
+    onSelect(key)
+    if (!isInnerNode(key)) { onExpandedChange(false); fit() }
   }
-  const move = (key: ProcessingStage, from: number, to: number) => {
-    if (from === to) return
-    onChange?.(moveProcessingStep(value, key, from, to))
-    setSelection({ stage: key, index: to })
-  }
-  const renderStage = (key: ProcessingStage, position: number) => {
-    const s = PROCESSING_STAGES.find(s => s.key === key)!
-    const list = stageSteps(value, key)
-    return <div className={`${styles.frame} ${selection.stage === key ? styles.activeFrame : ''}`}>
-      <button type="button" className={styles.frameHead} onClick={() => setSelection({ stage: key, index: null })}>
-        <span className={styles.frameIndex} aria-hidden>{position}</span>
-        <span>{s.title}</span>
-        <small className={styles.frameCount}>{list.length} 步</small>
-      </button>
-      <ol className={styles.nodeList}>
-        {list.map((item, i) => <li key={i}
-          className={`${styles.slot} ${dropAt?.stage === key && dropAt.index === i ? styles.dropTarget : ''}`}
-          onDragOver={e => {
-            if (dragging?.stage === key && !disabled) { e.preventDefault(); setDropAt({ stage: key, index: i }) }
-          }}
-          onDragLeave={() => setDropAt(at => at?.stage === key && at.index === i ? null : at)}
-          onDrop={e => {
-            e.preventDefault()
-            if (!disabled && dragging?.stage === key && dragging.index !== null) move(key, dragging.index, i)
-            setDragging(null)
-            setDropAt(null)
-          }}>
-          <button type="button"
-            aria-label={`${s.title}步骤 ${i + 1}：${COMMANDS[item.cmd || '']?.title ?? item.cmd}`}
-            aria-pressed={selection.stage === key && index === i}
-            draggable={!disabled}
-            onDragStart={e => { e.dataTransfer.setData('text/plain', `${key}:${i}`); e.dataTransfer.effectAllowed = 'move'; setDragging({ stage: key, index: i }) }}
-            onDragEnd={() => { setDragging(null); setDropAt(null) }}
-            className={`${styles.node} ${tone(item.cmd)} ${selection.stage === key && index === i ? styles.selected : ''}`}
-            onClick={() => setSelection({ stage: key, index: i })}>
-            <span className={styles.icon} aria-hidden>{COMMANDS[item.cmd || '']?.icon ?? '?'}</span>
-            <span className={styles.nodeText}><strong>{COMMANDS[item.cmd || '']?.title ?? item.cmd}</strong><small>{summary(item)}</small></span>
-            <span className={styles.nodeNumber}>{i + 1}</span>
-          </button>
-        </li>)}
-        {!list.length && <li className={styles.empty}>无处理步骤</li>}
-      </ol>
-      <button type="button" disabled={disabled} className={styles.addSlot} aria-label={`在${s.title}添加步骤`}
-        onClick={() => setSelection({ stage: key, index: null })}>＋ 添加步骤</button>
-      {key === 'postprocessor' && value[key] == null && <small className={styles.defaultHint}>使用默认清理</small>}
-    </div>
-  }
-
-  return <section id={id} className={styles.flow} aria-label="处理流程编排">
-    <header className={styles.heading}><strong>处理流程</strong></header>
-    <div className={styles.canvas}>
-      <div className={styles.graph}>
-        <div className={styles.column}>{renderStage('preprocessor', 1)}</div>
-        <div className={styles.column}><div className={styles.builtin}><span aria-hidden>●</span><strong>录制直播</strong><small>持续产生分段</small></div></div>
-        <div className={styles.column}>{renderStage('segment_processor', 2)}</div>
-        <div className={styles.column}><div className={styles.builtin}><span aria-hidden>↑</span><strong>上传视频</strong><small>使用所选投稿模板</small></div></div>
-        <div className={styles.column}>{renderStage('postprocessor', 3)}</div>
-        <div className={styles.branch}><span className={styles.branchLabel}>整场下载结束时触发</span>{renderStage('downloaded_processor', 4)}</div>
+  const processor = (key: ProcessingStage, className?: string) => <button type="button"
+    className={`${styles.edgeProcessor} ${className || ''} ${selected === key ? styles.selected : ''}`}
+    aria-label={FLOW_NODES[key].title} title={FLOW_NODES[key].description}
+    aria-pressed={selected === key} aria-controls="flow-node-settings" onClick={() => select(key)}>
+    <span aria-hidden="true">{FLOW_NODES[key].icon}</span>
+    <span>{FLOW_NODES[key].title}</span>
+    <span className={styles.count}>{stageSteps(value, key).length}</span>
+  </button>
+  const node = (key: 'start' | 'download' | 'upload', detail?: string) => <button type="button"
+    className={`${styles.node} ${styles[key]} ${selected === key ? styles.selected : ''}`}
+    aria-label={FLOW_NODES[key].title} aria-pressed={selected === key} aria-controls="flow-node-settings" onClick={() => select(key)}>
+    <span className={styles.nodeIcon} aria-hidden="true">{FLOW_NODES[key].icon}</span>
+    <span className={styles.nodeText}><strong>{FLOW_NODES[key].title}</strong>{detail && <small title={detail}>{detail}</small>}</span>
+    {selected === key && <span className={styles.selectionMark} aria-hidden="true"><IconCheckCircleStroked /></span>}
+  </button>
+  const arrow = (id: string, color?: string, external = false) => <marker id={id} style={{ fill: color }} viewBox="0 0 10 10" refX="9" refY="5"
+    markerUnits={external ? 'userSpaceOnUse' : 'strokeWidth'} markerWidth={external ? 8 / camera.zoom : 6}
+    markerHeight={external ? 8 / camera.zoom : 6} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker>
+  return <nav className={styles.canvas} aria-label="直播处理流程" data-detailed={detailed} style={{ '--camera-zoom': camera.zoom } as React.CSSProperties}>
+    <div className={styles.canvasHeader}><strong>处理流程</strong></div>
+    <div className={styles.graphArea}>
+      <div ref={viewportRef} className={styles.graph} role="region" aria-label="流程画布" tabIndex={0}
+        aria-describedby={`${marker}-gestures`} data-dragging={dragging} {...handlers}>
+        <span id={`${marker}-gestures`} className={styles.srOnly}>滚轮或双指缩放，拖动空白处平移。方向键平移，加减键缩放，Home 键查看全部流程。</span>
+        <div className={styles.world} style={{ visibility: ready ? 'visible' : 'hidden', transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
+          <div className={styles.externalFlow}>
+            <svg className={styles.connections} aria-hidden="true">
+              <defs>{arrow(marker, undefined, true)}{arrow(`${marker}-upload`, 'var(--upload-color)', true)}</defs>
+              <g>
+                <path d="M 340 72 V 180" markerEnd={`url(#${marker})`} />
+                <path className={styles.downloadRoute} d="M 174 235 H 110 Q 90 235 90 255 V 455" />
+                <circle className={styles.downloadRoute} cx="90" cy="455" r="3" />
+                <path className={styles.uploadRoute} markerEnd={`url(#${marker}-upload)`} d="M 340 290 V 544" />
+              </g>
+            </svg>
+            {node('start')}
+            {processor('preprocessor', styles.beforeDownload)}
+            {processor('downloaded_processor', styles.afterDownload)}
+            {processor('postprocessor', styles.afterUpload)}
+            <div className={styles.completion}>
+              <span className={styles.nodeIcon} aria-hidden="true"><IconCheckCircleStroked /></span>
+              <strong>流程完成</strong>
+            </div>
+          </div>
+          <div className={styles.subgraph}>
+            <button type="button" className={`${styles.subgraphNode} ${isInnerNode(selected) ? styles.selected : ''}`}
+              onClick={() => toggle(true)} aria-label="展开下载 & 上传" aria-hidden={detailed} inert={detailed}
+              aria-expanded={detailed} aria-controls={`${marker}-inner`} tabIndex={detailed ? -1 : 0}>
+              <span className={styles.groupLabel}>
+                <span className={styles.groupIcon} aria-hidden="true"><IconLayers /></span>
+                <strong>下载 &amp; 上传</strong>
+                <span className={styles.expandIcon} aria-hidden="true"><IconExpand /></span>
+              </span>
+              <span className={styles.groupPreview} aria-hidden="true">
+                <span className={styles.previewDownload}><IconDownloadStroked /></span>
+                <span className={styles.previewEdge} />
+                <span className={styles.previewProcessor}><IconFlowChartStroked /></span>
+                <span className={styles.previewEdge} />
+                <span className={styles.previewUpload}><IconCloudUploadStroked /></span>
+              </span>
+            </button>
+            <div id={`${marker}-inner`} className={styles.innerFlow} aria-hidden={!detailed} inert={!detailed}>
+              <svg className={styles.connections} aria-hidden="true">
+                <defs>{arrow(`${marker}-inner-arrow`)}</defs>
+                <g markerEnd={`url(#${marker}-inner-arrow)`}>
+                  <path d="M 166 150 V 232" />
+                  <path d="M 288 272 H 302 Q 316 272 316 258 V 124 Q 316 110 302 110 H 288" className={styles.repeatLine} />
+                </g>
+              </svg>
+              {node('download')}
+              {processor('segment_processor', styles.segmentProcessor)}
+              {node('upload', uploadLabel || '选择投稿模板')}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className={styles.cameraTools} role="group" aria-label="画布视图">
+        <button type="button" onClick={() => zoom(.8)} aria-label="缩小画布" title="缩小（−）">−</button>
+        <span className={styles.zoomValue}>{Math.round(camera.zoom * 100)}%</span>
+        <button type="button" onClick={() => zoom(1.25)} aria-label="放大画布" title="放大（+）">+</button>
+        <button type="button" onClick={() => toggle(false)} aria-label="查看全部流程" title="查看全部流程（Home）"><IconExpand aria-hidden="true" /></button>
+        {detailed && <button type="button" onClick={() => toggle(false)} aria-label="收起下载 & 上传" title="收起下载 & 上传"><IconShrink aria-hidden="true" /></button>}
       </div>
     </div>
-    <div className={`${styles.details} ${tone(step?.cmd)}`}>
-      <header className={styles.inspectorHead}>
-        <div>
-          <span className={styles.breadcrumb}><span className={styles.typeDot} aria-hidden />{stage.title}{step ? ` / 步骤 ${index! + 1}` : ''}</span>
-          <h3>{step ? COMMANDS[step.cmd || '']?.title ?? step.cmd : '添加处理步骤'}</h3>
+  </nav>
+}
+
+type Props = { value?: ProcessingFlow; onChange?: (value: ProcessingFlow) => void; disabled?: boolean; stage: ProcessingStage; id?: string }
+export function ProcessingFlowEditor({ value = {}, onChange, disabled, stage: key, id }: Props) {
+  const labelId = useId()
+  const [dragging, setDragging] = useState<number | null>(null)
+  const stage = PROCESSING_STAGES.find(s => s.key === key)!
+  const steps = stageSteps(value, key)
+  const replace = (next: PostprocessorFormStep[]) => onChange?.({ ...value, [key]: next })
+  const change = (index: number, next: PostprocessorFormStep) => replace(steps.map((s, i) => i === index ? next : s))
+  const move = (from: number, to: number) => onChange?.(moveProcessingStep(value, key, from, to))
+  return <section id={id} className={styles.steps} aria-label={`${stage.title}配置`}>
+    <div className={styles.stepsToolbar}>
+      <Button disabled={disabled} onClick={() => replace([...steps, newStep('run')])}>＋ 添加行</Button></div>
+    {!steps.length && <div className={styles.empty}>{key === 'postprocessor' ? '保留文件' : '暂无操作'}</div>}
+    <ol className={styles.stepList}>{steps.map((step, index) => <li key={`${key}:${index}`} className={styles.step}
+      onDragOver={e => { if (!disabled && dragging !== null) e.preventDefault() }}
+      onDrop={e => { e.preventDefault(); if (!disabled && dragging !== null) move(dragging, index); setDragging(null) }}>
+      <div className={styles.commandRow}>
+        <span className={styles.stepNumber} draggable={!disabled} title="拖动调整顺序"
+          onDragStart={e => { e.dataTransfer.setData('text/plain', String(index)); setDragging(index) }} onDragEnd={() => setDragging(null)}>{String(index + 1).padStart(2, '0')}</span>
+        <span id={`${labelId}-${index}`} className={styles.srOnly}>{stage.title}操作 {index + 1}</span>
+        <Select aria-labelledby={`${labelId}-${index}`} aria-describedby={`${labelId}-${index}-help`} value={step.cmd} disabled={disabled} className={styles.commandSelect}
+          onChange={cmd => change(index, newStep(String(cmd)))} optionList={[
+            ...(!(stage.commands as readonly string[]).includes(step.cmd || '') ? [{ value: step.cmd, label: `${step.cmd}（不支持）` }] : []),
+            ...stage.commands.map(cmd => ({ value: cmd, label: COMMANDS[cmd].label })),
+          ]} />
+        {step.cmd === 'rm' ? <span className={styles.parameterHint}>无需参数</span>
+          : step.cmd === 'render' ? <span className={styles.parameterHint}>在下方配置画面与弹幕</span>
+          : <Input aria-label={`${stage.title}参数 ${index + 1}`} aria-describedby={`${labelId}-${index}-help`} prefix="=" className={styles.parameter} disabled={disabled}
+            value={step.value ?? ''} placeholder={COMMANDS[step.cmd || '']?.placeholder} onChange={text => change(index, { ...step, value: text })} />}
+        <div className={styles.actions}>
+          <Button theme="borderless" aria-label={`操作 ${index + 1} 上移`} disabled={disabled || index === 0} onClick={() => move(index, index - 1)}>↑</Button>
+          <Button theme="borderless" aria-label={`操作 ${index + 1} 下移`} disabled={disabled || index === steps.length - 1} onClick={() => move(index, index + 1)}>↓</Button>
+          <Button theme="borderless" type="danger" aria-label={`删除操作 ${index + 1}`} disabled={disabled} onClick={() => replace(steps.filter((_, i) => i !== index))}>×</Button>
         </div>
-        {step && <div className={styles.actions}>
-          <button type="button" className={styles.iconButton} aria-label="步骤上移" disabled={disabled || index === 0} onClick={() => move(stage.key, index!, index! - 1)}>↑</button>
-          <button type="button" className={styles.iconButton} aria-label="步骤下移" disabled={disabled || index === steps.length - 1} onClick={() => move(stage.key, index!, index! + 1)}>↓</button>
-          <button type="button" className={`${styles.iconButton} ${styles.delete}`} disabled={disabled} onClick={() => {
-            replace(steps.filter((_, i) => i !== index)); setSelection({ stage: stage.key, index: null })
-          }}>删除</button>
-        </div>}
-      </header>
-      {step ? <>
-        {COMMANDS[step.cmd || '']?.hint && <p className={styles.hint}>{COMMANDS[step.cmd || '']?.hint}</p>}
-        <fieldset disabled={disabled} className={styles.fields}>
-          <label>操作类型<select value={step.cmd} onChange={e => change(newStep(e.target.value))}>
-            {!(stage.commands as readonly string[]).includes(step.cmd || '') && <option value={step.cmd}>{step.cmd}（此阶段不支持）</option>}
-            {stage.commands.map(cmd => <option key={cmd} value={cmd}>{COMMANDS[cmd].title}</option>)}
-          </select></label>
-          {step.cmd === 'run' && <label>Shell 命令
-            <textarea rows={3} value={step.value ?? ''} placeholder="输入要执行的命令" onChange={e => change({ ...step, value: e.target.value })} />
-          </label>}
-          {step.cmd === 'mv' && <label>目标目录
-            <input value={step.value ?? ''} placeholder="backup/" onChange={e => change({ ...step, value: e.target.value })} />
-          </label>}
-          {step.cmd === 'remux' && <label>目标容器
-            <select value={step.value ?? 'mp4'} onChange={e => change({ ...step, value: e.target.value })}><option value="mp4">MP4</option></select>
-          </label>}
-          {step.cmd === 'render' && <RecipeFields step={step} onChange={change} />}
-        </fieldset>
-      </> : <>
-        <div className={styles.catalog}>{stage.commands.map(cmd => <button type="button" disabled={disabled} key={cmd} onClick={() => add(stage.key, cmd)} className={tone(cmd)}>
-          <span className={styles.icon} aria-hidden>{COMMANDS[cmd].icon}</span><strong>{COMMANDS[cmd].title}</strong>
-        </button>)}</div>
-        {stage.key === 'segment_processor' && <p className={styles.help}>弹幕需同时开启录制；把弹幕和遮挡放在同一步骤可以只编码一次。</p>}
-        {stage.key === 'postprocessor' && !steps.length && <p className={styles.keepHint}>已保留文件：上传成功后不执行清理。</p>}
-      </>}
-    </div>
+      </div>
+      <p id={`${labelId}-${index}-help`} className={styles.commandHelp}>
+        {COMMANDS[step.cmd || '']?.description}
+        {step.cmd === 'run' && (key === 'segment_processor' || key === 'postprocessor') && ' 视频文件路径作为标准输入传入。'}
+      </p>
+      {step.cmd === 'render' && <fieldset disabled={disabled} className={styles.fields}><RecipeFields step={step} onChange={next => change(index, next)} /></fieldset>}
+    </li>)}</ol>
   </section>
 }
-
-function RecipeFields({ step, onChange }: { step: PostprocessorFormStep; onChange: (step: PostprocessorFormStep) => void }) {
-  let recipe: RenderRecipe
-  try {
-    const parsed = JSON.parse(step.value || '{}')
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error()
-    const defaults = defaultRecipe()
-    recipe = { ...defaults, ...parsed, danmaku: { ...defaults.danmaku, ...parsed.danmaku }, encoding: { ...defaults.encoding, ...parsed.encoding }, regions: parsed.regions ?? [] }
-    if (!Array.isArray(recipe.regions) || recipe.regions.some(r => !r || typeof r !== 'object')) throw new Error()
-  } catch {
-    return <label>修正画面与弹幕设置
-      <textarea rows={6} value={step.value ?? ''} onChange={e => onChange({ ...step, value: e.target.value })} />
-    </label>
-  }
-  const update = (next: RenderRecipe) => onChange({ ...step, value: JSON.stringify(next) })
-  const danmaku = (patch: Partial<DanmakuSettings>) => update({ ...recipe, danmaku: { ...recipe.danmaku, ...patch } })
-  const region = (index: number, patch: Partial<MaskRegion>) => update({ ...recipe, regions: recipe.regions.map((r, i) => i === index ? { ...r, ...patch } : r) })
-  const addRegion = () => update({ ...recipe, regions: [...recipe.regions, {
-    id: crypto.randomUUID(), effect_type: 'mosaic', x: .1, y: .1, width: .2, height: .2,
-    strength: 12, color: '#000000', opacity: 1, asset_id: null, lock_aspect: true, intervals: [],
-  }] })
-  return <>
-    <div className={styles.section}><strong>弹幕</strong>
-      <label className={styles.check}><input type="checkbox" checked={recipe.danmaku.enabled} onChange={e => danmaku({ enabled: e.target.checked })} />压制录制弹幕</label>
-    </div>
-    {recipe.danmaku.enabled && <div className={styles.grid}>
-      <NumberField title="字号" value={recipe.danmaku.font_size} min={8} max={200} change={font_size => danmaku({ font_size })} />
-      <NumberField title="不透明度 %" value={recipe.danmaku.opacity * 100} min={0} max={100} change={v => danmaku({ opacity: v / 100 })} />
-      <NumberField title="描边" value={recipe.danmaku.outline} min={0} max={4} step={.1} change={outline => danmaku({ outline })} />
-      <NumberField title="滚动时长（秒）" value={recipe.danmaku.scroll_seconds} min={2} max={60} change={scroll_seconds => danmaku({ scroll_seconds })} />
-      <NumberField title="显示区域 %" value={recipe.danmaku.display_area * 100} min={5} max={100} change={v => danmaku({ display_area: v / 100 })} />
-      <NumberField title="时间偏移（毫秒）" value={recipe.danmaku.offset_ms} min={-3600000} max={3600000} change={offset_ms => danmaku({ offset_ms })} />
-    </div>}
-    <div className={styles.section}><strong>画面遮挡</strong>
-      <button type="button" className={styles.iconButton} disabled={recipe.regions.length >= 32} onClick={addRegion}>＋ 添加区域</button>
-    </div>
-    {recipe.regions.length > 0 && <div className={styles.maskPreview} aria-label="遮挡位置示意图">
-      {recipe.regions.map((r, i) => <div key={r.id ?? i}
-        style={{ left: `${r.x * 100}%`, top: `${r.y * 100}%`, width: `${r.width * 100}%`, height: `${r.height * 100}%` }}>{i + 1}</div>)}
-    </div>}
-    {recipe.regions.map((r, i) => <div className={styles.region} key={r.id ?? i}>
-      <div className={styles.section}><strong>区域 {i + 1}</strong>
-        <button type="button" className={`${styles.iconButton} ${styles.delete}`} onClick={() => update({ ...recipe, regions: recipe.regions.filter((_, n) => n !== i) })}>删除区域 {i + 1}</button>
-      </div>
-      <div className={styles.grid}>
-        <label>遮挡效果<select value={r.effect_type ?? 'mosaic'} onChange={e => region(i, { effect_type: e.target.value as MaskRegion['effect_type'] })}>
-          <option value="mosaic">马赛克</option><option value="blur">模糊</option><option value="smooth_blur">平滑模糊</option><option value="solid">纯色</option>
-          {r.effect_type === 'image' && <option value="image">图片（自动处理不支持）</option>}
-        </select></label>
-        <NumberField title={`区域 ${i + 1} 强度`} value={r.strength ?? 12} min={1} max={100} change={strength => region(i, { strength })} />
-        {(['x', 'y', 'width', 'height'] as const).map((key, n) => <NumberField key={key} title={`区域 ${i + 1} ${['横坐标', '纵坐标', '宽度', '高度'][n]} %`}
-          value={(r[key] ?? (n < 2 ? 0 : .2)) * 100} min={n < 2 ? 0 : .1} max={100} step={.1} change={v => region(i, { [key]: v / 100 })} />)}
-        <NumberField title={`区域 ${i + 1} 不透明度 %`} value={(r.opacity ?? 1) * 100} min={0} max={100} change={v => region(i, { opacity: v / 100 })} />
-        {r.effect_type === 'solid' && <label>遮挡颜色<input type="color" value={r.color ?? '#000000'} onChange={e => region(i, { color: e.target.value })} /></label>}
-      </div>
-      {!!r.intervals?.length && <p className={styles.help}>含 {r.intervals.length} 个限定时段，在回看编辑器里调整。</p>}
-    </div>)}
-    <div className={styles.section}><strong>视频编码</strong></div>
-    <div className={styles.grid}>
-      <label>编码器<select value={recipe.encoding?.encoder ?? 'auto'} onChange={e => update({ ...recipe, encoding: { ...recipe.encoding!, encoder: e.target.value as NonNullable<RenderRecipe['encoding']>['encoder'], device: null } })}>
-        <option value="auto">自动选择可用编码器</option><option value="libx264">CPU · libx264</option><option value="h264_nvenc">NVIDIA · NVENC</option><option value="h264_qsv">Intel · QSV</option><option value="h264_vaapi">VAAPI</option><option value="h264_amf">AMD · AMF</option>
-      </select></label>
-      <label>质量<select value={recipe.encoding?.quality ?? 'balanced'} onChange={e => update({ ...recipe, encoding: { ...recipe.encoding!, quality: e.target.value as NonNullable<RenderRecipe['encoding']>['quality'] } })}>
-        <option value="space_saver">体积优先</option><option value="balanced">均衡</option><option value="high_quality">高画质</option>
-      </select></label>
-    </div>
-  </>
-}
-
-function NumberField({ title, value, min, max, step = 1, change }: { title: string; value: number; min: number; max: number; step?: number; change: (value: number) => void }) {
-  const [draft, setDraft] = useState<{ value: number; text: string } | null>(null)
-  return <label>{title}<input type="number" value={draft?.value === value ? draft.text : Math.round(value * 1000) / 1000} min={min} max={max} step={step}
-    onChange={e => {
-      const n = e.target.valueAsNumber
-      setDraft({ value: Number.isFinite(n) ? n : value, text: e.target.value })
-      if (Number.isFinite(n)) change(n)
-    }} onBlur={e => {
-      const n = e.target.valueAsNumber
-      change(Math.max(min, Math.min(max, Number.isFinite(n) ? n : value)))
-      setDraft(null)
-    }} /></label>
-}
-
 const Wrapped = withField(ProcessingFlowEditor)
 export default function ProcessingFlowField(props: Omit<Props, 'value'> & CommonFieldProps) {
-  return <Wrapped {...props} validator={validateProcessingFlow} />
+  // StreamerEditor validates all stages on save; an empty newly added row is still being edited.
+  return <Wrapped {...props} />
 }

@@ -30,8 +30,8 @@ export function ManagedConfigBanner({ controller, canEditSecrets }: { controller
       title={`这台机器已加入控制面 ${controller}，配置由控制面统一下发，这里只读`}
       description={
         canEditSecrets
-          ? '下载、上传与各平台参数请到控制面「节点」页的「Fleet 配置」或「节点覆盖」里改。Cookie、密码等本机密钥不随控制面下发，点右上角「本机密钥」修改。'
-          : '下载、上传与各平台参数请到控制面「节点」页修改。'
+          ? '下载、上传与各平台参数请到控制面「任务平台 › 节点管理」页的「Fleet 配置」或「节点覆盖」里改。Cookie、密码等本机密钥不随控制面下发，点右上角「本机密钥」修改。'
+          : '下载、上传与各平台参数请到控制面「任务平台 › 节点管理」页修改。'
       }
     />
   )

@@ -1,69 +1,131 @@
-/* 处理流程编辑器：画布上按阶段排节点，连线表示触发顺序，下方是所选节点的属性面板。
-   参考视频 / 图像 / 游戏里的节点编辑器：阶段是虚线框，节点带类型色与端口，属性放检查器。 */
-.flow { --flow-accent: var(--semi-color-primary, #6654d9); --flow-line: var(--semi-color-border, #d9d8e6); --flow-muted: var(--semi-color-text-2, #77798a); --flow-faint: var(--semi-color-text-3, #a9a6b8); --flow-surface: var(--semi-color-bg-1, #fff); border: 1px solid var(--semi-color-border, #e5e5ed); border-radius: 12px; overflow: hidden; color: var(--semi-color-text-0, #222336); background: var(--flow-surface); }
-.heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 18px; border-bottom: 1px solid var(--semi-color-border, #eae7f2); }
-.heading strong { font-size: 14px; font-weight: 600; }
-
-/* 画布：点阵底纹 + 横向滚动，连线画在列与列之间 */
-.canvas { overflow-x: auto; padding: 26px 22px; background-color: var(--semi-color-fill-0, #fafaff); background-image: radial-gradient(var(--semi-color-border, #ddddea) .8px, transparent .8px); background-size: 16px 16px; }
-.graph { display: grid; grid-template-columns: 170px 92px 190px 92px 170px; column-gap: 26px; align-items: start; min-width: 852px; }
-.column { position: relative; min-width: 0; }
-.column:not(:nth-child(5))::after { content: ''; position: absolute; top: 38px; left: calc(100% + 3px); width: 19px; height: 1px; background: var(--flow-line); }
-.column:not(:nth-child(5))::before { content: ''; position: absolute; top: 35px; left: calc(100% + 21px); border: 4px solid transparent; border-left: 5px solid var(--flow-line); }
-
-/* 阶段：虚线框 + 头部（序号、名称、步数） */
-.frame { border: 1px dashed var(--semi-color-border, #e0dcef); border-radius: 10px; padding: 8px 10px 10px; min-width: 0; background: var(--flow-surface); }
-.activeFrame { border-style: solid; border-color: var(--flow-accent); box-shadow: 0 0 0 3px var(--semi-color-primary-light-default, #f0edff); }
-.frameHead { display: flex; align-items: center; gap: 7px; width: 100%; padding: 0 0 8px; border: 0; background: transparent; cursor: pointer; color: inherit; font-size: 12px; font-weight: 600; text-align: left; }
-.frameIndex { display: flex; align-items: center; justify-content: center; flex: 0 0 17px; height: 17px; border-radius: 50%; background: var(--semi-color-fill-1, #eeeef6); color: var(--flow-muted); font-size: 10px; font-weight: 500; }
-.frameCount { margin-left: auto; color: var(--flow-faint); font-size: 10px; font-weight: normal; }
-
-/* 节点链：槽位之间画端口连线，拖动时在目标槽位上画插入线 */
-.nodeList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 18px; }
-.slot { position: relative; }
-.slot + .slot::before { content: ''; position: absolute; left: 50%; top: -18px; height: 18px; border-left: 1px dashed var(--flow-line); }
-.dropTarget::after { content: ''; position: absolute; left: 1px; right: 1px; top: -10px; height: 2px; border-radius: 2px; background: var(--flow-accent); }
-.node { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 46px; padding: 8px 9px 8px 13px; text-align: left; border: 1px solid var(--semi-color-border, #e7e5f0); border-radius: 8px; background: var(--flow-surface); color: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
-.node::before { content: ''; position: absolute; left: 0; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--node-color, var(--flow-line)); }
-.node:hover { border-color: var(--node-color, var(--flow-accent)); transform: translateY(-1px); box-shadow: 0 3px 10px #24213a12; }
-.node[draggable=true] { cursor: grab; }
-.node[draggable=true]:active { cursor: grabbing; }
-.selected { border-color: var(--node-color, var(--flow-accent)); background: var(--semi-color-primary-light-default, #f5f2ff); box-shadow: 0 0 0 2px var(--semi-color-primary-light-default, #eee9ff); }
-.icon { display: flex; align-items: center; justify-content: center; flex: 0 0 26px; height: 26px; border-radius: 7px; background: var(--node-tint, var(--semi-color-fill-0, #f2f0f8)); color: var(--node-color, var(--flow-accent)); font: 12px/1 monospace; }
+/* Full-bleed canvas with an independent floating inspector. */
+.workspace {
+  --flow-accent: var(--semi-color-primary);
+  --flow-muted: var(--semi-color-text-2);
+  --flow-surface: var(--semi-color-bg-1);
+  --graph-surface: var(--semi-color-bg-0);
+  --download-color: #3974d9;
+  --upload-color: #168579;
+  --inspector-width: clamp(460px, 48%, 640px);
+  flex: 1; min-height: 0; min-width: 0; position: relative; container-type: inline-size;
+  color: var(--semi-color-text-0); background: var(--graph-surface);
+}
+.workspaceForm { position: absolute; inset: 0; padding: 0 !important; }
+/* The grid, group and edges share a continuous zoom, including reverse transitions. */
+.canvas {
+  --download-color: #3974d9;
+  --upload-color: #168579;
+  --group-color: #7158bd;
+  --node-zoom: var(--camera-zoom);
+  position: absolute; inset: 0; overflow: hidden; box-sizing: border-box;
+  background-image: radial-gradient(color-mix(in srgb, var(--semi-color-text-2) 28%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px; background-position: center 0;
+}
+.canvasHeader { position: absolute; left: 32px; top: 24px; display: flex; align-items: center; height: 32px; font-size: 14px; }
+.graphArea { position: absolute; top: 64px; bottom: 16px; left: 16px; right: calc(var(--inspector-width) + 48px); }
+/* Clipping must not create a scroll container: focusing a node must not move the camera. */
+.graph { position: absolute; inset: 0; overflow: clip; touch-action: none; cursor: grab; user-select: none; outline: none; }
+.graph[data-dragging=true], .graph[data-dragging=true] * { cursor: grabbing; }
+.graph:focus-visible { box-shadow: inset 0 0 0 1px var(--semi-color-primary-light-active); border-radius: 12px; }
+.world { position: absolute; left: 0; top: 0; width: 600px; height: 660px; transform-origin: 0 0; will-change: transform; }
+.externalFlow { position: absolute; inset: 0; transition: opacity .5s; }
+.canvas[data-detailed=true] .externalFlow { opacity: .35; }
+.connections { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.connections g { fill: none; stroke: var(--semi-color-text-3); stroke-width: 1.5; }
+.connections marker { fill: var(--semi-color-text-3); }
+.externalFlow .connections path { vector-effect: non-scaling-stroke; }
+.connections .downloadRoute { stroke: color-mix(in srgb, var(--download-color) 55%, var(--semi-color-text-3)); stroke-width: 1.25; stroke-dasharray: 4 5; }
+.connections circle.downloadRoute { stroke-dasharray: none; }
+.connections .uploadRoute { stroke: var(--upload-color); stroke-width: 2.5; }
+.connections .repeatLine { stroke: color-mix(in srgb, var(--download-color) 55%, var(--graph-surface)); }
+.edgeProcessor { position: absolute; display: flex; align-items: center; justify-content: center; gap: 8px; width: max-content; min-width: 164px; height: 36px; padding: 0 12px; box-sizing: border-box; transform: translateX(-50%); border: 1px solid var(--semi-color-border); border-radius: 18px; color: var(--semi-color-text-1); background: var(--flow-surface); box-shadow: 0 2px 6px #00000006; font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; transition: box-shadow .2s, border-color .2s; }
+.edgeProcessor > span:first-child { display: flex; color: var(--flow-muted); }
+.edgeProcessor svg { width: 14px; height: 14px; }
+.edgeProcessor::before, .edgeProcessor::after { content: ''; position: absolute; left: calc(50% - 2px); width: 4px; height: 4px; border-radius: 50%; background: var(--semi-color-text-3); }
+.edgeProcessor::before { top: -3px; }
+.edgeProcessor::after { bottom: -3px; }
+.edgeProcessor:hover { border-color: var(--flow-accent); }
+.beforeDownload { top: 108px; left: 340px; }
+.afterDownload { top: 396px; left: 90px; }
+.afterUpload { top: 430px; left: 340px; }
+.afterUpload::before, .afterUpload::after { background: var(--upload-color); }
+.completion { position: absolute; left: 268px; top: 544px; width: 144px; height: 40px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--upload-color); background: var(--graph-surface); cursor: default; }
+.completion .nodeIcon { width: 22px; height: 22px; border-radius: 50%; color: var(--upload-color); background: transparent; }
+.completion .nodeIcon svg { width: 22px; height: 22px; }
+.completion strong { font-size: 14px; font-weight: 500; white-space: nowrap; }
+/* The inner layout already exists at microscopic scale inside the group.
+   Only the common camera scales; the group never shrinks into a header. */
+.subgraph { pointer-events: none; position: absolute; left: 174px; top: 180px; width: 332px; height: 110px; }
+.subgraphNode { pointer-events: auto; position: absolute; inset: 0; width: 332px; height: 110px; padding: 0; box-sizing: border-box; color: inherit; background: var(--flow-surface); border: 1.5px solid color-mix(in srgb, var(--group-color) 60%, var(--flow-surface)); border-radius: 12px; box-shadow: 5px 5px 0 var(--flow-surface), 6px 6px 0 color-mix(in srgb, var(--group-color) 45%, var(--flow-surface)), 10px 10px 0 var(--flow-surface), 11px 11px 0 color-mix(in srgb, var(--group-color) 25%, var(--flow-surface)); cursor: pointer; text-align: left; transition: opacity .5s; }
+.subgraphNode.selected { border: 2px solid var(--group-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--group-color) 16%, transparent), 5px 5px 0 var(--flow-surface), 6px 6px 0 var(--group-color), 10px 10px 0 var(--flow-surface), 11px 11px 0 color-mix(in srgb, var(--group-color) 35%, var(--flow-surface)); }
+.groupLabel { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-radius: 10px 10px 0 0; background: color-mix(in srgb, var(--group-color) 12%, var(--flow-surface)); border-bottom: 1px solid color-mix(in srgb, var(--group-color) 20%, var(--flow-surface)); transition: opacity .25s; }
+.groupLabel strong { flex: 1; font-size: 19px; font-weight: 600; white-space: nowrap; }
+.groupIcon { display: flex; color: var(--group-color); }
+.groupIcon svg { width: 22px; height: 22px; }
+.groupPreview { display: flex; justify-content: center; align-items: center; padding: 10px 18px; transition: opacity .25s; }
+.groupPreview > span:not(.previewEdge) { display: grid; place-items: center; width: 30px; height: 26px; border: 1px solid currentColor; border-radius: 5px; }
+.groupPreview svg { width: 15px; height: 15px; }
+.previewDownload { color: var(--download-color); background: color-mix(in srgb, var(--download-color) 8%, var(--flow-surface)); }
+.previewUpload { color: var(--upload-color); background: color-mix(in srgb, var(--upload-color) 8%, var(--flow-surface)); }
+.groupPreview > .previewProcessor { width: 25px; height: 18px; border-radius: 10px; color: var(--flow-muted); }
+.previewEdge { width: 44px; height: 1px; background: color-mix(in srgb, var(--group-color) 40%, var(--flow-surface)); }
+.nodeIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; color: white; background: var(--node-color, var(--group-color)); }
+.nodeIcon svg { width: 24px; height: 24px; }
 .nodeText { min-width: 0; flex: 1; }
-.nodeText strong { display: block; font-size: 12px; font-weight: 500; }
-.nodeText small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--flow-muted); font-size: 10px; margin-top: 3px; }
-.nodeNumber { align-self: flex-start; color: var(--flow-faint); font-size: 9px; }
-.empty { display: block; padding: 10px 0; text-align: center; color: var(--flow-faint); font-size: 11px; }
-.addSlot { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 12px; padding: 8px 0; width: 100%; border: 1px dashed var(--semi-color-border, #ddd9ef); border-radius: 8px; background: transparent; color: var(--flow-accent); font-size: 11px; cursor: pointer; transition: border-color .15s, background .15s; }
-.addSlot:hover:not(:disabled) { border-color: var(--flow-accent); background: var(--semi-color-primary-light-default, #f5f2ff); }
-.defaultHint { display: block; margin-top: 8px; text-align: center; color: var(--flow-faint); font-size: 10px; }
-
-/* 内置步骤：只读，做成虚线药丸，和可编辑节点区分开 */
-.builtin { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; margin-top: 18px; padding: 12px 6px; min-height: 64px; border: 1px dashed var(--semi-color-border, #e1deed); border-radius: 10px; background: var(--semi-color-fill-0, #fafaff); text-align: center; }
-.builtin > span { color: var(--semi-color-success, #72a684); font-size: 12px; }
-.builtin strong { color: var(--semi-color-text-1, #4c4659); font-size: 11px; font-weight: 500; }
-.builtin small { color: var(--flow-faint); font-size: 9px; }
-
-/* 下载结束：从分段处理拉出的虚线支线，标签像连线上的标牌 */
-.branch { position: relative; grid-column: 2 / span 2; margin: 30px 0 0 18px; max-width: 240px; }
-.branch::before { content: ''; position: absolute; left: 34px; top: -30px; height: 30px; border-left: 1px dashed var(--flow-line); }
-.branch::after { content: ''; position: absolute; left: 30px; top: -34px; width: 8px; height: 8px; border: 1px solid var(--flow-line); border-radius: 50%; background: var(--flow-surface); }
-.branchLabel { display: inline-block; margin-bottom: 8px; padding: 1px 7px; border: 1px solid var(--semi-color-border, #e5e5ed); border-radius: 10px; background: var(--flow-surface); color: var(--flow-muted); font-size: 10px; }
-
-/* 检查器：所选节点的属性，类型色跟着一起走 */
-.details { border-top: 1px solid var(--semi-color-border, #eae7f2); padding: 18px 20px 20px; background: var(--flow-surface); }
-.inspectorHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.breadcrumb { display: inline-flex; align-items: center; gap: 6px; color: var(--flow-muted); font-size: 11px; }
-.typeDot { width: 8px; height: 8px; border-radius: 50%; background: var(--node-color, var(--flow-accent)); }
-.inspectorHead h3 { margin: 5px 0 0; font-size: 15px; font-weight: 600; }
-.actions { display: flex; gap: 6px; }
-.iconButton { display: flex; align-items: center; justify-content: center; min-width: 30px; height: 28px; padding: 0 8px; border: 1px solid var(--semi-color-border, #e0daed); border-radius: 7px; background: var(--flow-surface); color: var(--flow-accent); font-size: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
-.iconButton:hover:not(:disabled) { border-color: var(--flow-accent); background: var(--semi-color-primary-light-default, #f5f2ff); }
-.delete { color: var(--semi-color-danger, #cb4f64); }
-.hint { margin: 10px 0 0; padding: 8px 10px; border-left: 2px solid var(--node-color, var(--flow-accent)); border-radius: 0 6px 6px 0; background: var(--semi-color-fill-0, #fafaff); color: var(--flow-muted); font-size: 12px; line-height: 1.6; }
-.help { margin: 8px 0 0; color: var(--flow-muted); font-size: 12px; line-height: 1.6; }
-.keepHint { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: var(--semi-color-success-light-default, #eef8f2); color: var(--semi-color-success, #578369); font-size: 12px; }
+.nodeText strong { display: block; font-size: 18px; line-height: 24px; white-space: nowrap; font-weight: 600; }
+.nodeText small { display: block; margin-top: 6px; font-size: 11px; color: var(--flow-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.expandIcon { display: flex; color: var(--group-color); }
+.expandIcon svg { width: 16px; height: 16px; }
+.canvas[data-detailed=true] .subgraphNode { opacity: .25; pointer-events: none; }
+.canvas[data-detailed=true] .subgraphNode,
+.canvas[data-detailed=true] .externalFlow .node,
+.canvas[data-detailed=true] .externalFlow .edgeProcessor { border-style: dashed; border-width: calc(1px / var(--camera-zoom)); box-shadow: none; }
+.canvas[data-detailed=true] .externalFlow .connections path { stroke-dasharray: 5 6; }
+.canvas[data-detailed=true] .groupLabel, .canvas[data-detailed=true] .groupPreview { opacity: 0; }
+.innerFlow { --node-zoom: calc(var(--camera-zoom) * .1875); position: absolute; left: 134.875px; top: 24.0625px; width: 332px; height: 330px; opacity: 0; transform: scale(.1875); transform-origin: 0 0; pointer-events: none; transition: opacity .3s; }
+.canvas[data-detailed=true] .innerFlow { opacity: 1; pointer-events: auto; transition: opacity .5s; }
+.cameraTools { position: absolute; top: -44px; right: 0; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--semi-color-border); border-radius: 10px; background: var(--flow-surface); box-shadow: 0 2px 8px #00000008; }
+.cameraTools button { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--semi-color-text-1); font-size: 20px; cursor: pointer; }
+.cameraTools button:hover { background: var(--semi-color-primary-light-default); }
+.cameraTools button:focus-visible { outline: 2px solid var(--flow-accent); outline-offset: 1px; }
+.zoomValue { min-width: 40px; color: var(--flow-muted); font: 11px monospace; text-align: center; }
+.node { position: absolute; left: 44px; width: 244px; height: 80px; box-sizing: border-box; display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--node-color) 38%, var(--flow-surface)); border-radius: 14px; background: color-mix(in srgb, var(--node-color) 9%, var(--flow-surface)); color: inherit; cursor: pointer; text-align: left; box-shadow: 0 4px 12px #00000007; transition: box-shadow .2s, border-color .2s; }
+.download { top: 70px; --node-color: var(--download-color); }
+.start { --node-color: #b07938; }
+.node.start { left: 218px; top: 8px; height: 64px; }
+.upload { top: 232px; --node-color: var(--upload-color); }
+.node:hover { border-color: var(--node-color); box-shadow: 0 4px 14px #00000012; }
+.node.selected { border: 2px solid var(--node-color); background: color-mix(in srgb, var(--node-color) 20%, var(--flow-surface)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--node-color) 20%, transparent), 0 4px 12px #0000000c; }
+.selectionMark { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; width: 22px; height: 22px; border: 2px solid var(--flow-surface); border-radius: 50%; color: white; background: var(--node-color); }
+.selectionMark svg { width: 18px; height: 18px; }
+.edgeProcessor.selected { color: var(--flow-accent); border: 2px solid var(--flow-accent); background: var(--semi-color-primary-light-default); box-shadow: 0 0 0 3px color-mix(in srgb, var(--flow-accent) 20%, transparent); font-weight: 600; }
+.edgeProcessor.selected > span:first-child { color: var(--flow-accent); }
+.node:focus-visible, .subgraphNode:focus-visible, .edgeProcessor:focus-visible { outline: 2px solid var(--flow-accent); outline-offset: 4px; }
+.segmentProcessor { left: 166px; top: 174px; }
+.count { padding-left: 6px; border-left: 1px solid var(--semi-color-border); color: var(--flow-muted); font: 11px monospace; }
+.inspector { position: absolute; z-index: 2; top: 24px; right: 24px; bottom: 24px; width: var(--inspector-width); box-sizing: border-box; min-width: 0; overflow: auto; padding: 28px; border: 1px solid var(--semi-color-border); border-radius: 16px; background: var(--flow-surface); box-shadow: 0 8px 32px #00000014, 0 2px 8px #0000000a; }
+.inspector [hidden] { display: none !important; }
+.inspectorHead { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--semi-color-border); }
+.inspectorHead h2 { display: flex; align-items: center; gap: 12px; font-size: 22px; margin: 8px 0; font-weight: 600; }
+.inspectorHead .inspectorIcon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; color: var(--node-color, var(--flow-accent)); border-radius: 10px; background: color-mix(in srgb, var(--node-color, var(--flow-accent)) 12%, var(--flow-surface)); }
+.inspectorIcon svg { width: 22px; height: 22px; }
+.inspectorHead p { font-size: 13px; color: var(--flow-muted); margin: 0; line-height: 1.8; }
+.steps { overflow-x: auto; }
+.stepsToolbar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 4px 0 12px; font-size: 12px; color: var(--flow-muted); }
+.stepList { list-style: none; padding: 0; margin: 0; }
+.step { padding: 10px 0; border-bottom: 1px solid var(--semi-color-border); }
+.commandRow { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; }
+.stepNumber { font: 11px monospace; color: var(--flow-muted); cursor: grab; }
+.commandSelect { width: 156px; flex-shrink: 0; }
+.parameter { flex: 1; min-width: 100px; }
+.parameterHint { flex: 1; min-width: 100px; color: var(--flow-muted); font-size: 12px; }
+.commandHelp { margin: 8px 0 0 22px; color: var(--flow-muted); font-size: 12px; line-height: 1.7; }
+.actions { display: flex; flex-shrink: 0; }
+.actions :global(.semi-button) { padding: 0; width: 26px; }
+.empty { padding: 32px 12px; border: 1px dashed var(--semi-color-border); border-radius: 8px; text-align: center; color: var(--flow-muted); font-size: 13px; }
+.help { margin: 18px 0 0; color: var(--flow-muted); font-size: 12px; line-height: 1.8; }
+.iconButton { border: 1px solid var(--semi-color-border); border-radius: 6px; padding: 5px 8px; background: var(--flow-surface); color: var(--flow-accent); cursor: pointer; }
+.delete { color: var(--semi-color-danger); }
 .fields { border: 0; margin: 14px 0 0; padding: 0; min-width: 0; }
 .fields label { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; color: var(--semi-color-text-1, #615a70); font-size: 12px; }
 .fields input:not([type=checkbox]), .fields select, .fields textarea { box-sizing: border-box; min-width: 0; width: 100%; padding: 7px 10px; border: 1px solid var(--semi-color-border, #ded8ea); border-radius: 6px; background: var(--flow-surface); color: var(--semi-color-text-0, #383041); font: inherit; transition: border-color .15s, box-shadow .15s; }
@@ -80,20 +142,31 @@
 .maskPreview { position: relative; aspect-ratio: 16 / 9; max-width: 340px; margin: 0 0 12px; overflow: hidden; border: 1px solid var(--semi-color-border, #e6dfed); border-radius: 8px; background-color: #e9e6f0; background-image: linear-gradient(#0000000a 1px, transparent 1px), linear-gradient(90deg, #0000000a 1px, transparent 1px); background-size: 32px 32px; }
 .maskPreview > div { position: absolute; box-sizing: border-box; display: flex; align-items: flex-start; justify-content: flex-end; padding: 1px 3px; border: 1px solid #fff; outline: 1px solid #8171c8; background: #9582d455; color: #fff; font-size: 10px; }
 
-/* 节点模板（未选中任何步骤时） */
-.catalog { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-.catalog button { display: flex; align-items: center; gap: 8px; min-width: 150px; padding: 9px 11px; border: 1px solid var(--semi-color-border, #e0daed); border-radius: 8px; background: var(--flow-surface); color: inherit; cursor: pointer; transition: border-color .15s, transform .15s; }
-.catalog button:hover:not(:disabled) { border-color: var(--node-color, var(--flow-accent)); transform: translateY(-1px); }
-.catalog strong { color: var(--semi-color-text-0, #3e3554); font-size: 12px; font-weight: 500; }
 
-/* 节点类型色：左边条、图标底色与检查器的高亮都取自这里 */
-.typeRun { --node-color: var(--semi-color-info, #3f6fd8); --node-tint: var(--semi-color-info-light-default, #eef3fe); }
-.typeRender { --node-color: var(--semi-color-primary, #6654d9); --node-tint: var(--semi-color-primary-light-default, #f0edff); }
-.typeRemux { --node-color: var(--semi-color-success, #3f9d6a); --node-tint: var(--semi-color-success-light-default, #eef8f2); }
-.typeMv { --node-color: var(--semi-color-warning, #c58b1f); --node-tint: var(--semi-color-warning-light-default, #fdf6e6); }
-.typeRm { --node-color: var(--semi-color-danger, #dd5c66); --node-tint: var(--semi-color-danger-light-default, #fff0f1); }
+@container (max-width: 1050px) {
+  .inspector { padding: 20px; right: 16px; top: 16px; bottom: 16px; }
+  .graphArea { right: calc(var(--inspector-width) + 32px); }
+}
+@container (max-width: 900px) {
+  .canvasHeader { top: 12px; left: 24px; }
+  .graphArea { top: 52px; left: 12px; right: 12px; bottom: calc(44% + 32px); }
+  .inspector { top: auto; right: 12px; bottom: 12px; width: calc(100% - 24px); height: 44%; min-height: 220px; }
+  .inspectorHead { padding-bottom: 12px; margin-bottom: 4px; }
+  .inspectorHead h2 { font-size: 18px; }
+  .cameraTools { top: -44px; }
+  .cameraTools button { width: 36px; height: 36px; }
+  .node::after, .edgeProcessor::after { content: ''; position: absolute; left: 0; top: 50%; bottom: auto; width: 100%; height: max(100%, calc(44px / var(--node-zoom))); transform: translateY(-50%); border-radius: inherit; background: transparent; }
+}
+@container (max-width: 450px) {
+  .canvasHeader { left: 16px; top: 15px; font-size: 12px; }
+  .graphArea { top: 64px; }
+  .cameraTools { top: -52px; }
+  .cameraTools button { width: 40px; height: 40px; }
+  .cameraTools { gap: 0; padding: 2px; }
+  .zoomValue { min-width: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace *, .connections path { transition: none !important; }
+}
 
-.flow button:disabled { opacity: .45; cursor: default; }
-.flow button:focus-visible { outline: 2px solid var(--flow-accent); outline-offset: 2px; }
-@media (max-width: 720px) { .heading, .details { padding: 14px; } .grid { grid-template-columns: 1fr; } .inspectorHead { flex-wrap: wrap; } }
-@media (prefers-reduced-motion: reduce) { .flow button { transition: none; } }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

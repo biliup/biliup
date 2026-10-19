@@ -4,7 +4,7 @@ import type { SystemCpu, SystemDisk, SystemMemory, SystemSample } from './use-sy
 import type { NodeConfigState } from './fleet-config'
 
 /**
- * Fleet 控制面的接口（只有以 `--controller` 启动的实例才有，普通实例全部 404）。
+ * Fleet 控制面的接口（独立实例默认提供，已加入其他控制面的节点不提供）。
  * 时间字段一律是 Unix 毫秒；节点的采样时刻用的是节点自己的时钟。
  */
 

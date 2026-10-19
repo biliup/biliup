@@ -61,7 +61,7 @@ export interface Me {
   permissions: Permission[]
   /** 未开启 `--auth` 时为 false：零鉴权，视为超级管理员 */
   auth_enabled: boolean
-  /** 本机以 `--controller` 运行（Fleet 控制面），「节点」菜单只在这时出现 */
+  /** 本机提供 Fleet 控制面能力，在任务平台内显示节点管理入口 */
   fleet_controller: boolean
   /**
    * 本机是加入了控制面的节点（或启用了「本机」节点的控制面）时才有：
@@ -86,7 +86,7 @@ export interface FleetRevoked {
 export interface FleetManaged {
   /** 控制面的显示名（relay 地址的主机名或控制面 ID 前缀）；「本机」节点为「本机」 */
   controller: string
-  /** 控制面自己的「本机」节点：托管行是分派到本机的 Fleet 房间，到「节点 › 房间」修改 */
+  /** 控制面自己的「本机」节点：托管行是分派到本机的 Fleet 房间，到「任务平台 › 节点管理 › 房间」修改 */
   local?: boolean
   /** 托管的本地直播间 id */
   streamers: number[]

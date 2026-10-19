@@ -157,7 +157,7 @@ export default function PairDialog({
             type="warning"
             fullMode={false}
             closeIcon={null}
-            description="主机是控制面这台的「本机」节点：先在「节点」页启用「本机」，再来配对"
+            description="主机是控制面这台的「本机」节点：先在「任务平台 › 节点管理」页启用「本机」，再来配对"
           />
         ) : null}
         <div className={styles.field}>

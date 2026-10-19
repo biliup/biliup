@@ -43,3 +43,9 @@
   gap: 8px;
   flex-shrink: 0;
 }
+
+.breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; list-style: none; padding: 0; margin: 0; }
+.breadcrumbs li { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.breadcrumbs a { color: var(--semi-color-text-2); font-size: 14px; text-decoration: none; }
+.breadcrumbs a:hover { color: var(--semi-color-primary); }
+.breadcrumbs li > span { color: var(--semi-color-text-3); }

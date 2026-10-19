@@ -291,7 +291,8 @@ pub struct ServeOptions {
     /// the danmaku preview and FFmpeg. (Danmaku conversion is built in.)
     pub render_tools_dir: Option<PathBuf>,
     /// Fleet controller options (`--controller`, `--relay-listen`, `--relay-url`).
-    /// The default runs standalone, or as a node when `data/node.json` exists.
+    /// By default the controller is ready while local recording stays unmanaged;
+    /// existing `data/node.json` or a join ticket selects the node role instead.
     pub fleet: FleetOptions,
 }
 

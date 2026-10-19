@@ -1,4 +1,4 @@
-//! 控制面的 Fleet 配置接口（F3），路由在 `fleet.rs` 里注册，只在 `--controller` 时存在。
+//! 控制面的 Fleet 配置接口（F3），路由在 `fleet.rs` 里注册，仅控制面角色提供。
 //!
 //! - `GET` / `PUT /v1/fleet/configuration`：全局配置，只含共享的白名单键；保存后重新给所有在线节点下发
 //! - `GET /v1/fleet/configuration/history`：保留着的历史版本（只读）

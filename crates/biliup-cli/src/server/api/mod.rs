@@ -20,7 +20,7 @@ pub mod douyu_validation;
 /// 通用API端点
 pub mod endpoints;
 pub mod files;
-/// 控制面的节点与加入票据（只在 `--controller` 时注册）
+/// 控制面的节点与加入票据（默认控制面角色下注册）
 pub mod fleet;
 pub mod fleet_alerts;
 pub mod fleet_config;

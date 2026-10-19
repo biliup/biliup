@@ -1,7 +1,5 @@
 'use client'
 import { Button } from '@douyinfe/semi-ui'
-import { IconArrowLeft } from '@douyinfe/semi-icons'
-import Link from 'next/link'
 import { useState, useSyncExternalStore, type ReactNode } from 'react'
 import PageHeader from '@/app/(app)/components/PageHeader'
 import styles from './shell.module.scss'
@@ -9,8 +7,9 @@ import styles from './shell.module.scss'
 export type FormPageProps = {
   title: ReactNode
   description?: ReactNode
-  /** 返回哪一页：页头左侧的返回箭头回到这里。页面没有「取消」 */
+  /** 面包屑的父级页面。页面没有「取消」 */
   back: { href: string; label: string }
+  breadcrumbs?: { href: string; label: string }[]
   /** 页头右上角的主按钮，写动作本身（创建模板 / 保存模板）；不传则页头不放按钮 */
   okText?: ReactNode
   okIcon?: ReactNode
@@ -23,14 +22,17 @@ export type FormPageProps = {
   headerExtra?: ReactNode
   /** 内容占满页头下方的剩余高度、页面本身不滚，由内容自己分区滚动（配置页的 Tab 面板） */
   fill?: boolean
+  /** 画布类编辑页铺满内容区，由画布自己定位浮动面板。 */
+  canvas?: boolean
   children?: ReactNode
 }
 
-/** 表单页：页头（返回箭头 + 标题 + 右上角主按钮）+ 内容列。不套卡片，分区靠表单自己的分节标题 */
+/** 表单页：面包屑、标题与主按钮，加上表单内容或画布。 */
 export default function FormPage({
   title,
   description,
   back,
+  breadcrumbs,
   okText,
   okIcon,
   onOk,
@@ -38,6 +40,7 @@ export default function FormPage({
   okLoading,
   headerExtra,
   fill,
+  canvas,
   children,
 }: FormPageProps) {
   const [busy, setBusy] = useState(false)
@@ -55,17 +58,9 @@ export default function FormPage({
   return (
     <>
       <PageHeader
-        icon={
-          <Link
-            href={back.href}
-            prefetch={false}
-            className={styles.pageBack}
-            aria-label={`返回${back.label}`}
-            title={`返回${back.label}`}
-          >
-            <IconArrowLeft size="large" />
-          </Link>
-        }
+        breadcrumbs={breadcrumbs ?? (back.href.startsWith('/nodes')
+          ? [{ href: '/status', label: '任务平台' }, ...(back.href === '/nodes' ? [] : [{ href: '/nodes', label: '节点管理' }]), back]
+          : [back])}
         title={title}
         description={description}
         actions={
@@ -87,7 +82,7 @@ export default function FormPage({
           ) : undefined
         }
       />
-      <div className={fill ? styles.pageFill : styles.pageBody}>{children}</div>
+      <div className={canvas ? styles.pageCanvas : fill ? styles.pageFill : styles.pageBody}>{children}</div>
     </>
   )
 }

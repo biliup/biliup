@@ -4,7 +4,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import useSWR, { mutate as revalidate } from 'swr'
 import { Button, Empty, Popconfirm, Select, Spin, TabPane, Tabs, Tag, Toast, Typography } from '@douyinfe/semi-ui'
 import { IconPlusCircle, IconServer, IconSetting } from '@douyinfe/semi-icons'
-import PageHeader from '../components/PageHeader'
+import TaskPlatformHeader from '../status/TaskPlatformHeader'
 import dc from '@/app/ui/data-card.module.scss'
 import { fetcher } from '@/app/lib/api-streamer'
 import { useMe } from '@/app/lib/use-me'
@@ -63,7 +63,7 @@ function NotController() {
       <Empty
         image={<IconServer size="extra-large" style={{ color: 'var(--semi-color-text-3)' }} />}
         title="本机不是控制面"
-        description="用 biliup server --controller 启动后，才能在这里添加和查看节点"
+        description="已加入其他控制面的机器，请到控制面的任务平台管理节点。独立运行的 biliup 默认开启控制面。"
       />
     </div>
   )
@@ -137,7 +137,8 @@ function Nodes() {
     refreshInterval: FLEET_REFRESH_MS,
   })
   const showHa = !!ha && (ha.pair !== null || Object.keys(ha.handback ?? {}).length > 0)
-  const tab: Tab = TABS.find((t) => t === requested && (t !== 'ha' || showHa)) ?? 'nodes'
+  const hasFleet = !!data?.nodes.some(n => !n.local) || !!roomList?.rooms.length || data?.local_node != null
+  const tab: Tab = hasFleet ? TABS.find((t) => t === requested && (t !== 'ha' || showHa)) ?? 'nodes' : 'nodes'
   const [labelFilter, setLabelFilter] = useState<string[]>([])
   const [joining, setJoining] = useState(false)
   const [pairing, setPairing] = useState(false)
@@ -209,7 +210,7 @@ function Nodes() {
   const openAlertCount = alerts.filter((a) => a.resolved_at === null).length
 
   const createRoom = (
-    <CreateRoomButton nodes={nodes} templates={templates ?? []} onCreated={refreshRooms}>
+    <CreateRoomButton>
       <Button icon={<IconPlusCircle />} theme="solid">
         {isMobile ? '添加' : '新建房间'}
       </Button>
@@ -227,7 +228,7 @@ function Nodes() {
   )
   const nodeActions = (
     <>
-      {canViewConfig ? (
+      {canViewConfig && hasFleet ? (
         <Button icon={<IconSetting />} onClick={() => router.push('/nodes/config')}>
           {isMobile ? '配置' : 'Fleet 配置'}
         </Button>
@@ -257,11 +258,11 @@ function Nodes() {
       <div className={styles.center}>
         <Empty
           image={<IconServer size="extra-large" style={{ color: 'var(--semi-color-text-3)' }} />}
-          title="还没有节点"
+          title="当前仅本机运行"
           description={
             canManage
-              ? '点击右上角「添加节点」生成一张加入票据，在另一台运行 biliup 的机器上执行给出的命令'
-              : '还没有机器加入这个控制面'
+              ? '直播间仍在本机录制和投稿。添加其他节点后，可在这里分派房间、管理配置和查看告警。'
+              : '直播间仍在本机录制和投稿，暂时没有其他节点加入。'
           }
         />
         {canManage ? (
@@ -354,10 +355,9 @@ function Nodes() {
 
   return (
     <>
-      <PageHeader
-        icon={<IconServer size="large" />}
-        title="节点"
-        description={DESCRIPTIONS[controller ? tab : 'nodes']}
+      <TaskPlatformHeader
+        active="nodes"
+        description={controller && !hasFleet ? '本机独立录制；需要多机协作时再添加节点' : DESCRIPTIONS[controller ? tab : 'nodes']}
         actions={actions}
       />
       <div className={dc.content}>
@@ -396,19 +396,19 @@ function Nodes() {
                 ) : null}
               </div>
             ) : null}
-            <Tabs type="line" activeKey={tab} onChange={switchTab} className={styles.tabs} lazyRender>
+            <Tabs type="line" activeKey={tab} onChange={switchTab} className={styles.tabs} tabBarStyle={hasFleet ? undefined : { display: 'none' }} lazyRender>
               <TabPane tab="节点" itemKey="nodes">
                 {data?.removals?.length ? (
                   <RemovalNotices removals={data.removals} rooms={rooms} nodes={nodes} />
                 ) : null}
-                {canManage && data && data.local_node === null ? <LocalNodeOffer onEnabled={refresh} /> : null}
+                {canManage && hasFleet && data && data.local_node === null ? <LocalNodeOffer onEnabled={refresh} /> : null}
                 {canManage && data && ha && !showHa && nodes.some((n) => !n.local) ? (
                   <PairEntry onOpen={() => setPairing(true)} />
                 ) : null}
                 {nodesBody}
                 {controller ? <PendingTokens canManage={canManage} /> : null}
               </TabPane>
-              <TabPane tab={`房间${rooms.length ? ` ${rooms.length}` : ''}`} itemKey="rooms">
+              {hasFleet && <TabPane tab={`房间${rooms.length ? ` ${rooms.length}` : ''}`} itemKey="rooms">
                 {controller ? (
                   <RoomsPanel
                     nodes={nodes}
@@ -418,8 +418,8 @@ function Nodes() {
                     onChanged={refresh}
                   />
                 ) : null}
-              </TabPane>
-              <TabPane tab={`投稿模板${templates?.length ? ` ${templates.length}` : ''}`} itemKey="templates">
+              </TabPane>}
+              {hasFleet && <TabPane tab={`投稿模板${templates?.length ? ` ${templates.length}` : ''}`} itemKey="templates">
                 {controller ? (
                   <TemplatesPanel
                     templates={templates}
@@ -433,12 +433,12 @@ function Nodes() {
                     onChanged={refreshTemplates}
                   />
                 ) : null}
-              </TabPane>
-              <TabPane tab={`告警${alerts.length ? ` ${alerts.length}` : ''}`} itemKey="alerts">
+              </TabPane>}
+              {hasFleet && <TabPane tab={`告警${alerts.length ? ` ${alerts.length}` : ''}`} itemKey="alerts">
                 {controller ? (
                   <AlertsPanel nodes={nodes} canManage={canManage} nodeFilter={alertNode} onNodeFilter={openAlerts} />
                 ) : null}
-              </TabPane>
+              </TabPane>}
               {showHa && ha ? (
                 <TabPane tab="一主一备" itemKey="ha">
                   <ControllerHa

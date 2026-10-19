@@ -49,7 +49,7 @@ import styles from './fleet-config.module.scss'
 
 const { Text } = Typography
 
-export const FLEET_CONFIG_BACK = { href: '/nodes', label: '节点' }
+export const FLEET_CONFIG_BACK = { href: '/nodes', label: '节点管理' }
 
 const TAB_GLOBAL = 'global'
 const TAB_PLATFORM = 'platform'
