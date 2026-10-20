@@ -78,12 +78,14 @@ export function useFlowViewport() {
   }
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 && event.button !== 1) return
-    if (event.button === 0 && event.pointerType !== 'touch' && !space.current && (event.target as Element).closest('button')) return
+    const target = event.target as Element
+    const labelControl = target.closest('label')?.control
+    const button = target.closest('button') || (labelControl?.tagName === 'BUTTON' ? labelControl as HTMLButtonElement : null)
+    if (event.button === 0 && event.pointerType !== 'touch' && !space.current && button) return
     event.preventDefault()
     stop()
     const origin = point(event)
     pointers.current.set(event.pointerId, origin)
-    const button = (event.target as Element).closest('button')
     tap.current = event.pointerType === 'touch' && pointers.current.size === 1 && button
       ? { id: event.pointerId, origin, button } : null
     event.currentTarget.setPointerCapture(event.pointerId)

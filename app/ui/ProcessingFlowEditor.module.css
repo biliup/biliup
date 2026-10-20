@@ -31,12 +31,11 @@
 .externalFlow { position: absolute; inset: 0; transition: opacity .5s; }
 .canvas[data-detailed=true] .externalFlow { opacity: .35; }
 .connections { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
-.connections g { fill: none; stroke: var(--semi-color-text-3); stroke-width: 1.5; }
+.connections g { fill: none; stroke: var(--semi-color-text-3); stroke-width: calc(1.5px / var(--node-zoom)); }
 .connections marker { fill: var(--semi-color-text-3); }
-.externalFlow .connections path { vector-effect: non-scaling-stroke; }
-.connections .downloadRoute { stroke: color-mix(in srgb, var(--download-color) 55%, var(--semi-color-text-3)); stroke-width: 1.25; stroke-dasharray: 4 5; }
+.connections .downloadRoute { stroke: color-mix(in srgb, var(--download-color) 55%, var(--semi-color-text-3)); stroke-width: calc(1.25px / var(--node-zoom)); stroke-dasharray: calc(4px / var(--node-zoom)) calc(5px / var(--node-zoom)); }
 .connections circle.downloadRoute { stroke-dasharray: none; }
-.connections .uploadRoute { stroke: var(--upload-color); stroke-width: 2.5; }
+.connections .uploadRoute { stroke: var(--upload-color); stroke-width: calc(2.5px / var(--node-zoom)); }
 .connections .repeatLine { stroke: color-mix(in srgb, var(--download-color) 55%, var(--graph-surface)); }
 .edgeProcessor { position: absolute; display: flex; align-items: center; justify-content: center; gap: 8px; width: max-content; min-width: 164px; height: 36px; padding: 0 12px; box-sizing: border-box; transform: translateX(-50%); border: 1px solid var(--semi-color-border); border-radius: 18px; color: var(--semi-color-text-1); background: var(--flow-surface); box-shadow: 0 2px 6px #00000006; font: inherit; font-size: 14px; white-space: nowrap; cursor: pointer; transition: box-shadow .2s, border-color .2s; }
 .edgeProcessor > span:first-child { display: flex; color: var(--flow-muted); }
@@ -58,16 +57,19 @@
 .subgraph { pointer-events: none; position: absolute; left: 174px; top: 180px; width: 332px; height: 110px; }
 .subgraphNode { pointer-events: auto; position: absolute; inset: 0; width: 332px; height: 110px; padding: 0; box-sizing: border-box; color: inherit; background: var(--flow-surface); border: 1.5px solid color-mix(in srgb, var(--group-color) 60%, var(--flow-surface)); border-radius: 12px; box-shadow: 5px 5px 0 var(--flow-surface), 6px 6px 0 color-mix(in srgb, var(--group-color) 45%, var(--flow-surface)), 10px 10px 0 var(--flow-surface), 11px 11px 0 color-mix(in srgb, var(--group-color) 25%, var(--flow-surface)); cursor: pointer; text-align: left; transition: opacity .5s; }
 .subgraphNode.selected { border: 2px solid var(--group-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--group-color) 16%, transparent), 5px 5px 0 var(--flow-surface), 6px 6px 0 var(--group-color), 10px 10px 0 var(--flow-surface), 11px 11px 0 color-mix(in srgb, var(--group-color) 35%, var(--flow-surface)); }
-.groupLabel { display: flex; align-items: center; gap: 12px; padding: 13px 18px; border-radius: 10px 10px 0 0; background: color-mix(in srgb, var(--group-color) 12%, var(--flow-surface)); border-bottom: 1px solid color-mix(in srgb, var(--group-color) 20%, var(--flow-surface)); transition: opacity .25s; }
+.groupLabel { display: flex; align-items: center; width: 100%; box-sizing: border-box; gap: 12px; padding: 13px 18px; border: 0; border-radius: 10px 10px 0 0; color: inherit; font: inherit; text-align: left; cursor: pointer; background: color-mix(in srgb, var(--group-color) 12%, var(--flow-surface)); border-bottom: 1px solid color-mix(in srgb, var(--group-color) 20%, var(--flow-surface)); transition: opacity .25s; }
 .groupLabel strong { flex: 1; font-size: 19px; font-weight: 600; white-space: nowrap; }
 .groupIcon { display: flex; color: var(--group-color); }
 .groupIcon svg { width: 22px; height: 22px; }
-.groupPreview { display: flex; justify-content: center; align-items: center; padding: 10px 18px; transition: opacity .25s; }
-.groupPreview > span:not(.previewEdge) { display: grid; place-items: center; width: 30px; height: 26px; border: 1px solid currentColor; border-radius: 5px; }
-.groupPreview svg { width: 15px; height: 15px; }
+.groupPreview { display: flex; justify-content: center; align-items: center; padding: 8px 18px; transition: opacity .25s; }
+.previewButton { position: relative; display: grid; place-items: center; width: 44px; height: 34px; padding: 0; box-sizing: border-box; border: 1px solid currentColor; border-radius: 7px; cursor: pointer; }
+.previewButton > span { display: flex; }
+.previewButton:hover { background: color-mix(in srgb, currentColor 16%, var(--flow-surface)); }
+.previewButton.selected { border-width: 2px; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 20%, transparent); background: color-mix(in srgb, currentColor 16%, var(--flow-surface)); }
+.groupPreview svg { width: 18px; height: 18px; }
 .previewDownload { color: var(--download-color); background: color-mix(in srgb, var(--download-color) 8%, var(--flow-surface)); }
 .previewUpload { color: var(--upload-color); background: color-mix(in srgb, var(--upload-color) 8%, var(--flow-surface)); }
-.groupPreview > .previewProcessor { width: 25px; height: 18px; border-radius: 10px; color: var(--flow-muted); }
+.previewProcessor { border-radius: 17px; color: var(--flow-muted); background: var(--flow-surface); }
 .previewEdge { width: 44px; height: 1px; background: color-mix(in srgb, var(--group-color) 40%, var(--flow-surface)); }
 .nodeIcon { display: grid; place-items: center; width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; color: white; background: var(--node-color, var(--group-color)); }
 .nodeIcon svg { width: 24px; height: 24px; }
@@ -80,8 +82,8 @@
 .canvas[data-detailed=true] .subgraphNode,
 .canvas[data-detailed=true] .externalFlow .node,
 .canvas[data-detailed=true] .externalFlow .edgeProcessor { border-style: dashed; border-width: calc(1px / var(--camera-zoom)); box-shadow: none; }
-.canvas[data-detailed=true] .externalFlow .connections path { stroke-dasharray: 5 6; }
-.canvas[data-detailed=true] .groupLabel, .canvas[data-detailed=true] .groupPreview { opacity: 0; }
+.canvas[data-detailed=true] .externalFlow .connections g path { stroke-dasharray: calc(5px / var(--node-zoom)) calc(6px / var(--node-zoom)); }
+.canvas[data-detailed=true] .groupExpand, .canvas[data-detailed=true] .groupPreview { opacity: 0; }
 .innerFlow { --node-zoom: calc(var(--camera-zoom) * .1875); position: absolute; left: 134.875px; top: 24.0625px; width: 332px; height: 330px; opacity: 0; transform: scale(.1875); transform-origin: 0 0; pointer-events: none; transition: opacity .3s; }
 .canvas[data-detailed=true] .innerFlow { opacity: 1; pointer-events: auto; transition: opacity .5s; }
 .cameraTools { position: absolute; top: -44px; right: 0; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--semi-color-border); border-radius: 10px; background: var(--flow-surface); box-shadow: 0 2px 8px #00000008; }
@@ -100,9 +102,45 @@
 .selectionMark svg { width: 18px; height: 18px; }
 .edgeProcessor.selected { color: var(--flow-accent); border: 2px solid var(--flow-accent); background: var(--semi-color-primary-light-default); box-shadow: 0 0 0 3px color-mix(in srgb, var(--flow-accent) 20%, transparent); font-weight: 600; }
 .edgeProcessor.selected > span:first-child { color: var(--flow-accent); }
-.node:focus-visible, .subgraphNode:focus-visible, .edgeProcessor:focus-visible { outline: 2px solid var(--flow-accent); outline-offset: 4px; }
+.node:focus-visible, .groupExpand:focus-visible, .previewButton:focus-visible, .edgeProcessor:focus-visible { outline: calc(2px / var(--node-zoom)) solid var(--flow-accent); outline-offset: calc(4px / var(--node-zoom)); }
 .segmentProcessor { left: 166px; top: 174px; }
 .count { padding-left: 6px; border-left: 1px solid var(--semi-color-border); color: var(--flow-muted); font: 11px monospace; }
+/* Geometry follows the camera; stroke weights stay in screen pixels, including
+   the microscopic child graph's additional scale. */
+.world :is(.node, .edgeProcessor, .previewButton, .subgraphNode),
+.world :is(.node, .edgeProcessor, .previewButton, .subgraphNode).selected { border-width: 0; }
+.world .selectionMark { border: 0; box-shadow: 0 0 0 calc(2px / var(--node-zoom)) var(--flow-surface); }
+.world .nodeOutline { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; fill: none; }
+.nodeOutline rect { rx: 14px; stroke: var(--node-stroke); stroke-width: calc(var(--stroke-width, 1px) / var(--node-zoom)); }
+.node { --node-stroke: color-mix(in srgb, var(--node-color) 38%, var(--flow-surface)); }
+.node:hover, .node.selected { --node-stroke: var(--node-color); }
+.edgeProcessor { --node-stroke: var(--semi-color-border); }
+.edgeProcessor:hover, .edgeProcessor.selected { --node-stroke: var(--flow-accent); }
+.edgeProcessor > .nodeOutline rect { rx: 18px; }
+.subgraphNode { --stroke-width: 1.5px; --node-stroke: color-mix(in srgb, var(--group-color) 60%, var(--flow-surface)); }
+.subgraphNode.selected { --node-stroke: var(--group-color); }
+.subgraphNode > .nodeOutline rect { rx: 12px; }
+.previewButton { --stroke-width: 1px; --node-stroke: currentColor; }
+.previewButton > .nodeOutline rect { rx: 7px; }
+.previewProcessor > .nodeOutline rect { rx: 17px; }
+:is(.node, .edgeProcessor, .subgraphNode, .previewButton).selected { --stroke-width: 2px; }
+.groupLabel { position: relative; border-bottom: 0; }
+.groupLabel::after { content: ''; position: absolute; inset: auto 0 0; height: calc(1px / var(--node-zoom)); background: color-mix(in srgb, var(--group-color) 20%, var(--flow-surface)); }
+.count { border-left: 0; background: linear-gradient(var(--semi-color-border), var(--semi-color-border)) left / calc(1px / var(--node-zoom)) 100% no-repeat; }
+.edgeProcessor { box-shadow: 0 calc(2px / var(--node-zoom)) calc(6px / var(--node-zoom)) #00000006; }
+.edgeProcessor::before, .edgeProcessor::after { left: calc(50% - 2px / var(--node-zoom)); width: calc(4px / var(--node-zoom)); height: calc(4px / var(--node-zoom)); }
+.edgeProcessor::before { top: calc(-3px / var(--node-zoom)); }
+.edgeProcessor::after { bottom: calc(-3px / var(--node-zoom)); }
+.node { box-shadow: 0 calc(4px / var(--node-zoom)) calc(12px / var(--node-zoom)) #00000007; }
+.node:hover { box-shadow: 0 calc(4px / var(--node-zoom)) calc(14px / var(--node-zoom)) #00000012; }
+.node.selected { box-shadow: 0 0 0 calc(4px / var(--node-zoom)) color-mix(in srgb, var(--node-color) 20%, transparent), 0 calc(4px / var(--node-zoom)) calc(12px / var(--node-zoom)) #0000000c; }
+.edgeProcessor.selected { box-shadow: 0 0 0 calc(3px / var(--node-zoom)) color-mix(in srgb, var(--flow-accent) 20%, transparent); }
+.previewButton.selected { box-shadow: 0 0 0 calc(3px / var(--node-zoom)) color-mix(in srgb, currentColor 20%, transparent); }
+.previewEdge { height: calc(1px / var(--node-zoom)); }
+.subgraphNode { box-shadow: calc(5px / var(--node-zoom)) calc(5px / var(--node-zoom)) 0 var(--flow-surface), calc(6px / var(--node-zoom)) calc(6px / var(--node-zoom)) 0 color-mix(in srgb, var(--group-color) 45%, var(--flow-surface)), calc(10px / var(--node-zoom)) calc(10px / var(--node-zoom)) 0 var(--flow-surface), calc(11px / var(--node-zoom)) calc(11px / var(--node-zoom)) 0 color-mix(in srgb, var(--group-color) 25%, var(--flow-surface)); }
+.subgraphNode.selected { box-shadow: 0 0 0 calc(3px / var(--node-zoom)) color-mix(in srgb, var(--group-color) 16%, transparent), calc(5px / var(--node-zoom)) calc(5px / var(--node-zoom)) 0 var(--flow-surface), calc(6px / var(--node-zoom)) calc(6px / var(--node-zoom)) 0 var(--group-color), calc(10px / var(--node-zoom)) calc(10px / var(--node-zoom)) 0 var(--flow-surface), calc(11px / var(--node-zoom)) calc(11px / var(--node-zoom)) 0 color-mix(in srgb, var(--group-color) 35%, var(--flow-surface)); }
+.canvas[data-detailed=true] .world :is(.subgraphNode, .externalFlow .node, .externalFlow .edgeProcessor) { --stroke-width: 1px; border-width: 0; box-shadow: none; }
+.canvas[data-detailed=true] :is(.subgraphNode, .externalFlow .node, .externalFlow .edgeProcessor) > .nodeOutline rect { stroke-dasharray: calc(5px / var(--node-zoom)) calc(6px / var(--node-zoom)); }
 .inspector { position: absolute; z-index: 2; top: 24px; right: 24px; bottom: 24px; width: var(--inspector-width); box-sizing: border-box; min-width: 0; overflow: auto; padding: 28px; border: 1px solid var(--semi-color-border); border-radius: 16px; background: var(--flow-surface); box-shadow: 0 8px 32px #00000014, 0 2px 8px #0000000a; }
 .inspector [hidden] { display: none !important; }
 .inspectorHead { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--semi-color-border); }
@@ -120,7 +158,7 @@
 .parameter { flex: 1; min-width: 100px; }
 .parameterHint { flex: 1; min-width: 100px; color: var(--flow-muted); font-size: 12px; }
 .commandHelp { margin: 8px 0 0 22px; color: var(--flow-muted); font-size: 12px; line-height: 1.7; }
-.actions { display: flex; flex-shrink: 0; }
+.actions { display: flex; flex-shrink: 0; margin-left: auto; }
 .actions :global(.semi-button) { padding: 0; width: 26px; }
 .empty { padding: 32px 12px; border: 1px dashed var(--semi-color-border); border-radius: 8px; text-align: center; color: var(--flow-muted); font-size: 13px; }
 .help { margin: 18px 0 0; color: var(--flow-muted); font-size: 12px; line-height: 1.8; }
@@ -155,7 +193,9 @@
   .inspectorHead h2 { font-size: 18px; }
   .cameraTools { top: -44px; }
   .cameraTools button { width: 36px; height: 36px; }
-  .node::after, .edgeProcessor::after { content: ''; position: absolute; left: 0; top: 50%; bottom: auto; width: 100%; height: max(100%, calc(44px / var(--node-zoom))); transform: translateY(-50%); border-radius: inherit; background: transparent; }
+  .groupPreview { padding-left: 0; padding-right: 0; }
+  .previewEdge { width: max(44px, calc(48px / var(--node-zoom) - 44px)); }
+  .node::after, .edgeProcessor::after, .previewButton::after { content: ''; position: absolute; left: 50%; top: 50%; bottom: auto; width: max(100%, calc(44px / var(--node-zoom))); height: max(100%, calc(44px / var(--node-zoom))); transform: translate(-50%, -50%); border-radius: inherit; background: transparent; }
 }
 @container (max-width: 450px) {
   .canvasHeader { left: 16px; top: 15px; font-size: 12px; }
@@ -170,3 +210,25 @@
 }
 
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Each action in the collapsed group is a labelled, independent entry point. */
+.subgraph { top: 167px; height: 136px; }
+.subgraphNode { height: 136px; cursor: default; }
+.groupExpand { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; text-align: left; }
+.groupLabel { position: absolute; inset: 0 0 auto; justify-content: space-between; padding: 10px 14px 8px; height: 30px; background: transparent; }
+.groupLabel::after { display: none; }
+.groupIcon svg { width: 18px; height: 18px; }
+.groupExpand:hover { background: color-mix(in srgb, var(--group-color) 5%, transparent); }
+.groupPreview { position: relative; margin-top: 30px; padding: 8px 12px 12px; pointer-events: none; }
+.previewItem { display: flex; flex-direction: column; align-items: center; width: 86px; gap: 10px; flex-shrink: 0; }
+.previewButton { display: grid; place-items: center; width: 56px; height: 48px; border-radius: 10px; pointer-events: auto; }
+.groupPreview .previewButton > .nodeOutline rect { rx: 10px; }
+.previewLabel { font-size: 13px; line-height: 18px; font-weight: 600; white-space: nowrap; cursor: pointer; pointer-events: auto; }
+.previewButton > span svg { width: 24px; height: 24px; }
+.previewProcessor { height: 36px; margin: 6px 0; border-radius: 18px; color: var(--flow-muted); --node-stroke: var(--semi-color-border); box-shadow: 0 calc(2px / var(--node-zoom)) calc(6px / var(--node-zoom)) #00000006; }
+.previewProcessor > span svg { width: 14px; height: 14px; }
+.groupPreview .previewProcessor > .nodeOutline rect { rx: 18px; }
+.previewProcessor:hover, .previewProcessor.selected { color: var(--flow-accent); --node-stroke: var(--flow-accent); }
+.previewProcessor.selected { background: var(--semi-color-primary-light-default); }
+.previewEdge { flex: 1; width: auto; min-width: 10px; align-self: flex-start; margin: 24px -15px 0; }
+.innerFlow { top: 37.0625px; }

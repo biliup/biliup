@@ -79,11 +79,11 @@ function touchHarness() {
   hook.viewportRef.current = element
   effects.forEach(fn => fn())
   let clicks = 0
-  const button = { click: () => { clicks++ } }
+  const button = { tagName: 'BUTTON', click: () => { clicks++ } }
   const pointer = (handler, id, x, y, onButton = false) => hook.handlers[handler]({
     type: handler === 'onPointerUp' ? 'pointerup' : handler === 'onPointerCancel' ? 'pointercancel' : handler,
     button: 0, pointerType: 'touch', pointerId: id, clientX: x, clientY: y,
-    target: { closest: () => onButton ? button : null }, currentTarget: element, preventDefault() {},
+    target: { closest: selector => onButton === 'label' ? (selector === 'label' ? { control: button } : null) : (onButton && selector === 'button' ? button : null) }, currentTarget: element, preventDefault() {},
   })
   return { pointer, camera: () => states[0], dragging: () => states[1], clicks: () => clicks, captures, listeners }
 }
@@ -102,6 +102,13 @@ test('a touch tap selects once; dragging from the same node pans without selecti
   close(h.camera().y, before.y + 40)
   assert.equal(h.clicks(), 1)
   assert.equal(h.captures.size, 0)
+  h.pointer('onPointerDown', 3, 140, 200, 'label')
+  h.pointer('onPointerUp', 3, 140, 200, 'label')
+  assert.equal(h.clicks(), 2)
+  h.pointer('onPointerDown', 4, 140, 200, 'label')
+  h.pointer('onPointerMove', 4, 170, 240, 'label')
+  h.pointer('onPointerUp', 4, 170, 240, 'label')
+  assert.equal(h.clicks(), 2)
 })
 
 test('two touches zoom without accidental selection and continue panning after one lifts', () => {

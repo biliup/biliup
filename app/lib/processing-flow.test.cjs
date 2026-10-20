@@ -37,6 +37,18 @@ test('implicit default cleanup and explicit keep-files are different after savin
   assert.deepEqual(stageSteps(from(submit(keep)), 'postprocessor'), [])
 })
 
+test('legacy webhook survives editing and is available only after upload with an HTTP endpoint', () => {
+  const entity = { postprocessor: ['rm', { webhook: 'https://example.invalid/hook?token=local-test' }] }
+  assert.deepEqual(submit(from(entity)).postprocessor, entity.postprocessor)
+  assert.equal(validate(from(entity)), '')
+  for (const value of ['not-a-url', 'file:///tmp/hook', 'javascript:alert(1)']) {
+    assert.match(validate({ postprocessor: [{ cmd: 'webhook', value }] }), /HTTP/)
+  }
+  for (const stage of ['preprocessor', 'downloaded_processor', 'segment_processor']) {
+    assert.match(validate({ [stage]: [{ cmd: 'webhook', value: 'https://example.invalid' }] }), /不支持/)
+  }
+})
+
 test('reordering changes only the selected phase and preserves the step payload', () => {
   const flow = from({ segment_processor: [{ run: 'echo first' }, { remux: 'mp4' }], preprocessor: [{ run: 'echo before' }] })
   const reordered = move(flow, 'segment_processor', 1, 0)

@@ -19,6 +19,7 @@ pub mod throughput;
 pub mod timerange;
 pub mod upload;
 pub mod upload_observation;
+pub mod webhook;
 /// 通用工具函数
 pub mod util;
 

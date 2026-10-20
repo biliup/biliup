@@ -66,6 +66,19 @@ where
         }
         return plan.run(rx, ctx, upload_config).await;
     }
+    let paths =
+        super::webhook::on_failure(ctx, upload_and_submit(rx, ctx, upload_config).await).await?;
+    execute_postprocessor(paths, ctx).await
+}
+
+async fn upload_and_submit<F>(
+    rx: Inspect<Receiver<SegmentInfo>, F>,
+    ctx: &Context,
+    upload_config: &UploadStreamer,
+) -> AppResult<Vec<PathBuf>>
+where
+    F: FnMut(&SegmentInfo),
+{
     // 1. 初始化上传环境
     let upload_context =
         initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
@@ -108,12 +121,7 @@ where
         return Err(AppError::Custom("没有一个分段上传成功".into()).into());
     }
 
-    // 5. 执行后处理
-    if !uploaded_videos.paths.is_empty() {
-        execute_postprocessor(uploaded_videos.paths, ctx).await?;
-    }
-
-    Ok(())
+    Ok(uploaded_videos.paths)
 }
 
 async fn process_without_upload<F>(
@@ -134,7 +142,8 @@ where
         ctx,
         |path| async move { Ok(Video::new(&path.to_string_lossy())) },
     )
-    .await?;
+    .await;
+    let processed = super::webhook::on_failure(ctx, processed).await?;
     execute_postprocessor(processed.paths, ctx).await
 }
 
@@ -1004,10 +1013,21 @@ pub(crate) fn studio_from_template(
 }
 
 pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
+    // Like the Python handler, callbacks gate all file operations, regardless
+    // of their position in the postprocessor list (including after an rm).
+    super::webhook::notify(ctx, None).await?;
+    if video_paths.is_empty() {
+        return Ok(());
+    }
     if let Some(processor) = &ctx.live_streamer().postprocessor {
+        let processor: Vec<_> = processor
+            .iter()
+            .filter(|step| !matches!(step, HookStep::Webhook { .. }))
+            .cloned()
+            .collect();
         let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
         let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
-        process_video(&paths, processor, Some(&retention)).await?;
+        process_video(&paths, &processor, Some(&retention)).await?;
     }
     Ok(())
 }

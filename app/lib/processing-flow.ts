@@ -4,7 +4,7 @@ export const PROCESSING_STAGES = [
   { key: 'preprocessor', title: '下载前处理', commands: ['run'] },
   { key: 'segment_processor', title: '分段时后处理', commands: ['run', 'remux', 'render'] },
   { key: 'downloaded_processor', title: '下载后处理', commands: ['run'] },
-  { key: 'postprocessor', title: '后处理', commands: ['run', 'mv', 'rm'] },
+  { key: 'postprocessor', title: '后处理', commands: ['run', 'mv', 'rm', 'webhook'] },
 ] as const
 export type ProcessingStage = typeof PROCESSING_STAGES[number]['key']
 export type ProcessingFlow = Partial<Record<ProcessingStage, PostprocessorFormStep[] | null>>
@@ -43,6 +43,11 @@ export function validateProcessingFlow(flow?: ProcessingFlow): string {
       if (!(stage.commands as readonly string[]).includes(step.cmd ?? '')) return `${prefix}此阶段不支持该操作`
       if (step.cmd === 'rm') continue
       if (!step.value?.trim()) return `${prefix}${step.cmd === 'run' ? '请填写命令' : step.cmd === 'mv' ? '请填写目标目录' : '请填写参数'}`
+      if (step.cmd === 'webhook') {
+        try {
+          if (!['http:', 'https:'].includes(new URL(step.value).protocol)) throw new Error()
+        } catch { return `${prefix}请填写有效的 HTTP 或 HTTPS 回调地址` }
+      }
       if (step.cmd === 'remux' && step.value !== 'mp4') return `${prefix}转封装仅支持 MP4`
       if (step.cmd === 'render') {
         try {

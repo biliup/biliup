@@ -2,7 +2,8 @@
  * 后处理步骤的双向转换:表单形态 {cmd, value} ↔ 后端 HookStep 形态。
  *
  * 后端 HookStep 是 #[serde(untagged)] 枚举(声明顺序即匹配顺序):
- *   Run { run: string } | Move { mv: string } | Remux { remux: string } | Remove("rm")
+ *   Run { run: string } | Move { mv: string } | Webhook { webhook: string }
+ *   | Remux { remux: string } | Render { render: object } | Remove("rm")
  * 表单(ArrayField)中每个步骤的字段是 cmd(Select) + value(Input)。
  *
  * 严禁把 {mv: target} 改写成 {run: "mv target"} —— untagged 枚举先匹配 Run,
@@ -50,6 +51,8 @@ export function formToHookStep(step: PostprocessorFormStep): unknown {
       return { mv: value }
     case 'remux':
       return { remux: value }
+    case 'webhook':
+      return { webhook: value }
     case 'render': {
       const render: unknown = JSON.parse(value)
       if (!render || typeof render !== 'object' || Array.isArray(render)) {

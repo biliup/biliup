@@ -19,6 +19,8 @@ pub enum HookStep {
     Run { run: String },
     /// 移动文件格式：{mv: "target_dir"}
     Move { mv: String },
+    /// 上传结果回调；在任何文件后处理之前由上传流程执行。
+    Webhook { webhook: String },
     /// ts→mp4 无重编码 remux 格式：{remux: "mp4"}
     /// 解决 B 站对 .ts 直传时常见的 "时间戳跳变" 转码失败。
     /// 用 ffmpeg `-c copy -fflags +genpts+igndts -bsf:a aac_adtstoasc -movflags +faststart`，
@@ -69,6 +71,9 @@ impl HookStep {
                 // 移动文件到指定目录
                 self.move_file(video_paths, mv, retention.map(|r| &r.pool))
                     .await?;
+            }
+            HookStep::Webhook { .. } => {
+                bail!(AppError::Custom("webhook 只支持上传结束后的结果回调".into()));
             }
             HookStep::Render { .. } => {
                 bail!(AppError::Custom(

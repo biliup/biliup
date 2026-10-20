@@ -160,6 +160,34 @@ async fn run_inner(
     upload_config: &UploadStreamer,
     session: Arc<Mutex<SyncSession>>,
 ) -> AppResult<DownloadStatus> {
+    let result = super::webhook::on_failure(
+        ctx,
+        run_upload_session(
+            downloader,
+            token,
+            ctx,
+            download_config,
+            upload_config,
+            session.clone(),
+        )
+        .await,
+    )
+    .await?;
+    // Keep the paths available for a subsequent attempt if the callback fails.
+    let paths = session.lock().await.postprocess_paths.clone();
+    execute_postprocessor(paths, ctx).await?;
+    session.lock().await.postprocess_paths.clear();
+    Ok(result)
+}
+
+async fn run_upload_session(
+    downloader: &SyncDownloader,
+    token: CancellationToken,
+    ctx: &Context,
+    download_config: DownloadConfig,
+    upload_config: &UploadStreamer,
+    session: Arc<Mutex<SyncSession>>,
+) -> AppResult<DownloadStatus> {
     let mut upload_ctx =
         initialize_upload_context(&ctx.config(), ctx.stateless_client(), upload_config).await?;
     upload_ctx.threads = 3;
@@ -204,16 +232,6 @@ async fn run_inner(
     // 正常结束（含取消）时 run_loop 已排空队列；这里只处理出错后残留的分段。
     abandon_pending(&mut pending, &mut ready).await;
 
-    // 取消（停止/暂停）同样是“本场录制结束”，已投稿分段的后处理照常执行
-    if result.is_ok() {
-        let paths = {
-            let mut state = session.lock().await;
-            std::mem::take(&mut state.postprocess_paths)
-        };
-        if !paths.is_empty() {
-            execute_postprocessor(paths, ctx).await?;
-        }
-    }
     result
 }
 

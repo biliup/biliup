@@ -28,6 +28,7 @@ const COMMANDS: Record<string, { label: string; placeholder?: string; descriptio
   rm: { label: 'rm（删除文件）', description: '删除文件，为默认操作。' },
   remux: { label: 'remux（转封装）', placeholder: 'mp4', description: '将视频转封装为 MP4，保留原文件。' },
   render: { label: 'render（画面与弹幕）', description: '将弹幕烧录、遮挡等操作应用到视频。' },
+  webhook: { label: 'webhook', placeholder: 'https://example.com/webhook', description: '上传结束后 POST 直播与投稿信息（stream_info）及异常（caught_error）。返回 success 后才执行文件后处理；回调失败则保留文件。' },
 }
 function newStep(cmd: string): PostprocessorFormStep {
   if (cmd === 'rm') return { cmd }
@@ -66,6 +67,9 @@ export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, ex
     onSelect(key)
     if (!isInnerNode(key)) { onExpandedChange(false); fit() }
   }
+  // SVG strokes keep fractional widths; CSS borders round to device pixels
+  // before the camera transform, making thin borders grow at high zoom.
+  const outline = <svg className={styles.nodeOutline} aria-hidden="true"><rect width="100%" height="100%" /></svg>
   const processor = (key: ProcessingStage, className?: string) => <button type="button"
     className={`${styles.edgeProcessor} ${className || ''} ${selected === key ? styles.selected : ''}`}
     aria-label={FLOW_NODES[key].title} title={FLOW_NODES[key].description}
@@ -73,6 +77,7 @@ export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, ex
     <span aria-hidden="true">{FLOW_NODES[key].icon}</span>
     <span>{FLOW_NODES[key].title}</span>
     <span className={styles.count}>{stageSteps(value, key).length}</span>
+    {outline}
   </button>
   const node = (key: 'start' | 'download' | 'upload', detail?: string) => <button type="button"
     className={`${styles.node} ${styles[key]} ${selected === key ? styles.selected : ''}`}
@@ -80,10 +85,20 @@ export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, ex
     <span className={styles.nodeIcon} aria-hidden="true">{FLOW_NODES[key].icon}</span>
     <span className={styles.nodeText}><strong>{FLOW_NODES[key].title}</strong>{detail && <small title={detail}>{detail}</small>}</span>
     {selected === key && <span className={styles.selectionMark} aria-hidden="true"><IconCheckCircleStroked /></span>}
+    {outline}
   </button>
-  const arrow = (id: string, color?: string, external = false) => <marker id={id} style={{ fill: color }} viewBox="0 0 10 10" refX="9" refY="5"
-    markerUnits={external ? 'userSpaceOnUse' : 'strokeWidth'} markerWidth={external ? 8 / camera.zoom : 6}
-    markerHeight={external ? 8 / camera.zoom : 6} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker>
+  const arrow = (id: string, color?: string, inner = false) => <marker id={id} style={{ fill: color }} viewBox="0 0 10 10" refX="9" refY="5"
+    markerUnits="userSpaceOnUse" markerWidth={8 / (camera.zoom * (inner ? .1875 : 1))}
+    markerHeight={8 / (camera.zoom * (inner ? .1875 : 1))} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker>
+  const shortcut = (key: 'download' | 'segment_processor' | 'upload', className: string) => <div className={styles.previewItem}>
+    <button type="button" id={`${marker}-${key}-shortcut`} className={`${styles.previewButton} ${className} ${selected === key ? styles.selected : ''}`}
+      aria-label={FLOW_NODES[key].title} title={FLOW_NODES[key].title}
+      aria-pressed={selected === key} aria-controls="flow-node-settings" onClick={() => select(key)}>
+      <span aria-hidden="true">{FLOW_NODES[key].icon}</span>
+      {outline}
+    </button>
+    <label htmlFor={`${marker}-${key}-shortcut`} className={styles.previewLabel} aria-hidden="true">{FLOW_NODES[key].title}</label>
+  </div>
   return <nav className={styles.canvas} aria-label="直播处理流程" data-detailed={detailed} style={{ '--camera-zoom': camera.zoom } as React.CSSProperties}>
     <div className={styles.canvasHeader}><strong>处理流程</strong></div>
     <div className={styles.graphArea}>
@@ -93,12 +108,12 @@ export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, ex
         <div className={styles.world} style={{ visibility: ready ? 'visible' : 'hidden', transform: `translate(${camera.x}px, ${camera.y}px) scale(${camera.zoom})` }}>
           <div className={styles.externalFlow}>
             <svg className={styles.connections} aria-hidden="true">
-              <defs>{arrow(marker, undefined, true)}{arrow(`${marker}-upload`, 'var(--upload-color)', true)}</defs>
+              <defs>{arrow(marker)}{arrow(`${marker}-upload`, 'var(--upload-color)')}</defs>
               <g>
-                <path d="M 340 72 V 180" markerEnd={`url(#${marker})`} />
+                <path d="M 340 72 V 167" markerEnd={`url(#${marker})`} />
                 <path className={styles.downloadRoute} d="M 174 235 H 110 Q 90 235 90 255 V 455" />
-                <circle className={styles.downloadRoute} cx="90" cy="455" r="3" />
-                <path className={styles.uploadRoute} markerEnd={`url(#${marker}-upload)`} d="M 340 290 V 544" />
+                <circle className={styles.downloadRoute} cx="90" cy="455" r={3 / camera.zoom} />
+                <path className={styles.uploadRoute} markerEnd={`url(#${marker}-upload)`} d="M 340 303 V 544" />
               </g>
             </svg>
             {node('start')}
@@ -111,25 +126,27 @@ export function ProcessingFlowGraph({ value, selected, onSelect, uploadLabel, ex
             </div>
           </div>
           <div className={styles.subgraph}>
-            <button type="button" className={`${styles.subgraphNode} ${isInnerNode(selected) ? styles.selected : ''}`}
-              onClick={() => toggle(true)} aria-label="展开下载 & 上传" aria-hidden={detailed} inert={detailed}
-              aria-expanded={detailed} aria-controls={`${marker}-inner`} tabIndex={detailed ? -1 : 0}>
-              <span className={styles.groupLabel}>
-                <span className={styles.groupIcon} aria-hidden="true"><IconLayers /></span>
-                <strong>下载 &amp; 上传</strong>
-                <span className={styles.expandIcon} aria-hidden="true"><IconExpand /></span>
-              </span>
-              <span className={styles.groupPreview} aria-hidden="true">
-                <span className={styles.previewDownload}><IconDownloadStroked /></span>
-                <span className={styles.previewEdge} />
-                <span className={styles.previewProcessor}><IconFlowChartStroked /></span>
-                <span className={styles.previewEdge} />
-                <span className={styles.previewUpload}><IconCloudUploadStroked /></span>
-              </span>
-            </button>
+            <div className={`${styles.subgraphNode} ${isInnerNode(selected) ? styles.selected : ''}`}
+              aria-hidden={detailed} inert={detailed}>
+              <button type="button" className={styles.groupExpand} onClick={() => toggle(true)}
+                aria-label="展开下载 & 上传" aria-expanded={detailed} aria-controls={`${marker}-inner`}>
+                <span className={styles.groupLabel}>
+                  <span className={styles.groupIcon} aria-hidden="true"><IconLayers /></span>
+                  <span className={styles.expandIcon} aria-hidden="true"><IconExpand /></span>
+                </span>
+              </button>
+              <div className={styles.groupPreview}>
+                {shortcut('download', styles.previewDownload)}
+                <span className={styles.previewEdge} aria-hidden="true" />
+                {shortcut('segment_processor', styles.previewProcessor)}
+                <span className={styles.previewEdge} aria-hidden="true" />
+                {shortcut('upload', styles.previewUpload)}
+              </div>
+              {outline}
+            </div>
             <div id={`${marker}-inner`} className={styles.innerFlow} aria-hidden={!detailed} inert={!detailed}>
               <svg className={styles.connections} aria-hidden="true">
-                <defs>{arrow(`${marker}-inner-arrow`)}</defs>
+                <defs>{arrow(`${marker}-inner-arrow`, undefined, true)}</defs>
                 <g markerEnd={`url(#${marker}-inner-arrow)`}>
                   <path d="M 166 150 V 232" />
                   <path d="M 288 272 H 302 Q 316 272 316 258 V 124 Q 316 110 302 110 H 288" className={styles.repeatLine} />
@@ -178,7 +195,7 @@ export function ProcessingFlowEditor({ value = {}, onChange, disabled, stage: ke
             ...(!(stage.commands as readonly string[]).includes(step.cmd || '') ? [{ value: step.cmd, label: `${step.cmd}（不支持）` }] : []),
             ...stage.commands.map(cmd => ({ value: cmd, label: COMMANDS[cmd].label })),
           ]} />
-        {step.cmd === 'rm' ? <span className={styles.parameterHint}>无需参数</span>
+        {step.cmd === 'rm' ? null
           : step.cmd === 'render' ? <span className={styles.parameterHint}>在下方配置画面与弹幕</span>
           : <Input aria-label={`${stage.title}参数 ${index + 1}`} aria-describedby={`${labelId}-${index}-help`} prefix="=" className={styles.parameter} disabled={disabled}
             value={step.value ?? ''} placeholder={COMMANDS[step.cmd || '']?.placeholder} onChange={text => change(index, { ...step, value: text })} />}

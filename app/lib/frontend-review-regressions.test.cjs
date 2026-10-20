@@ -72,6 +72,6 @@ test('postprocessor conversion rejects form actions with no server HookStep cont
   const { formToHookStep, formListToHookStep } = loadTypeScript('postprocessor.ts')
   assert.equal(formToHookStep({ cmd: 'rm' }), 'rm')
   assert.deepEqual(JSON.parse(JSON.stringify(formToHookStep({ cmd: 'mv', value: 'archive/' }))), { mv: 'archive/' })
-  assert.throws(() => formToHookStep({ cmd: 'webhook', value: 'https://example.invalid/hook' }), /不支持的后处理操作/)
-  assert.throws(() => formListToHookStep([{ cmd: 'run', value: 'echo ok' }, { cmd: 'webhook', value: 'x' }]), /不支持的后处理操作/)
+  assert.deepEqual(JSON.parse(JSON.stringify(formToHookStep({ cmd: 'webhook', value: 'https://example.invalid/hook' }))), { webhook: 'https://example.invalid/hook' })
+  assert.throws(() => formListToHookStep([{ cmd: 'run', value: 'echo ok' }, { cmd: 'unknown', value: 'x' }]), /不支持的后处理操作/)
 })

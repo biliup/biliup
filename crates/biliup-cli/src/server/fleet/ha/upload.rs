@@ -190,7 +190,7 @@ where
         }
         Err(e) => {
             primary.upload_failed(key, &scrub(&format!("{e:#}")));
-            Err(e)
+            crate::server::common::webhook::on_failure(ctx, Err(e)).await
         }
     }
 }

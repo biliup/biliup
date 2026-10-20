@@ -711,6 +711,7 @@ impl Standby {
             Err(e) => {
                 let reason = events::scrub(&format!("{e:#}"));
                 self.update(|core, now| core.upload_failed(now, &id, &reason));
+                let _ = crate::server::common::webhook::on_failure::<()>(&ctx, Err(e)).await;
             }
         }
     }
