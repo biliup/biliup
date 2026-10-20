@@ -13,7 +13,12 @@ use std::time::Duration;
 
 use crate::client::StatelessClient;
 use crate::uploader::bilibili::Video;
+use crate::uploader::line::UploadObserver;
 use crate::{retry, retry_with_config};
+
+#[cfg(test)]
+#[path = "upos_observation_tests.rs"]
+mod observation_tests;
 
 pub struct Upos {
     client: StatelessClient,
@@ -53,6 +58,11 @@ pub(crate) struct UposPart {
 
 impl Upos {
     pub async fn from(client: StatelessClient, bucket: Bucket) -> Result<Self> {
+        if bucket.chunk_size == 0 {
+            return Err(Kind::Custom(
+                "UPOS chunk_size must be greater than zero".into(),
+            ));
+        }
         let url = format!(
             "https:{}/{}",
             bucket.endpoint,
@@ -98,6 +108,21 @@ impl Upos {
         F: Stream<Item = Result<(B, usize)>> + 'a,
         B: Into<Body> + Clone,
     {
+        self.upload_stream_with_observer(stream, total_size, limit, None)
+            .await
+    }
+
+    pub(crate) async fn upload_stream_with_observer<'a, F, B>(
+        &'a self,
+        stream: F,
+        total_size: u64,
+        limit: usize,
+        observer: Option<&'a dyn UploadObserver>,
+    ) -> Result<impl Stream<Item = Result<(UposPart, usize)>> + 'a>
+    where
+        F: Stream<Item = Result<(B, usize)>> + 'a,
+        B: Into<Body> + Clone,
+    {
         // let mut parts = Vec::new();
 
         // let total_size = file.metadata()?.len();
@@ -115,6 +140,9 @@ impl Upos {
             .enumerate()
             .map(move |(i, chunk)| async move {
                 let (chunk, len) = chunk?;
+                if observer.is_some_and(|observer| !observer.can_upload()) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
                 // let len = chunk.len();
                 // println!("{}", len);
                 let params = Protocol {
@@ -127,23 +155,38 @@ impl Upos {
                     start: i as u64 * chunk_size as u64,
                     end: i as u64 * chunk_size as u64 + len as u64,
                 };
-                retry(|| async {
-                    let response = client
-                        .put(url)
-                        .header(
-                            "X-Upos-Auth",
-                            header::HeaderValue::from_str(&self.bucket.auth)?,
-                        )
-                        .query(&params)
-                        .timeout(Duration::from_secs(240))
-                        .header(CONTENT_LENGTH, len)
-                        .body(chunk.clone())
-                        .send()
-                        .await?;
-                    response.error_for_status()?;
-                    Ok::<_, Kind>(())
+                let mut attempts = 0;
+                retry(|| {
+                    if attempts > 0 {
+                        if let Some(observer) = observer {
+                            observer.chunk_retry(i + 1);
+                        }
+                    }
+                    attempts += 1;
+                    async {
+                        let response = client
+                            .put(url)
+                            .header(
+                                "X-Upos-Auth",
+                                header::HeaderValue::from_str(&self.bucket.auth)?,
+                            )
+                            .query(&params)
+                            .timeout(Duration::from_secs(240))
+                            .header(CONTENT_LENGTH, len)
+                            .body(chunk.clone())
+                            .send()
+                            .await?;
+                        response.error_for_status()?;
+                        Ok::<_, Kind>(())
+                    }
                 })
                 .await?;
+
+                if observer.is_some_and(|observer| {
+                    !observer.chunk_confirmed_range(i + 1, params.start, len)
+                }) {
+                    return Err(Kind::Custom("上传已取消".into()));
+                }
 
                 Ok::<_, Kind>((
                     UposPart {
@@ -153,7 +196,9 @@ impl Upos {
                     len,
                 ))
             })
-            .buffer_unordered(limit);
+            // `buffer_unordered(0)` 永远不拉取分块、也不唤醒，上传会无声挂死；
+            // `--limit 0` / `limit=0` / `threads: 0` 都按 1 处理。
+            .buffer_unordered(limit.max(1));
         Ok(stream)
     }
 
@@ -206,26 +251,23 @@ impl Upos {
         )
         .await?;
         debug_assert_eq!(res["OK"], 1);
-        let filename = Path::new(&self.bucket.upos_uri)
-            .file_stem()
-            .unwrap()
-            .to_str()
-            .unwrap();
-
-        // B站限制分P视频标题不能超过80字符，需要截断filename字段
-        let truncated_filename = if filename.chars().count() >= 80 {
-            Video::truncate_title(filename, 80)
-        } else {
-            filename.to_string()
-        };
-
-        Ok(Video {
-            title: None,
-            filename: truncated_filename,
-            desc: "".into(),
-            cid: None,
-        })
+        uploaded_video(&self.bucket.upos_uri)
     }
+}
+
+fn uploaded_video(upos_uri: &str) -> Result<Video> {
+    let filename = Path::new(upos_uri)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .filter(|filename| !filename.is_empty())
+        .ok_or_else(|| Kind::Custom("UPOS response contains no video filename".into()))?;
+    // This is the uploaded object's key. Only the human-readable P title can be truncated.
+    Ok(Video {
+        title: None,
+        filename: filename.to_string(),
+        desc: "".into(),
+        cid: None,
+    })
 }
 
 fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
@@ -245,7 +287,93 @@ fn sorted_parts(parts: &[UposPart]) -> Result<Vec<UposPart>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UposPart, sorted_parts};
+    use super::{Bucket, Upos, UposPart, sorted_parts, uploaded_video};
+    use crate::client::StatelessClient;
+    use crate::error::Kind;
+    use bytes::Bytes;
+    use futures::TryStreamExt;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// 接受任意请求并返回 200 的假 UPOS，记录每个 PUT 的查询参数。
+    async fn fake_upos() -> (Upos, Arc<Mutex<Vec<HashMap<String, String>>>>) {
+        let puts = Arc::new(Mutex::new(Vec::new()));
+        let recorded = puts.clone();
+        let app =
+            axum::Router::new().fallback(move |uri: axum::http::Uri, _body: axum::body::Bytes| {
+                let recorded = recorded.clone();
+                async move {
+                    let query: HashMap<String, String> =
+                        serde_urlencoded::from_str(uri.query().unwrap_or_default()).unwrap();
+                    recorded.lock().unwrap().push(query);
+                    ""
+                }
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let upos = Upos {
+            client: StatelessClient::default(),
+            bucket: Bucket {
+                chunk_size: 4,
+                auth: "auth".into(),
+                endpoint: format!("//{addr}"),
+                biz_id: 1,
+                upos_uri: "upos://bucket/file.mp4".into(),
+            },
+            url: format!("http://{addr}/bucket/file.mp4"),
+            upload_id: "upload-id".into(),
+        };
+        (upos, puts)
+    }
+
+    /// 并发上限为 0（CLI `--limit 0`、stream-gears `limit=0`、服务端 `threads: 0`）时
+    /// 也必须把每个分块传完，而不是永远挂起。
+    #[tokio::test]
+    async fn zero_concurrency_limit_still_uploads_every_chunk() {
+        let (upos, puts) = fake_upos().await;
+        let chunks = vec![
+            Ok::<_, Kind>((Bytes::from_static(b"abcd"), 4)),
+            Ok((Bytes::from_static(b"ef"), 2)),
+        ];
+
+        let uploaded = tokio::time::timeout(Duration::from_secs(20), async {
+            upos.upload_stream(futures::stream::iter(chunks), 6, 0)
+                .await?
+                .try_collect::<Vec<_>>()
+                .await
+        })
+        .await
+        .expect("upload with limit 0 hung")
+        .unwrap();
+
+        let mut numbers: Vec<_> = uploaded
+            .iter()
+            .map(|(part, len)| (part.part_number, *len))
+            .collect();
+        numbers.sort();
+        assert_eq!(numbers, [(1, 4), (2, 2)]);
+
+        let mut puts = puts.lock().unwrap().clone();
+        puts.sort_by_key(|query| query["partNumber"].clone());
+        let ranges: Vec<_> = puts
+            .iter()
+            .map(|q| {
+                (
+                    q["partNumber"].as_str(),
+                    q["start"].as_str(),
+                    q["end"].as_str(),
+                    q["chunks"].as_str(),
+                    q["total"].as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            ranges,
+            [("1", "0", "4", "2", "6"), ("2", "4", "6", "2", "6")]
+        );
+    }
 
     fn part(part_number: usize) -> UposPart {
         UposPart {
@@ -270,5 +398,32 @@ mod tests {
     fn complete_parts_must_be_contiguous() {
         assert!(sorted_parts(&[part(1), part(3)]).is_err());
         assert!(sorted_parts(&[part(1), part(1)]).is_err());
+    }
+
+    #[test]
+    fn uploaded_object_key_is_preserved_even_when_longer_than_a_title() {
+        let key = "a".repeat(120);
+        let video = uploaded_video(&format!("upos://bucket/{key}.mp4")).unwrap();
+        assert_eq!(video.filename, key);
+        assert!(video.title.is_none());
+        assert!(video.cid.is_none());
+        assert!(serde_json::to_value(&video).unwrap().get("cid").is_none());
+        assert!(uploaded_video("").is_err());
+    }
+
+    #[tokio::test]
+    async fn zero_chunk_size_is_rejected_before_requesting_an_upload_id() {
+        let bucket = Bucket {
+            chunk_size: 0,
+            auth: "auth".into(),
+            endpoint: "//127.0.0.1:1".into(),
+            biz_id: 1,
+            upos_uri: "upos://bucket/file.mp4".into(),
+        };
+        let error = Upos::from(StatelessClient::default(), bucket)
+            .await
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("chunk_size"));
     }
 }

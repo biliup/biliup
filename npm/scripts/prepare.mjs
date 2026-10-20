@@ -189,6 +189,9 @@ try {
     fs.mkdirSync(path.join(pkgDir, 'bin'))
     fs.copyFileSync(bin, path.join(pkgDir, 'bin', exe))
     fs.chmodSync(path.join(pkgDir, 'bin', exe), 0o755)
+    // Rust 弹幕排版派生自 DanmakuFactory，随二进制分发来源及许可证。
+    const notices = path.join(unpack, `biliupR-${tag}-${t.build}`, 'THIRD-PARTY-NOTICES.txt')
+    if (fs.existsSync(notices)) fs.copyFileSync(notices, path.join(pkgDir, 'THIRD-PARTY-NOTICES.txt'))
     const pj = readJson(path.join(pkgDir, 'package.json'))
     pj.version = version
     writeJson(path.join(pkgDir, 'package.json'), pj)

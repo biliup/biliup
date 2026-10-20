@@ -9,6 +9,7 @@ sort_by = "weight"
 template = "docs/page.html"
 
 [extra]
+language_code = "en-US"
 lead = "Contribute to AdiDoks, improve documentation, or submit to showcase."
 toc = true
 top = false

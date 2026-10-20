@@ -2,9 +2,8 @@
 import { Spin, Typography } from '@douyinfe/semi-ui'
 import useSWR from 'swr'
 import { fetcher } from '@/app/lib/api-streamer'
-import { IconSetting } from '@douyinfe/semi-icons'
 import { JSONTree } from 'react-json-tree'
-import PageHeader from '../components/PageHeader'
+import TaskPlatformHeader from './TaskPlatformHeader'
 import dc from '@/app/ui/data-card.module.scss'
 
 interface StatusPayload {
@@ -21,9 +20,8 @@ export default function Status() {
   if (isLoading) {
     return (
       <>
-        <PageHeader
-          icon={<IconSetting size="large" />}
-          title="任务平台"
+        <TaskPlatformHeader
+          active="status"
           description="系统运行状态(调试视图)"
         />
         <div style={{ padding: '80px 0', textAlign: 'center' }}>
@@ -37,9 +35,8 @@ export default function Status() {
 
   return (
     <>
-      <PageHeader
-        icon={<IconSetting size="large" />}
-        title="任务平台"
+      <TaskPlatformHeader
+        active="status"
         description="系统运行状态(调试视图)"
       />
       <div className={dc.content}>

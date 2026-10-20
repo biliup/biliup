@@ -309,8 +309,18 @@ pub(crate) async fn unique_session_id(
     session_id: i64,
 ) -> i64 {
     use std::sync::atomic::{AtomicI64, Ordering};
-    static NEXT: AtomicI64 = AtomicI64::new(1_000_000);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    // 号按 128 步长走：改写过的行会把库里的自增序列顶到改写值之后，同一库 open_session 之后建出的
+    // 场次会拿到改写值 +1、+2……发号若是连续取值，那个 +1 恰好是下一次发号（另一条用例的场次），
+    // 进程级「正在录制」登记表就会撞键：一条用例的登记被另一条顶掉、结束时又被删掉，回看流在
+    // 中途失去登记、提前结束。步长大于一个测试库可能开出的场次上限（现有用例最多 2 个），
+    // 被顶高的号段就追不上下一个发号值。
+    const STRIDE: i64 = 128;
+    static NEXT: AtomicI64 = AtomicI64::new(0);
+    let id = 1_000_000 + NEXT.fetch_add(1, Ordering::Relaxed) * STRIDE;
+    assert!(
+        !LIVE.lock().unwrap().1.contains_key(&id),
+        "场次 id {id} 和另一条用例的登记撞了"
+    );
     sqlx::query("UPDATE stream_sessions SET id = ?1 WHERE id = ?2")
         .bind(id)
         .bind(session_id)

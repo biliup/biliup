@@ -1,0 +1,18 @@
+@import "../themes/adidoks/sass/main";
+
+// Custom styles for biliup docs
+
+// Make images responsive and constrain to content width
+.docs-content img,
+.content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem auto;
+}
+
+// Prevent images from being too large on wide screens
+article img {
+  max-width: 100%;
+  height: auto;
+}

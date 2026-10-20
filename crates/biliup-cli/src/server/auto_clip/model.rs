@@ -893,6 +893,9 @@ mod tests {
         let endpoint = Endpoint::new(format!("http://127.0.0.1:{port}/v1"), "m");
         let options = ClientOptions {
             backoff: vec![],
+            // 连接被拒绝必须早于超时暴露出来；Windows 上关闭的本地端口可能比
+            // 夹具默认的 800ms 更慢才报错。
+            chat_timeout: Duration::from_secs(10),
             ..quick()
         };
         let error = ModelClient::new(options)

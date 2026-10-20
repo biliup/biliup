@@ -225,6 +225,34 @@ async fn dot_prefixed_part_file_renamed_at_close_is_one_segment() {
     assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
 }
 
+#[tokio::test]
+async fn mosaic_quarantine_keeps_one_workbench_segment_with_an_index() {
+    let (dir, pool) = setup().await;
+    let t0 = 1_700_000_000_000;
+    let session = go_live(&pool, t0, 10).await;
+    let recorder = SessionRecorder::spawn(pool.clone(), target(session.id), None);
+    let handle = recorder.handle();
+    handle.run_started_at(t0);
+    let part = write_flv(dir.path(), "raw.flv.part");
+    handle.opened_at(&part, t0);
+    let protected = dir.path().join("raw.flv.unmasked");
+    std::fs::rename(&part, &protected).unwrap();
+    handle.closed_at(&protected, t0 + 4000, ClosedSegment::default());
+    handle.settled().await;
+    recorder.finish().await;
+    let rows = segments(&pool, session.id).await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "quarantine must not create a duplicate segment"
+    );
+    assert_eq!(rows[0].path, s(&protected));
+    assert_eq!(rows[0].end_ms, Some(FLV_DURATION_MS));
+    assert_eq!(rows[0].state, SegmentState::Finished);
+    assert!(rows[0].index_path.is_some());
+    assert!(protected.exists());
+}
+
 /// 场次有了第一个分段才登记为正在录（之前对外给出的场次 id 查不到详情），任务结束即注销。
 #[tokio::test]
 async fn a_session_is_registered_as_recording_once_it_has_a_segment() {
@@ -989,13 +1017,16 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
         path: path.to_string(),
         start_ms,
     };
-    let dir = Path::new("/rec");
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path();
+    let inside = dir.join("c.flv").to_string_lossy().into_owned();
+    let outside = dir.join("elsewhere").join("d.flv").to_string_lossy().into_owned();
     let by_name = store::segment_files_in_dir(
         vec![
             file(1, "a.flv", 0),
             file(1, "./b.ts", 60_000),
-            file(2, "/rec/c.flv", 5_000),
-            file(3, "/elsewhere/d.flv", 0),
+            file(2, &inside, 5_000),
+            file(3, &outside, 0),
             file(3, "sub/e.flv", 0),
             file(4, "a.flv", 7_000),
         ],
@@ -1013,7 +1044,7 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
         (1, 60_000)
     );
     assert_eq!(by_name["c.flv"].session_id, 2);
-    let no_cwd = store::segment_files_in_dir(vec![file(2, "/rec/c.flv", 0)], None);
+    let no_cwd = store::segment_files_in_dir(vec![file(2, &inside, 0)], None);
     assert!(no_cwd.is_empty());
 }
 

@@ -153,25 +153,26 @@ pub async fn create_marker(
                 pressed_at: body.pressed_at,
                 latency_ms: body.latency_ms,
             };
-            match markers::watched_at_ms(id, now, timing) {
-                Some(at_ms) => {
+            match markers::watched_at_in_view(&pool, id, now, timing).await {
+                Ok(Some(at_ms)) => {
                     debug!(session = id, at_ms, ?timing, "按当前画面换算标记时间");
                     at_ms
                 }
-                None if live::is_recording(id) || session.ended_at.is_none() => {
+                Ok(None) if live::is_recording(id) || session.ended_at.is_none() => {
                     return (
                         StatusCode::CONFLICT,
                         "这次录制还没开出分段，等画面开始写盘后再标记",
                     )
                         .into_response();
                 }
-                None => {
+                Ok(None) => {
                     return (
                         StatusCode::CONFLICT,
                         "这一场没有在录，不能按当前画面标记；请到剪辑台按场次回看，在回看里按时间标记",
                     )
                         .into_response();
                 }
+                Err(e) => return internal(e),
             }
         }
     };
@@ -255,6 +256,15 @@ pub async fn update_marker(
         Ok(changes) => changes,
         Err(message) => return bad_request(message),
     };
+    if let Some(at_ms) = changes.at_ms {
+        match markers::owner_in_view(&pool, id, mid).await {
+            Ok(Some((_, offset_ms))) if at_ms < offset_ms => {
+                return bad_request("标记不能移到来源场次开始之前".into());
+            }
+            Ok(_) => {}
+            Err(e) => return internal(e),
+        }
+    }
     match markers::update(&pool, id, mid, &changes).await {
         Ok(Some(marker)) => Json(marker).into_response(),
         Ok(None) => marker_not_found(),
@@ -592,6 +602,103 @@ mod tests {
         )
         .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn group_routes_translate_inherited_markers_and_live_creation() {
+        let f = fixture().await;
+        let operator = login(&f.app, "op", "operator-password").await;
+        let pool = f.backend.pool();
+        let group: i64 = sqlx::query_scalar(
+            "INSERT INTO stream_sessions(name,url,title,date,live_cover_path,started_at,kind)
+             VALUES ('a','https://a','merged','2026-09-24 00:00:00','',1,'group') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        for (ordinal, source, offset) in [(0, f.ended, 0), (1, f.live, 60_000)] {
+            sqlx::query(
+                "INSERT INTO session_group_members(group_session_id,source_session_id,ordinal,offset_ms)
+                 VALUES (?,?,?,?)",
+            )
+            .bind(group)
+            .bind(source)
+            .bind(ordinal)
+            .bind(offset)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        let source_list = format!("/v1/sessions/{}/markers", f.live);
+        let original = json_of(
+            call(
+                &f.app,
+                Some(&operator),
+                "POST",
+                &source_list,
+                Some(json!({"at_ms":2000})),
+            )
+            .await,
+            StatusCode::CREATED,
+        )
+        .await;
+        let list = format!("/v1/sessions/{group}/markers");
+        let one = format!("{list}/{}", original["id"]);
+        let inherited = json_of(
+            call(&f.app, Some(&operator), "GET", &list, None).await,
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(inherited["markers"][0]["at_ms"], 62_000);
+        assert_eq!(inherited["markers"][0]["session_id"], f.live);
+        assert_eq!(inherited["markers"][0]["source_session_id"], f.live);
+        assert_eq!(inherited["markers"][0]["view_session_id"], group);
+        assert_eq!(
+            call(
+                &f.app,
+                Some(&operator),
+                "PATCH",
+                &one,
+                Some(json!({"at_ms":59_999}))
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+        let changed = json_of(
+            call(
+                &f.app,
+                Some(&operator),
+                "PATCH",
+                &one,
+                Some(json!({"at_ms":64_000})),
+            )
+            .await,
+            StatusCode::OK,
+        )
+        .await;
+        assert_eq!(changed["at_ms"], 64_000);
+        let source = markers::list(pool, f.live).await.unwrap();
+        assert_eq!(source[0].at_ms, 4_000);
+        assert_eq!(
+            call(&f.app, Some(&operator), "DELETE", &one, None)
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+
+        f.guard.anchor(30_000, recorder::now_ms());
+        let current = json_of(
+            call(&f.app, Some(&operator), "POST", &list, Some(json!({}))).await,
+            StatusCode::CREATED,
+        )
+        .await;
+        let at = current["at_ms"].as_i64().unwrap();
+        assert!(
+            (90_000..91_000).contains(&at),
+            "来源实时锚点平移，实际 {at}"
+        );
+        assert_eq!(current["session_id"], group, "新标记归属合并场次");
     }
 
     #[tokio::test]

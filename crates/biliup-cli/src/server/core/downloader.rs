@@ -222,6 +222,9 @@ pub struct SegmentInfo {
     pub duration_secs: Option<f64>,
     /// 分段文件的字节数。下载器报告了才有，目前只有 mesio
     pub size_bytes: Option<u64>,
+    /// Completed masking must wait for the workbench/index writer to finish
+    /// consuming the original file before replacing it.
+    pub(crate) ready: Option<SegmentReady>,
     // /// 分段开始时间戳
     // start_time: std::time::SystemTime,
     // /// 分段结束时间戳
@@ -242,6 +245,7 @@ impl SegmentInfo {
             segment_index,
             duration_secs: None,
             size_bytes: None,
+            ready: None,
         }
     }
 
@@ -250,6 +254,17 @@ impl SegmentInfo {
         self.duration_secs = Some(duration_secs);
         self.size_bytes = Some(size_bytes);
         self
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct SegmentReady(
+    pub futures::future::Shared<futures::future::BoxFuture<'static, ()>>,
+);
+
+impl std::fmt::Debug for SegmentReady {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SegmentReady")
     }
 }
 
@@ -352,25 +367,6 @@ impl DanmakuClient for RustDanmakuClient {
     }
 }
 
-/// 解析时长字符串 "HH:MM:SS" 为秒数
-///
-/// # 参数
-/// * `duration` - 时长字符串，格式为"HH:MM:SS"
-///
-/// # 返回
-/// 返回总秒数
-fn parse_duration(duration: &str) -> u64 {
-    let parts: Vec<&str> = duration.split(':').collect();
-    if parts.len() == 3 {
-        let hours: u64 = parts[0].parse().unwrap_or(0);
-        let minutes: u64 = parts[1].parse().unwrap_or(0);
-        let seconds: u64 = parts[2].parse().unwrap_or(0);
-        hours * 3600 + minutes * 60 + seconds
-    } else {
-        0
-    }
-}
-
 // 使用示例
 // #[tokio::main]
 // async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -435,6 +431,13 @@ mod tests {
         assert_eq!(limit("01:00:00"), secs(3600));
         assert_eq!(limit("30:00"), secs(1800));
         assert_eq!(limit("3600"), secs(3600));
+        assert_eq!(limit("00:07:30"), secs(450));
+        assert_eq!(limit("7:30"), secs(450));
+        assert_eq!(limit("450"), secs(450));
+        assert_eq!(
+            limit("00:07:30.5"),
+            Some(std::time::Duration::from_millis(450500))
+        );
         assert_eq!(limit("00:00:00"), None);
         assert_eq!(limit("abc"), None);
         assert_eq!(DownloadConfig::default().segment_time_limit(), None);

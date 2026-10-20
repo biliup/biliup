@@ -169,7 +169,7 @@ class BiliWeb:
                     self.desc = self.desc.replace(
                         "@credit", "@"+credit["username"]+"  ", 1)
                     desc_v2_tmp = desc_v2_tmp[num+7:]
-                except IndexError:
+                except ValueError:
                     logger.error('简介中的@credit占位符少于credits的数量,替换失败')
             desc_v2.append({
                 "raw_text": " "+desc_v2_tmp,
@@ -654,6 +654,8 @@ class BiliBili:
 
     @staticmethod
     async def _upload(params, file, chunk_size, afunc, tasks=3):
+        if tasks < 1 or chunk_size < 1:
+            raise ValueError("tasks and chunk_size must be positive")
         params['chunk'] = -1
 
         async def upload_chunk():
@@ -678,6 +680,8 @@ class BiliBili:
                             i + 1,
                             type(error).__name__,
                         )
+                        if i == 9:
+                            raise RuntimeError(f"chunk {clone['chunk']} failed after 10 attempts") from error
 
         async with aiohttp.ClientSession() as session:
             await asyncio.gather(*[upload_chunk() for _ in range(tasks)])
@@ -723,15 +727,17 @@ class BiliBili:
                 raise RuntimeError("Access token is required, but account and access_token does not exist!")
             self.login_by_password(**self.account)
             self.store()
-        while True:
+        for attempt in range(2):
             post_data = asdict(self.video)
             if post_data.get('tid_v2') is None:
                 post_data.pop('tid_v2', None)
             ret = self.__session.post(f'http://member.bilibili.com/x/vu/client/add?access_key={self.access_token}',
                                       timeout=5, json=post_data).json()
-            if ret['code'] == -101:
+            if ret['code'] == -101 and attempt == 0:
                 logger.info("客户端登录状态失效，正在刷新凭据: %s", _safe_response_status(ret))
-                self.login_by_password(**config['user']['account'])
+                if self.account is None:
+                    raise RuntimeError("Access token expired and no account is available to refresh it")
+                self.login_by_password(**self.account)
                 self.store()
                 continue
             return ret

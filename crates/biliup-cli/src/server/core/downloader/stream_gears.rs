@@ -93,6 +93,7 @@ impl StreamGears {
                     segment_index: i,
                     duration_secs: None,
                     size_bytes: None,
+                    ready: None,
                 };
                 (callback.lock().unwrap())(SegmentEvent::Segment(event));
 
@@ -118,15 +119,21 @@ impl StreamGears {
             }
             Err(e) => {
                 error!("{e}");
-                // HLS流下载
+                // HLS 流下载：容器（TS / fMP4）由播放列表决定，扩展名与预览格式都在
+                // `hls::download` 里按容器定；这里给的 "ts" 只是解析播放列表之前的默认值
                 let file = LifecycleFile::with_hook(&file_name, "ts", hook)
                     .with_start_hook(start_hook)
                     .with_counter(download_config.bytes_written.clone())
                     .with_index_tap(download_config.index_tap.clone());
-                let preview = download_config.preview.attach(PreviewFormat::MpegTs);
-                hls::download(&url, &client, file, segment.clone(), Some(preview))
-                    .await
-                    .change_context(AppError::Unknown)?;
+                hls::download(
+                    &url,
+                    &client,
+                    file,
+                    segment.clone(),
+                    Some(&download_config.preview),
+                )
+                .await
+                .change_context(AppError::Unknown)?;
             }
         }
         Ok(DownloadStatus::StreamEnded)

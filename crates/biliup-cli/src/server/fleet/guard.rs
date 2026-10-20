@@ -101,7 +101,7 @@ impl Managed {
 
     fn config_message(&self, keys: &[String]) -> String {
         format!(
-            "配置由控制面 {} 管理，这些项请到控制面的「节点」页修改：{}。Cookie、密码等本机密钥不随控制面下发，仍可在本机保存",
+            "配置由控制面 {} 管理，这些项请到控制面的「任务平台 › 节点管理」页修改：{}。Cookie、密码等本机密钥不随控制面下发，仍可在本机保存",
             self.controller,
             keys.join("、")
         )
@@ -109,7 +109,7 @@ impl Managed {
 
     fn message(&self) -> String {
         if self.local {
-            return "这是分派到本机的 Fleet 房间，请到「节点 › 房间」修改".to_string();
+            return "这是分派到本机的 Fleet 房间，请到「任务平台 › 节点管理 › 房间」修改".to_string();
         }
         format!(
             "由控制面 {} 管理，请到控制面修改；本机只能查看",
@@ -307,11 +307,11 @@ mod tests {
         let (code, _) = status(&app, Method::PUT, "/v1/streamers/3/pause", "").await;
         assert_eq!(code, StatusCode::CONFLICT);
 
-        // 控制面自己的「本机」节点：提示去「节点 › 房间」改
+        // 控制面自己的「本机」节点：提示去任务平台的节点管理里改
         handle.write().unwrap().as_mut().unwrap().local = true;
         let (code, body) = status(&app, Method::PUT, "/v1/streamers", r#"{"id":3}"#).await;
         assert_eq!(code, StatusCode::CONFLICT);
-        assert!(body.contains("「节点 › 房间」"), "{body}");
+        assert!(body.contains("「任务平台 › 节点管理 › 房间」"), "{body}");
         assert_eq!(
             handle.read().unwrap().as_ref().unwrap().view()["local"],
             true

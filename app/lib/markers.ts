@@ -1,10 +1,13 @@
 import { mutate } from 'swr'
-import { API_BASE, handleResponse } from './api-streamer'
+import { apiFetch, handleResponse } from './api-streamer'
 
 /** GET / POST /v1/sessions/{id}/markers 返回的标记 */
 export interface Marker {
   id: number
   session_id: number
+  /** 所属场次不变；合并工作台返回的是视图时间，更新时使用这个路由。 */
+  view_session_id?: number | null
+  source_session_id?: number | null
   /** 场次时间轴上的位置（毫秒） */
   at_ms: number
   label: string
@@ -19,11 +22,23 @@ export interface Marker {
 
 export const markersUrl = (sessionId: number) => `/v1/sessions/${sessionId}/markers`
 
+/** 相邻小旗共享一个入口，列表保留所有重合标记的鼠标和键盘访问。 */
+export function markerClusters(markers: Marker[], from: number, to: number): Marker[][] {
+  const clusters: Marker[][] = []
+  const distance = Math.max(1, to - from) * 0.018
+  for (const marker of markers.filter(marker => marker.at_ms >= from && marker.at_ms <= to).sort((a, b) => a.at_ms - b.at_ms || a.id - b.id)) {
+    const previous = clusters.at(-1)
+    if (previous && marker.at_ms - previous[0].at_ms < distance) previous.push(marker)
+    else clusters.push([marker])
+  }
+  return clusters
+}
+
 /** 401 / 403：`handleResponse` 已经跳登录页或提示过，调用方不必再弹一次 */
 export class ReportedError extends Error {}
 
 async function send(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(API_BASE + url, init)
+  const res = await apiFetch(url, init)
   try {
     return await handleResponse(res)
   } catch (e) {
@@ -73,15 +88,17 @@ export async function createMarkerAt(sessionId: number, atMs: number): Promise<M
   return marker
 }
 
-export async function renameMarker(sessionId: number, id: number, label: string): Promise<Marker> {
+export async function renameMarker(sessionId: number, id: number, label: string, ownerSessionId = sessionId): Promise<Marker> {
   const marker = await sendJson<Marker>(`${markersUrl(sessionId)}/${id}`, 'PATCH', { label })
   refreshMarkers(sessionId, false)
+  if (ownerSessionId !== sessionId) refreshMarkers(ownerSessionId, false)
   return marker
 }
 
-export async function deleteMarker(sessionId: number, id: number): Promise<void> {
+export async function deleteMarker(sessionId: number, id: number, ownerSessionId = sessionId): Promise<void> {
   await send(`${markersUrl(sessionId)}/${id}`, { method: 'DELETE' })
   refreshMarkers(sessionId)
+  if (ownerSessionId !== sessionId) refreshMarkers(ownerSessionId, false)
 }
 
 /**

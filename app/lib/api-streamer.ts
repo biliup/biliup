@@ -4,6 +4,10 @@ import { mutate } from 'swr';
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_SERVER ?? '';
 
+/** 共享的 API 请求，开发时跨源访问后端也携带并接收登录会话 Cookie。 */
+export const apiFetch = (input: RequestInfo | URL, init?: RequestInit) =>
+	fetch(API_BASE + input, { credentials: 'include', ...init });
+
 /** 当前用户与权限点（见 use-me.ts）。放在这里是为了让统一的响应处理能刷新它，又不形成循环引用。 */
 export const ME_KEY = '/v1/me';
 
@@ -15,7 +19,7 @@ export function revalidateMe() {
 	mutate(ME_KEY).catch(() => undefined);
 }
 export async function sendRequest<T>(url: string, { arg }: { arg: T }) {
-	const res = await fetch(API_BASE + url, {
+	const res = await apiFetch(url, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(arg),
@@ -25,25 +29,25 @@ export async function sendRequest<T>(url: string, { arg }: { arg: T }) {
 }
 
 export const fetcher = async (input: RequestInfo | URL, init?: RequestInit) => {
-	const res = await fetch(API_BASE + input, init);
+	const res = await apiFetch(input, init);
 	await handleResponse(res);
 	return res.json();
 };
 
 export const proxy = async (input: RequestInfo | URL, init?: RequestInit) => {
-	const res = await fetch(API_BASE + input, init);
+	const res = await apiFetch(input, init);
 	await handleResponse(res);
 	return res;
 };
 
 export async function requestDelete<T>(url: string, { arg }: { arg: T }) {
-	const res = await fetch(`${API_BASE}${url}/${arg}`, { method: 'DELETE' });
+	const res = await apiFetch(`${url}/${arg}`, { method: 'DELETE' });
 	await handleResponse(res);
 	return res;
 }
 
 export async function put<T>(url: string, { arg }: { arg: T }) {
-	const res = await fetch(`${API_BASE}${url}`, {
+	const res = await apiFetch(url, {
 		method: 'PUT',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify(arg),
@@ -150,6 +154,25 @@ export interface DirectCapability {
 	reason: string | null;
 }
 
+/** 马赛克区域配置 */
+export interface MosaicRegion {
+	id: string;
+	x: number;      // 归一化坐标 0-1
+	y: number;
+	width: number;
+	height: number;
+	effectType: 'mosaic' | 'blur' | 'solid';
+	strength: number; // 马赛克块大小 (4-64) 或模糊半径 (1-100)
+	color?: string | null;   // 纯色遮挡的颜色
+}
+
+/** 完整的马赛克配置 */
+export interface MosaicConfig {
+	enabled: boolean;
+	regions: MosaicRegion[];
+	mode?: string | null; // 后端保留的可选处理模式
+}
+
 /** GET /v1/streamers/{id}/live-url：正在录制的那条流的 CDN 直链 */
 export interface LiveUrlInfo {
 	url: string;
@@ -197,7 +220,7 @@ export interface LiveStreamerEntity {
     time_range?: string | Date[];
     excluded_keywords?: string[];
 	preprocessor?: Record<'run', string>[];
-	segment_processor?: Record<'run', string>[];
+	segment_processor?: unknown[];
 	downloaded_processor?: Record<'run', string>[];
 	postprocessor?: (Record<'run' | 'mv', string> | 'rm')[];
 	opt_args?: string[];

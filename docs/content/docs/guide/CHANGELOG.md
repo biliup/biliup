@@ -2,7 +2,7 @@
 title = "更新日志"
 description = "CHANGELOG"
 date = 2021-05-01T08:20:00+00:00
-updated = 2021-05-01T08:20:00+00:00
+updated = 2026-10-09T00:00:00+00:00
 draft = false
 weight = 20
 sort_by = "weight"
@@ -20,6 +20,10 @@ top = false
 - ⚠️需要手动操作的更新信息
 
 ## 未发布
+- 💡斗鱼 Web 登录 Cookie 支持使用 `LTP0` 与配套 `dy_did` 自动续期，保存调度状态并更新运行中的请求；房间配置可明确继承全局登录、使用独立 Cookie 或匿名取流。说明见[斗鱼登录、Cookie 续期与画质设置](@/docs/tutorials/douyu-cookie-guide.md)。
+- 💡增加画面遮挡编辑器：在真实直播截帧上圈选马赛克、模糊或纯色区域，分段关闭后处理；待遮挡原片不会进入投稿或切片导出。分段时长支持预设、自定义和主播级继承／关闭。
+- 🔧必要遮挡在碎片过滤之前执行，工作台引用而保留的小分段也会完成遮挡。默认不自动合并本地分段；快速合并与后处理脚本说明见[录制分段、画面遮挡与本地合并](@/docs/tutorials/recording-and-masking.md)。
+- 🔧落盘 FLV 分段自动检查 AAC 音频包时间戳；发现重复或回退时修复并重新编码音频为 192 kbps AAC，正常音频保持复制。遮挡任务复用同一修复步骤；输出需通过严格递增校验，失败保留原片且不进入投稿或后处理。已有录像与边录边传不自动追溯处理，说明见[FLV 音频时间戳检查与自动修复](@/docs/tutorials/recording-and-masking.md#flv-yin-pin-shi-jian-chuo-jian-cha-yu-zi-dong-xiu-fu)。
 - ⚠️没有配置下载插件（`downloader`）的主播，默认下载插件从 stream-gears 改为 mesio。显式配置了 `downloader` 的不受影响；想保持原样，把 `downloader` 设为 `stream-gears` 即可。mesio 写出的 FLV 带关键帧索引（`onMetaData.keyframes`）、每段时间戳从 0 开始，播放器可以拖动进度条；能录 HEVC / Enhanced-FLV 和 B 站 `hls_fmp4`。行为上的变化：
   - 不转封装，容器跟随源站：FLV 流存 `.flv`，HLS TS 存 `.ts`，HLS fMP4（如 B 站 `hls_fmp4`）存 `.mp4`；配置的 `format` 与实际容器不一致时只在日志里提示。
   - 录制中直接写最终文件名，不再先写 `.part` 再改名。
@@ -29,6 +33,11 @@ top = false
 - 🔧`segment_time` 在 stream-gears、mesio、ffmpeg 下按同一种写法解析：`HH:MM:SS`、`MM:SS` 或秒数（如 `3600`），和 ffmpeg 一致。以前 stream-gears 遇到 `3600`、`01:00` 这类写法下载任务会 panic 中断，mesio 会静默当成不分段；现在都能正确分段，确实写错的值会在日志里提示并按不分段录制。
 - 💡WebUI 的「视频分段大小（file_size）」改成数值 + 单位（MB / GB）输入，按 1024 进制换算（1 GB = 1024 MB，与 Windows 资源管理器一致），配置文件里存的仍是字节数，旧配置原样可读。
 - 🔧主播「配置覆写」里把已有的 `file_size` 清空后保存，现在会真正写成「不按大小分段」；以前清空后保存，原来的值原样留着。
+- 🔧请求 MP4 输出（`format: mp4`）时，未配置下载插件或配置为 stream-gears 的主播改用 ffmpeg 真正转封装，避免只改扩展名得到无法播放的文件；边录边传与显式 mesio 保持原样。
+- ⚠️未完成的录像一律保留、不删除：断流、出错、暂停或删除房间、退出程序时，已写下的 FLV / TS 照常作为分段保存并上传；ffmpeg 录 MP4 被中止（未写完 moov、无法播放）时不进入上传流程，但 `.mp4.part` 文件留在录像目录里供手动处理。
+- 🔧斗鱼 CDN 切换时录制不再中断：时间戳归 0（`Non-monotonous DTS ... previous: 4877, current: 0`）按音频、视频轨道分别平移接上，不再因音视频交错把时间轴越拉越长；切换瞬间的空 tag / 残缺 tag 跳过，重发的 FLV 文件头跳过，连接在 tag 中间断开按正常断流结束。一个有效 tag 都还没读到时仍按原样报错。
+- 🔧HLS 清单出现媒体序号跳号时自动切段，避免同一文件内时间戳跳变。
+- 🔧抖音弹幕 PushFrame、gzip、Response 解码失败改为显式错误；损坏的聊天消息跳过并告警，重复解码错误限频告警。
 
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)

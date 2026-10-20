@@ -46,7 +46,7 @@ fn internal(error: impl std::fmt::Debug) -> Response {
 }
 
 /// 权限点由授权决策点算出（含环境属性），前端只按它显隐，不再自己推导。
-/// `fleet_controller`：本进程以 `--controller` 运行，前端据此显示「节点」菜单。
+/// `fleet_controller`：本进程提供控制面能力，前端据此显示任务平台里的节点管理。
 /// `fleet_node`：只有被控制面托管的节点才有，前端据此把托管的主播与模板显示为只读。
 /// `fleet_revoked`：被控制面移除过、原受管主播还暂停着等确认时才有，前端据此提示并给恢复入口。
 fn me_body(username: Option<&str>, subject: Subject, fleet: Option<FleetCapability>) -> Response {
@@ -521,5 +521,46 @@ mod tests {
         let (status, _, _) = call(&app, Some(&second), "GET", "/v1/me", None).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED, "其它会话下线");
         login(&app, "biliup", "new-password").await;
+    }
+
+    #[tokio::test]
+    async fn re_enabling_a_user_does_not_restore_their_old_sessions() {
+        let (_dir, app) = app().await;
+        let (_, admin, _) = call(
+            &app,
+            None,
+            "POST",
+            "/v1/users/register",
+            Some(json!({ "username": "boss", "password": "admin-password" })),
+        )
+        .await;
+        let admin = admin.unwrap();
+        let (status, _, viewer) = call(
+            &app,
+            Some(&admin),
+            "POST",
+            "/v1/web-users",
+            Some(json!({ "username": "viewer", "password": "viewer-password", "role": "viewer" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let cookie = login(&app, "viewer", "viewer-password").await;
+        let uri = format!("/v1/web-users/{}", viewer["id"].as_i64().unwrap());
+        for disabled in [true, false] {
+            let (status, _, _) = call(
+                &app,
+                Some(&admin),
+                "PUT",
+                &uri,
+                Some(json!({ "disabled": disabled })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+        }
+        // The user's browser remained idle throughout disable/re-enable, so it
+        // never had an opportunity to clear its session while disabled.
+        let (status, _, _) = call(&app, Some(&cookie), "GET", "/v1/me", None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        login(&app, "viewer", "viewer-password").await;
     }
 }

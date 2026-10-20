@@ -1,5 +1,6 @@
 /// 业务路由的访问控制（登录 + 权限点）
 pub mod access;
+pub mod activity_events;
 /// 认证相关API
 pub mod auth;
 /// 自动切片的连通性测试与状态
@@ -14,9 +15,12 @@ pub mod clip_suggestions;
 pub mod clips;
 /// 弹幕密度曲线（回看页用）
 pub mod danmaku_density;
+/// 斗鱼Cookie验证
+pub mod douyu_validation;
 /// 通用API端点
 pub mod endpoints;
-/// 控制面的节点与加入票据（只在 `--controller` 时注册）
+pub mod files;
+/// 控制面的节点与加入票据（默认控制面角色下注册）
 pub mod fleet;
 pub mod fleet_alerts;
 pub mod fleet_config;
@@ -32,8 +36,12 @@ pub mod live_preview;
 pub mod live_rates;
 /// 切片工作台的标记
 pub mod markers;
+pub mod mosaic_frame;
 /// 非超管的配置与主播数据脱敏
 pub mod redact;
+/// 录后画面、弹幕合成与遮挡图片资产
+pub mod renders;
+pub mod session_groups;
 /// 「保留这场」：改场次的保留期
 pub mod session_retention;
 pub mod sessions;
@@ -41,6 +49,7 @@ pub mod sessions;
 pub mod spa;
 /// 控制台首页的系统状态（CPU / 内存 / 磁盘 / 网速）
 pub mod system_stats;
+pub mod upload_queue;
 /// Web 用户管理与 /v1/me
 pub mod web_users;
 pub mod ws;

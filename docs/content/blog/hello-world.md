@@ -10,6 +10,7 @@ template = "blog/page.html"
 authors = ["Rustaceans"]
 
 [extra]
+language_code = "en-US"
 lead = "This is the source code of the traditional <b>Hello World</b> program."
 +++
 

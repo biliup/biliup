@@ -10,6 +10,7 @@ import {
   HA_SINCE,
   PAIR_SINCE,
   candidatesKey,
+  candidatesReadable,
   designate,
   joinPair,
   paramsIssue,
@@ -58,7 +59,7 @@ export default function PairDialog({
   const [draft, setDraft] = useState<Draft | null>(null)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<Result | null>(null)
-  const { data, error, isLoading } = useSWR<Candidates>(
+  const { data, error, isLoading, mutate: refreshCandidates } = useSWR<Candidates>(
     standby !== null && localNode !== null ? candidatesKey(standby) : null,
     fetcher,
     { revalidateOnFocus: false },
@@ -72,18 +73,30 @@ export default function PairDialog({
         ? draft
         : { standby, primary: defaultPicked(data?.primary), node: defaultPicked(data?.standby) }
   const issue = paramsIssue(params)
-  const blocked = localNode === null || standby === null || !!issue || (!data && !error)
+  // A candidate error must fail closed.  The server treats an omitted `adopt`
+  // field as "adopt every eligible local row" for a first pairing, which is
+  // unsafe when the rows were not actually shown to the administrator.
+  const candidateError = !candidatesReadable(data, error, standby ?? undefined, localNode ?? undefined)
+  const candidateErrorMessage = error
+    ? errorMessage(error)
+    : data?.standby?.error ??
+      data?.primary?.error ??
+      (!data?.standby || !data?.primary
+        ? '候选清单不完整，重试读取后才能配对'
+        : '候选清单与当前选择不匹配，请重试读取')
+  const blocked = localNode === null || standby === null || !!issue || candidateError
 
   const submit = async () => {
     if (busy || blocked || standby === null || !picks) return
     setBusy(true)
     try {
-      const readable = data?.standby && !data.standby.error
       const res = await designate({
         standby,
         mode,
         params,
-        adopt: readable ? picks.node : undefined,
+        // Always send the explicit choices.  `undefined` is omitted by
+        // JSON.stringify and means "select all" on the backend.
+        adopt: picks.node,
       })
       let primary: RowsView | null = null
       if (pickedCount(picks.primary) > 0) {
@@ -144,7 +157,7 @@ export default function PairDialog({
             type="warning"
             fullMode={false}
             closeIcon={null}
-            description="主机是控制面这台的「本机」节点：先在「节点」页启用「本机」，再来配对"
+            description="主机是控制面这台的「本机」节点：先在「任务平台 › 节点管理」页启用「本机」，再来配对"
           />
         ) : null}
         <div className={styles.field}>
@@ -200,8 +213,13 @@ export default function PairDialog({
               <div className={pageStyles.dialogCenter}>
                 <Spin />
               </div>
-            ) : error ? (
-              <div className={styles.pickError}>读不到清单：{errorMessage(error)}</div>
+            ) : candidateError ? (
+              <div className={styles.pickError}>
+                读不到完整清单：{candidateErrorMessage}{' '}
+                <Button size="small" theme="borderless" disabled={busy} onClick={() => refreshCandidates()}>
+                  重试读取
+                </Button>
+              </div>
             ) : picks ? (
               <>
                 <RowPicker

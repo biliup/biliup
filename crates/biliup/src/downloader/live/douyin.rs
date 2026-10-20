@@ -985,6 +985,64 @@ mod tests {
     use super::*;
     use crate::downloader::live::{LiveCredentials, LiveOptions, LiveRequest, LiveStatus};
 
+    fn live<'a>(quality: &str, protocol: &str, cache: &'a Mutex<Option<String>>) -> DouyinLive<'a> {
+        DouyinLive {
+            client: Client::new(),
+            url: format!("{DOUYIN_LIVE_URL}123"),
+            name: "fixture".into(),
+            douyin_quality: quality.into(),
+            douyin_protocol: protocol.into(),
+            douyin_double_screen: false,
+            douyin_true_origin: false,
+            cookie: String::new(),
+            douyin_danmaku: false,
+            web_rid: None,
+            room_id: None,
+            sec_uid: None,
+            ttwid_cache: cache,
+        }
+    }
+
+    fn room(stream_data: &str) -> serde_json::Value {
+        serde_json::json!({
+            "stream_url": {
+                "live_core_sdk_data": {
+                    "pull_data": {"stream_data": stream_data}
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn stream_selection_falls_back_to_an_available_quality() {
+        let cache = Mutex::new(None);
+        let live = live("origin", "flv", &cache);
+        let room = room(r#"{"data":{"uhd":{"main":{"flv":"http://cdn.example/uhd.flv"}}}}"#);
+        assert_eq!(
+            live.select_stream_url(&room).unwrap(),
+            "https://cdn.example/uhd.flv"
+        );
+    }
+
+    #[test]
+    fn replay_streams_are_rejected_instead_of_recorded() {
+        let cache = Mutex::new(None);
+        let live = live("origin", "flv", &cache);
+        let room = room(
+            r#"{"data":{"origin":{"main":{"flv":"https://cdn.example/live.flv?rtm_expr_tag=reflow_room_info"}}}}"#,
+        );
+        assert!(live.select_stream_url(&room).is_err());
+    }
+
+    #[test]
+    fn stream_headers_always_include_required_referer() {
+        let cache = Mutex::new(None);
+        let live = live("origin", "flv", &cache);
+        let headers = live.stream_headers();
+        assert_eq!(headers.get("referer"), Some(&DOUYIN_LIVE_URL.to_string()));
+        assert!(headers.contains_key("user-agent"));
+    }
+
     #[test]
     fn web_rid_from_www_live_path_skips_live_prefix() {
         assert_eq!(

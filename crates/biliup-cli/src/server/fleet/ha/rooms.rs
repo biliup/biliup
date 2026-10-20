@@ -187,6 +187,10 @@ pub fn plan(book: &mut Book, pair: &PairState, fleet: &FleetState, primary: Side
             };
             record.fleet = Some(reference.id);
             let newer = record.stamp.beats(&reference.stamp, primary);
+            let fresh = reference.stamp.beats(&record.stamp, primary);
+            if room && fresh {
+                plan.fresh_rooms.insert(reference.id);
+            }
             let adopt = record.local.filter(|_| !record.deleted()).filter(|local| {
                 let current = if room {
                     fleet.rooms.get(&reference.id).map(|r| r.local_id)
@@ -544,6 +548,7 @@ pub async fn record_applied(
             };
             applied = Some((local, hash));
         }
+        let previous = file.book.get(&key).and_then(|record| record.local);
         file.book.put(
             &key,
             reference.stamp,
@@ -556,7 +561,9 @@ pub async fn record_applied(
         );
         if let Some(record) = file.book.get_mut(&key) {
             record.fleet = Some(reference.id);
-            record.local = applied.map(|(local, _)| local);
+            // 本地行读不出来多半是本机刚删了它、扫描还没跟上：别把本机行号抹掉，
+            // 留着让扫描还能认出这次删除，否则删除永远不会排进队列
+            record.local = applied.map(|(local, _)| local).or(previous);
         }
     }
     for gone in &desired.pair.gone {

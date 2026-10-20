@@ -10,7 +10,7 @@ import styles from './page.module.scss'
 /**
  * 只在 Fleet 控制面上有意义的页面（投稿模板、Fleet 配置）先过这一道：
  * 本机不是控制面、或当前账号没有 `perm` 时直接说明原因，不去请求数据，也不给出可编辑的表单。
- * 侧栏的「节点」项按 `streamer.view` 放行、`controllerOnly` 只管显隐，手输地址进来的都靠这里挡。
+ * 任务平台的节点管理按 `streamer.view` 放行，手输子页面地址仍需经过这里校验。
  */
 export default function FleetPageGate({
   title,
@@ -45,7 +45,7 @@ export default function FleetPageGate({
       <Empty
         image={<IconServer size="extra-large" style={{ color: 'var(--semi-color-text-3)' }} />}
         title="本机不是控制面"
-        description="用 biliup server --controller 启动后，才能在这里管理 Fleet 的投稿模板与配置"
+        description="请到控制面的任务平台管理投稿模板与配置；独立运行的 biliup 默认开启控制面。"
       />
     )
   } else {

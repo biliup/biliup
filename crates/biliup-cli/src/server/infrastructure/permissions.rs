@@ -174,6 +174,38 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/clips/{cid}/cover" | "/v1/sessions/{id}/thumb" | "/v1/publish-jobs" if get => FileView,
         "/v1/clips/{cid}/cover" if method == Method::PUT || method == Method::DELETE => ClipEdit,
+        "/v1/sessions/{id}/render-recipe"
+        | "/v1/sessions/{id}/render-settings"
+        | "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/renders"
+        | "/v1/render-gpus"
+        | "/v1/render-assets/{aid}"
+        | "/v1/renders/{jid}"
+        | "/v1/renders/{jid}/download"
+        | "/v1/render-fonts/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/sessions/{id}/render-recipe" | "/v1/sessions/{id}/render-settings"
+            if method == Method::PUT =>
+        {
+            ClipEdit
+        }
+        "/v1/sessions/{id}/render-assets"
+        | "/v1/sessions/{id}/renders"
+        | "/v1/renders/{jid}/cancel"
+        | "/v1/renders/{jid}/retry"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
+        "/v1/render-assets/{aid}" if method == Method::DELETE => ClipEdit,
+        "/v1/renders/{jid}" if method == Method::DELETE => ClipEdit,
+        // Preview converts a recipe snapshot but does not persist a change.
+        "/v1/sessions/{id}/render-preview" if method == Method::POST => FileView,
+        "/v1/render-tools" | "/v1/render-capabilities" if get => StreamerView,
         "/v1/clips/{cid}/publish"
         | "/v1/publish-jobs"
         | "/v1/publish-jobs/preview"
@@ -186,6 +218,10 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/publish-jobs/{jid}" if method == Method::DELETE => UploadSubmit,
         "/v1/configuration" if get => ConfigView,
         "/v1/configuration" if method == Method::PUT => ConfigEdit,
+        "/v1/douyu/validate-cookie" if method == Method::POST => ConfigEdit,
+        "/v1/douyu/auth/status" if get => ConfigEdit,
+        "/v1/streamers/{id}/mosaic-frame" if get => StreamerHooks,
+        "/v1/douyu/auth/refresh" if method == Method::POST => ConfigEdit,
         // 连通性测试会用已保存的 key 调外部接口，归配置编辑；状态不含 key 和地址
         "/v1/auto-clip/test" if method == Method::POST => ConfigEdit,
         "/v1/auto-clip/status" | "/v1/auto-clip/jobs" if get => FileView,
@@ -204,7 +240,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
             ClipEdit
         }
         "/v1/streamer-info" | "/v1/streamer-info/files/{id}" if get => StreamerView,
-        "/v1/sessions/{id}" if method == Method::PATCH => ClipEdit,
+        "/v1/sessions/{id}" if method == Method::PATCH || method == Method::DELETE => ClipEdit,
         "/v1/upload/streamers" | "/v1/upload/streamers/{id}" if get => StreamerView,
         "/v1/upload/streamers" if method == Method::POST => TemplateEdit,
         "/v1/upload/streamers/{id}" if method == Method::DELETE => TemplateEdit,
@@ -218,14 +254,34 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         "/v1/login_by_qrcode" if method == Method::POST => AccountManage,
         "/bili/archive/pre" if get => UploadSubmit,
         "/v1/uploads" if method == Method::POST => UploadSubmit,
-        "/v1/videos" if get => FileView,
+        "/v1/videos"
+        | "/v1/activity-events"
+        | "/v1/files/location"
+        | "/v1/upload-queue"
+        | "/v1/upload-queue/{id}"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/files/reveal" if method == Method::POST => FileView,
+        "/v1/session-merge-candidates" if get => ClipEdit,
+        "/v1/session-groups"
+        | "/v1/session-merge-candidates/{id}/confirm"
+        | "/v1/session-merge-candidates/{id}/dismiss"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
         "/v1/status" if get => StreamerView,
         // 三个角色都有 StreamerView，等于登录即可
         "/v1/tools" if get => StreamerView,
         "/v1/ws/logs" if get => LogView,
         "/static/{path}" if get => {
+            // 处理函数按百分号解码后的文件名取文件，这里也要按解码后的判断：
+            // 否则 `/static/ds%5Fupdate.log` 读到的是日志，却只按录像的 file.view 放行
             let name = raw_path.rsplit('/').next().unwrap_or_default();
-            if crate::server::router::ALLOWED_LOG_FILES.contains(&name) {
+            let name = urlencoding::decode(name).unwrap_or_default();
+            if crate::server::router::ALLOWED_LOG_FILES.contains(&&*name) {
                 LogView
             } else {
                 FileView
@@ -329,6 +385,7 @@ mod tests {
             include_str!("../api/web_users.rs"),
             include_str!("../api/fleet.rs"),
             include_str!("../api/fleet_ha.rs"),
+            include_str!("../api/douyu_validation.rs"),
         ];
         // 这些路由有意不挂权限层：登录相关对外公开，`/v1/me*` 只要求登录。
         let unguarded = [
@@ -397,6 +454,29 @@ mod tests {
     }
 
     #[test]
+    fn validating_douyu_credentials_requires_configuration_editing() {
+        assert_eq!(
+            required_permission(
+                &Method::POST,
+                "/v1/douyu/validate-cookie",
+                "/v1/douyu/validate-cookie",
+            ),
+            Some(Permission::ConfigEdit)
+        );
+        for role in Role::ALL {
+            assert_eq!(role.has(Permission::ConfigEdit), role == Role::Admin);
+        }
+        assert_eq!(
+            required_permission(
+                &Method::GET,
+                "/v1/douyu/validate-cookie",
+                "/v1/douyu/validate-cookie",
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn static_route_distinguishes_logs_from_recordings() {
         assert_eq!(
             required_permission(&Method::GET, "/static/{path}", "/static/ds_update.log"),
@@ -404,6 +484,26 @@ mod tests {
         );
         assert_eq!(
             required_permission(&Method::GET, "/static/{path}", "/static/a.flv"),
+            Some(Permission::FileView)
+        );
+    }
+
+    /// `Path` 提取器会做百分号解码，编码过的日志文件名也得按日志判断
+    #[test]
+    fn static_route_classifies_the_decoded_file_name() {
+        for raw in [
+            "/static/ds%5Fupdate.log",
+            "/static/%64ownload.log",
+            "/static/upload%2Elog",
+        ] {
+            assert_eq!(
+                required_permission(&Method::GET, "/static/{path}", raw),
+                Some(Permission::LogView),
+                "{raw}"
+            );
+        }
+        assert_eq!(
+            required_permission(&Method::GET, "/static/{path}", "/static/%E5%BD%95.flv"),
             Some(Permission::FileView)
         );
     }

@@ -247,6 +247,7 @@
 .footBtn {
   width: 30px;
   height: 30px;
+  flex-shrink: 0;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -256,6 +257,17 @@
   justify-content: center;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
+}
+
+/* 60px 图标侧栏容纳不下横排的两个按钮，纵排保留主题和展开入口。 */
+.sider.collapsed .foot {
+  padding: 10px 8px;
+  align-items: center;
+}
+
+.sider.collapsed .footBtns {
+  flex-direction: column;
+  width: 100%;
 }
 
 .footBtn:hover {
@@ -311,6 +323,12 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
+}
+
+.burgerOpen {
+  left: auto;
+  right: 12px;
+  z-index: 1001;
 }
 
 .burger svg {

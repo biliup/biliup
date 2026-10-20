@@ -1,4 +1,4 @@
-//! 控制面的 `/v1/fleet/*` 接口，只在 `--controller` 时注册。
+//! 控制面的 `/v1/fleet/*` 接口，默认控制面角色下注册，节点角色不注册。
 //! 节点列表归 `streamer.view`，生成 / 作废票据与移除节点归 `node.manage`（见 `permissions.rs`）。
 //! 房间、投稿模板与节点账号的处理函数在 `fleet_rooms.rs`，Fleet 配置的在 `fleet_config.rs`。
 //! 被控制面移除过的机器另有 `/v1/node/revoked*`（恢复暂停中的原受管主播），归 `recording.control`。

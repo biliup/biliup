@@ -16,7 +16,7 @@ const Cookie: React.FC<Props> = props => {
     <>
       <PlatformPanel header="用户 Cookie" itemKey="user" bare={props.bare}>
         <Form.Input
-          field="user.kuaishou_cookie"
+          field="kuaishou_cookie"
           extraText={
             <div style={{ fontSize: '14px' }}>
               填入快手 Cookie 可降低被风控的概率。

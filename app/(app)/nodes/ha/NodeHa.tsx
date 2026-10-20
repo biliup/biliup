@@ -2,8 +2,7 @@
 import { useState } from 'react'
 import useSWR from 'swr'
 import { Button, Empty, Spin } from '@douyinfe/semi-ui'
-import { IconServer } from '@douyinfe/semi-icons'
-import PageHeader from '../../components/PageHeader'
+import TaskPlatformHeader from '../../status/TaskPlatformHeader'
 import dc from '@/app/ui/data-card.module.scss'
 import { fetcher, type LiveStreamerEntity } from '@/app/lib/api-streamer'
 import { useMe } from '@/app/lib/use-me'
@@ -122,7 +121,7 @@ export default function NodeHa() {
           onJoin={() => setDialog('join')}
           note={
             canManage
-              ? '解除配对在控制面的「节点 › 一主一备」里操作'
+              ? '解除配对在控制面的「任务平台 › 节点管理 › 一主一备」里操作'
               : '换上传主机、改模式、加入配对要「管理节点」权限；解除配对在控制面上操作'
           }
         />
@@ -151,9 +150,8 @@ export default function NodeHa() {
 
   return (
     <>
-      <PageHeader
-        icon={<IconServer size="large" />}
-        title="一主一备"
+      <TaskPlatformHeader
+        active="nodes"
         description="这台与控制面那台配成一主一备：两台录同样的直播间，只由一台投稿；在哪台上改都会同步"
       />
       <div className={dc.content}>

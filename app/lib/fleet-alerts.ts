@@ -48,6 +48,7 @@ export interface FleetAlerts {
 /** 与后端 `FleetSummary` 一致：控制台的 Fleet 汇总 */
 export interface FleetSummary {
   nodes_total: number
+  remote_nodes?: number
   nodes_online: number
   recording: number
   /** 还没「知道了」的告警 */
@@ -84,12 +85,12 @@ export function useFleetAlerts(enabled: boolean) {
 }
 
 export async function clearAlert(id: number): Promise<void> {
-  await handleResponse(await fetch(`${API_BASE}${FLEET_ALERTS_KEY}/${id}`, { method: 'DELETE' }))
+  await handleResponse(await fetch(`${API_BASE}${FLEET_ALERTS_KEY}/${id}`, { method: 'DELETE', credentials: 'include' }))
 }
 
 /** 返回清掉的条数 */
 export async function clearAlerts(): Promise<number> {
-  const res = await fetch(API_BASE + FLEET_ALERTS_KEY, { method: 'DELETE' })
+  const res = await fetch(API_BASE + FLEET_ALERTS_KEY, { method: 'DELETE', credentials: 'include' })
   await handleResponse(res)
   const body = (await res.json()) as { cleared: number }
   return body.cleared

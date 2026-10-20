@@ -14,25 +14,9 @@ import styles from '../nodes/fleet-config.module.scss'
 
 const SCOPE = 'local-secrets'
 
-/** 「用户 Cookie」栏里的快手 Cookie 写的是 user.kuaishou_cookie，实际字段在顶层，这里单独给一个 */
-function Kuaishou() {
-  return (
-    <Form.Input
-      field="kuaishou_cookie"
-      label="快手 Cookie（kuaishou_cookie）"
-      style={{ width: '100%' }}
-      fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
-      showClear
-    />
-  )
-}
-
-const PLATFORMS = [
-  ...PlatformPanels.filter((p) =>
-    ['bilibili', 'douyin', 'douyu', 'twitcasting', 'twitch', 'youtube', 'user'].includes(p.key),
-  ),
-  { key: 'kuaishou', name: '快手', Component: Kuaishou },
-]
+const PLATFORMS = PlatformPanels.filter((p) =>
+  ['bilibili', 'douyin', 'douyu', 'twitcasting', 'twitch', 'youtube', 'user'].includes(p.key),
+)
 
 
 /** 空间配置页顶部：这台机器的配置由控制面管理 */
@@ -46,8 +30,8 @@ export function ManagedConfigBanner({ controller, canEditSecrets }: { controller
       title={`这台机器已加入控制面 ${controller}，配置由控制面统一下发，这里只读`}
       description={
         canEditSecrets
-          ? '下载、上传与各平台参数请到控制面「节点」页的「Fleet 配置」或「节点覆盖」里改。Cookie、密码等本机密钥不随控制面下发，点右上角「本机密钥」修改。'
-          : '下载、上传与各平台参数请到控制面「节点」页修改。'
+          ? '下载、上传与各平台参数请到控制面「任务平台 › 节点管理」页的「Fleet 配置」或「节点覆盖」里改。Cookie、密码等本机密钥不随控制面下发，点右上角「本机密钥」修改。'
+          : '下载、上传与各平台参数请到控制面「任务平台 › 节点管理」页修改。'
       }
     />
   )

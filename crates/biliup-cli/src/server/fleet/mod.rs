@@ -1,8 +1,9 @@
 //! biliup Fleet：一台控制面管理多台录播节点（#1744）。
 //!
-//! 控制面（`biliup server --controller`）与节点之间只有 iroh QUIC 连接，连接一律由节点发起，
-//! 两端都经控制面内嵌的 relay 中转、能打洞时转直连。单机模式（不带 `--controller`、
-//! 也没有 `data/node.json`）不创建 iroh 端点、不开任何端口、不写任何 Fleet 文件。
+//! `biliup server` 默认准备好控制面；已有 `data/node.json` 或加入票据时作为节点启动。
+//! 没有其他节点时，本机直播间、模板与配置仍由原来的单机流程管理，不自动迁移或接管。
+//! 控制面与节点之间只有 iroh QUIC 连接，连接一律由节点发起，
+//! 两端都经控制面内嵌的 relay 中转、能打洞时转直连。
 //!
 //! 房间与投稿模板的真身在控制面，按期望状态整份下发给节点（F2）；配置按「Fleet 全局 ⊕ 节点覆盖」
 //! 随期望状态下发，节点叠上本机密钥后生效，Cookie、密码等白名单外的键不出节点（F3）。
@@ -107,7 +108,7 @@ impl FromStr for RelayListen {
 /// `biliup server` 的 Fleet 参数
 #[derive(Debug, Clone, Default)]
 pub struct FleetOptions {
-    /// `--controller`
+    /// `--controller`：显式要求控制面角色；默认自动选择，已有节点身份优先。
     pub controller: bool,
     /// `--relay-listen`；`None` 为默认的 `0.0.0.0:19160`
     pub relay_listen: Option<RelayListen>,
@@ -115,7 +116,7 @@ pub struct FleetOptions {
     pub relay_urls: Vec<Url>,
 }
 
-/// `/v1/me` 里的能力标记，前端据此显示「节点」菜单与「由控制面管理」的只读提示
+/// `/v1/me` 里的能力标记，前端据此显示任务平台中的节点管理与托管提示
 #[derive(Debug, Clone, Default)]
 pub struct FleetCapability {
     pub controller: bool,
@@ -265,10 +266,30 @@ impl Fleet {
     }
 }
 
-/// 按参数与工作目录决定本进程的角色。单机模式只检查 `data/node.json` 是否存在，不做别的事。
+/// 默认开启控制面，已加入或正在加入其他控制面时保留节点角色。
 pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppResult<Fleet> {
-    let node_file = Path::new(NODE_FILE);
+    let allow_hooks = std::env::var(JOIN_ALLOW_HOOKS_ENV)
+        .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
+    start_with(
+        options,
+        services,
+        Path::new(NODE_FILE),
+        join_ticket_env(),
+        allow_hooks,
+    )
+    .await
+}
+
+// Explicit paths also let startup be exercised without changing the process working directory.
+async fn start_with(
+    options: &FleetOptions,
+    services: &ServiceRegister,
+    node_file: &Path,
+    ticket: Option<String>,
+    allow_hooks: bool,
+) -> AppResult<Fleet> {
     let revoked_file = revoked::revoked_path(node_file);
+    let data = node_file.parent().unwrap_or(Path::new("."));
     let standalone = |revoked: Option<RevokedHandle>| Fleet {
         role: Role::Standalone,
         revoked,
@@ -280,24 +301,18 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
                 "--controller 与 {NODE_FILE} 不能同时使用：这台机器已经作为节点加入了别的控制面，先执行 `biliup node leave`"
             )));
         }
-        return start_controller_role(options, services, revoked_file).await;
-    }
-    if options.relay_listen.is_some() || !options.relay_urls.is_empty() {
-        warn!("--relay-listen / --relay-url 只在 --controller 时生效，已忽略");
+        return start_controller_role(options, services, data, revoked_file).await;
     }
     if !node_file.exists() {
-        let Some(ticket) = join_ticket_env() else {
+        let Some(ticket) = ticket else {
             // 离开时进程没在跑、之后又手动删了 node.json：托管行留作本地行
             let stale = reconcile::state_path(node_file);
-            if stale.exists() {
+            // The controller's local node shares fleet-state.json; its cached mapping must survive restart.
+            if stale.exists() && !data.join("local-node.json").exists() {
                 reconcile::forget(&stale);
             }
-            return Ok(standalone(
-                Revoked::resume_if_present(revoked_file, services).await,
-            ));
+            return start_controller_role(options, services, data, revoked_file).await;
         };
-        let allow_hooks = std::env::var(JOIN_ALLOW_HOOKS_ENV)
-            .is_ok_and(|value| matches!(value.trim(), "1" | "true" | "yes"));
         info!("{JOIN_TICKET_ENV} is set and {NODE_FILE} is missing, joining the fleet controller");
         match node::join(&ticket, allow_hooks, node_file).await {
             Ok(file) => info!(node = file.node_id, "joined the fleet controller"),
@@ -308,6 +323,9 @@ pub async fn start(options: &FleetOptions, services: &ServiceRegister) -> AppRes
                 ));
             }
         }
+    }
+    if options.relay_listen.is_some() || !options.relay_urls.is_empty() {
+        warn!("本机作为节点运行，已忽略控制面的 --relay-listen / --relay-url");
     }
     // 节点随时可能被移除，清单一直挂着；启动时先按清单暂停，再连控制面
     let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
@@ -366,19 +384,19 @@ pub fn reject_config_file(config_path: Option<&Path>) -> AppResult<()> {
 async fn start_controller_role(
     options: &FleetOptions,
     services: &ServiceRegister,
+    data: &Path,
     revoked_file: PathBuf,
 ) -> AppResult<Fleet> {
     // 没有文件时清单是空的，不写任何东西
     let revoked = Arc::new(Revoked::load(revoked_file, services.clone()));
     revoked.apply().await;
-    let controller = start_controller(options).await?;
+    let controller = start_controller(options, &data.join("fleet.sqlite3")).await?;
     // 先挂上配对：之前就连上来的备机等配对载入完再收期望状态，不会先收到一份不带配对的而解除
-    let data = Path::new(FLEET_DB).parent().unwrap_or(Path::new("."));
     let pairing = Arc::new(ha::pairing::Pairing::new(services.clone(), data));
     controller.attach_ha(pairing.clone());
     let managed = ManagedHandle::default();
     let local = Arc::new(local::LocalNode::new(
-        Path::new(local::LOCAL_NODE_FILE).to_path_buf(),
+        data.join("local-node.json"),
         services.clone(),
         managed.clone(),
         revoked.clone(),
@@ -388,16 +406,36 @@ async fn start_controller_role(
     Ok(Fleet::controller(controller, local, managed, revoked))
 }
 
-async fn start_controller(options: &FleetOptions) -> AppResult<Arc<Controller>> {
-    let pool = ConnectionManager::new_pool_with(FLEET_DB, &FLEET_MIGRATOR)
+async fn start_controller(options: &FleetOptions, database: &Path) -> AppResult<Arc<Controller>> {
+    let pool = ConnectionManager::new_pool_with(&database.to_string_lossy(), &FLEET_MIGRATOR)
         .await
         .attach("could not open the fleet database")?;
     let secret = store::identity(&pool, now_ms()).await?;
     let listen = options.relay_listen.unwrap_or_default();
     let (relay, relays) = match listen {
         RelayListen::Addr(addr) => {
-            let relay =
-                EmbeddedRelay::spawn(addr, FleetAccess::new(secret.public(), pool.clone())).await?;
+            let relay = match EmbeddedRelay::spawn(
+                addr,
+                FleetAccess::new(secret.public(), pool.clone()),
+            )
+            .await
+            {
+                Ok(relay) => relay,
+                Err(error)
+                    if !options.controller
+                        && options.relay_listen.is_none()
+                        && options.relay_urls.is_empty() =>
+                {
+                    // A second local installation must not lose recording because the default relay port is busy.
+                    warn!(error = ?error, "默认 relay 端口不可用，改用自动分配端口；加入票据会包含实际端口");
+                    EmbeddedRelay::spawn(
+                        SocketAddr::new(addr.ip(), 0),
+                        FleetAccess::new(secret.public(), pool.clone()),
+                    )
+                    .await?
+                }
+                Err(error) => return Err(error),
+            };
             let bound = relay.addr();
             let advertised = if !options.relay_urls.is_empty() {
                 options.relay_urls.clone()
@@ -520,6 +558,10 @@ mod tests {
                 6,
                 "c0ca05edd662e1687e2c52dcf3c49842e839447b39cd1e9fc4fd22e0b36534069ba71e94282a6c401f622667c0e6cef7",
             ),
+            (
+                7,
+                "94355800e8a52e4816853a06da63ec58152de630dd3bccc15eb65d98b853be5ec9f08c4a47a122b0855f280f6e209ea7",
+            ),
         ];
         let embedded: Vec<(i64, String)> = FLEET_MIGRATOR
             .iter()
@@ -544,7 +586,7 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, [1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, [1, 2, 3, 4, 5, 6, 7]);
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fleet_%' ORDER BY name",
         )
@@ -587,6 +629,6 @@ mod tests {
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(count, 6);
+        assert_eq!(count, 7);
     }
 }

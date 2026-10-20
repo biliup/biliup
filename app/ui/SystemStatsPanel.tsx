@@ -74,8 +74,10 @@ export default function SystemStatsPanel() {
   const series: SystemSeries = useMemo(() => toSeries(snap.samples, intervalMs), [snap.samples, intervalMs])
   const cpuYs = useMemo(() => [series.cpu], [series])
   const netYs = useMemo(() => [series.rx, series.tx], [series])
+  const diskYs = useMemo(() => [series.diskRead, series.diskWrite], [series])
   const last = snap.samples.length > 0 ? snap.samples[snap.samples.length - 1] : null
   const hasCurve = series.xs.length >= 2
+  const hasDiskCurve = hasCurve && (series.diskRead.some(value => value !== null) || series.diskWrite.some(value => value !== null))
   const summary = useMemo(() => {
     let cpuMax = 0
     let cpuSum = 0
@@ -182,12 +184,20 @@ export default function SystemStatsPanel() {
           label="录制目录所在磁盘"
           meta={
             disk ? (
-              <Tooltip content={`录制目录：${disk.path}`}>
+              <Tooltip content={`录制目录：${disk.path}；读写速率统计所在设备的全部磁盘 IO`}>
                 <span className={styles.path}>{disk.path}</span>
               </Tooltip>
             ) : null
           }
-          value={disk ? `${diskPct.toFixed(0)}%` : <Placeholder />}
+          value={
+            <span className={styles.diskValue}>
+              {disk ? <span>{diskPct.toFixed(0)}% <small>已用</small></span> : <Placeholder />}
+              <span className={styles.diskRates}>
+                <span className={styles.rx}>读 {last?.disk_read_bytes_per_sec == null ? '不可用' : formatRate(last.disk_read_bytes_per_sec)}</span>
+                <span className={styles.tx}>写 {last?.disk_write_bytes_per_sec == null ? '不可用' : formatRate(last.disk_write_bytes_per_sec)}</span>
+              </span>
+            </span>
+          }
           foot={
             disk
               ? `剩余 ${formatBytes(disk.available)} / 共 ${formatBytes(disk.total)}`
@@ -196,14 +206,9 @@ export default function SystemStatsPanel() {
                 : null
           }
         >
-          {disk ? (
-            <Progress
-              percent={diskPct}
-              stroke={levelColor(diskPct)}
-              aria-label={`录制目录磁盘已用 ${diskPct.toFixed(0)}%`}
-              className={styles.bar}
-            />
-          ) : null}
+          {hasDiskCurve ? (
+            <SystemChart kind="disk" xs={series.xs} ys={diskYs} windowMs={windowMs} height={CHART_HEIGHT} />
+          ) : <Text type="tertiary" size="small">{!last ? idleText : '磁盘读写速率暂无有效采样'}</Text>}
         </Tile>
 
         <Tile

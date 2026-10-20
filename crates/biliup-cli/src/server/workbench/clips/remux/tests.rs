@@ -335,3 +335,20 @@ async fn fmp4_cut_copies_init_and_rebases_tfdt_per_track() {
     // 音频（48000/s）跟着视频换算，同一个时钟
     assert_eq!(audio, vec![0, 48_000, 96_000, 144_000, 192_000, 240_000]);
 }
+
+/// 头区里有 largesize 大到 `起点 + 长度` 溢出的坏 box：跳过它，不 panic（导出任务 panic 会让切片
+/// 一直停在「导出中」，直到重启）。
+#[test]
+fn fmp4_header_with_an_overflowing_box_size_is_not_a_panic() {
+    let (bytes, _, header_len) = build_fmp4(1);
+    let mut region = bytes[..header_len as usize].to_vec();
+    region.extend_from_slice(&1u32.to_be_bytes());
+    region.extend_from_slice(b"free");
+    region.extend_from_slice(&u64::MAX.to_be_bytes());
+    region.extend_from_slice(&[0; 16]);
+    let mut cut = fmp4::Fmp4Cut::default();
+    let mut out = Vec::new();
+    cut.header(&region, &mut out).unwrap();
+    let kinds: Vec<[u8; 4]> = boxes(&out).iter().map(|b| b.0).collect();
+    assert_eq!(kinds, vec![*b"ftyp", *b"moov"]);
+}

@@ -1,7 +1,7 @@
 use crate::error::{Kind, Result};
 use crate::retry_with_config;
 use crate::uploader::{Uploader, VideoFile, VideoStream};
-use futures::{Stream, TryFutureExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use reqwest::{Body, RequestBuilder};
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +32,19 @@ const DEFAULT_PROBE_POST_MB: f64 = 0.1;
 
 pub mod upos;
 
+/// Receives successful UPOS PUT acknowledgements, never bytes merely read.
+/// Implementations must be quick and must not block the upload on telemetry IO.
+pub trait UploadObserver: Send + Sync {
+    fn can_upload(&self) -> bool {
+        true
+    }
+    fn chunk_confirmed(&self, part_number: usize, bytes: usize) -> bool;
+    fn chunk_confirmed_range(&self, part_number: usize, _start: u64, bytes: usize) -> bool {
+        self.chunk_confirmed(part_number, bytes)
+    }
+    fn chunk_retry(&self, _part_number: usize) {}
+}
+
 pub struct Parcel {
     // line: &'a Line,
     line: Bucket,
@@ -50,6 +63,22 @@ impl Parcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
+        self.upload_with_observer(client, limit, progress, None)
+            .await
+    }
+
+    pub async fn upload_with_observer<F, S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        progress: F,
+        observer: Option<&dyn UploadObserver>,
+    ) -> Result<Video>
+    where
+        F: FnOnce(VideoStream) -> S,
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
         let mut video = match self.line {
             Bucket::Upos(bucket) => {
                 // let bucket: crate::uploader::upos::Bucket = self.pre_upload(client).await?;
@@ -57,10 +86,11 @@ impl Parcel {
                 let upos = Upos::from(client, bucket).await?;
                 let mut parts = Vec::new();
                 let stream = upos
-                    .upload_stream(
+                    .upload_stream_with_observer(
                         progress(self.video_file.get_stream(chunk_size)?),
                         self.video_file.total_size,
                         limit,
+                        observer,
                     )
                     .await?;
                 tokio::pin!(stream);
@@ -182,6 +212,14 @@ fn probe_post_bytes(probe: &serde_json::Value) -> usize {
     (mb * 1024.0 * 1024.0) as usize
 }
 
+async fn send_preupload_request(request: RequestBuilder) -> Result<reqwest::Response> {
+    let response = request.send().await?;
+    if response.status().is_server_error() {
+        return Err(response.error_for_status().unwrap_err().into());
+    }
+    Ok(response)
+}
+
 #[derive(Clone)]
 enum Bucket {
     Upos(upos::Bucket),
@@ -273,13 +311,30 @@ impl StreamParcel {
         S: Stream<Item = Result<(B, usize)>>,
         B: Into<Body> + Clone,
     {
+        self.upload_parts_with_observer(client, limit, stream, None)
+            .await
+    }
+
+    pub async fn upload_parts_with_observer<S, B>(
+        self,
+        client: StatelessClient,
+        limit: usize,
+        stream: S,
+        observer: Option<&dyn UploadObserver>,
+    ) -> Result<UploadedStream>
+    where
+        S: Stream<Item = Result<(B, usize)>>,
+        B: Into<Body> + Clone,
+    {
         match self.line {
             Bucket::Upos(bucket) => {
                 let upos = Upos::from(client, bucket).await?;
                 let mut parts = Vec::new();
                 let mut uploaded_size = 0u64;
                 {
-                    let uploaded = upos.upload_stream(stream, self.total_size, limit).await?;
+                    let uploaded = upos
+                        .upload_stream_with_observer(stream, self.total_size, limit, observer)
+                        .await?;
                     tokio::pin!(uploaded);
                     while let Some((part, size)) = uploaded.try_next().await? {
                         parts.push(part);
@@ -330,18 +385,18 @@ impl Line {
         });
         info!("pre_upload: {}", params);
 
-        // 只重试没拿到响应的网络故障（与分片 PUT 同样 3 次）；B 站回了非 2xx（含 601）照旧交给下面
+        // Retry network failures and HTTP 5xx; preserve 4xx bodies for the 601 handling below.
         let response = retry_with_config(
             || {
-                bili.client
-                    .get(format!(
-                        "https://member.bilibili.com/preupload?{}",
-                        self.query
-                    ))
-                    .query(&params)
-                    .timeout(PRE_UPLOAD_TIMEOUT)
-                    .send()
-                    .map_err(Kind::from)
+                send_preupload_request(
+                    bili.client
+                        .get(format!(
+                            "https://member.bilibili.com/preupload?{}",
+                            self.query
+                        ))
+                        .query(&params)
+                        .timeout(PRE_UPLOAD_TIMEOUT),
+                )
             },
             3,
             Some(Kind::is_transient),
@@ -574,6 +629,67 @@ pub fn akbd() -> Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn preupload_retries_server_errors_and_preserves_rate_limit_bodies() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let server_attempts = attempts.clone();
+        let router = axum::Router::new()
+            .route(
+                "/preupload",
+                axum::routing::get(move || {
+                    let attempts = server_attempts.clone();
+                    async move {
+                        if attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                            (
+                                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                                "temporary outage",
+                            )
+                        } else {
+                            (axum::http::StatusCode::OK, "uploaded")
+                        }
+                    }
+                }),
+            )
+            .route(
+                "/limited",
+                axum::routing::get(|| async {
+                    (
+                        axum::http::StatusCode::FORBIDDEN,
+                        r#"{"code":601,"message":"limited"}"#,
+                    )
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = format!("http://{address}/preupload");
+        let response = retry_with_config(
+            || send_preupload_request(client.get(&url)),
+            1,
+            Some(Kind::is_transient),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+
+        let response = send_preupload_request(client.get(format!("http://{address}/limited")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FORBIDDEN);
+        let body: serde_json::Value = response.json().await.unwrap();
+        assert_eq!(body["code"], 601);
+        server.abort();
+    }
 
     fn broken_line(query: &str) -> Line {
         Line {

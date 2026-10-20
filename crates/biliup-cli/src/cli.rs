@@ -182,17 +182,17 @@ pub enum Commands {
         #[arg(short, long, value_name = "FILE")]
         config: Option<PathBuf>,
 
-        /// 以 Fleet 控制面运行：接受其他 biliup 节点加入并显示它们的状态（数据在 data/fleet.sqlite3）
+        /// 显式以 Fleet 控制面运行（默认自动开启；已有节点身份时作为节点运行）
         #[arg(long)]
         controller: bool,
 
         /// 控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它；
-        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。只在 --controller 时生效
+        /// off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。作为节点运行时忽略
         #[arg(long, value_name = "ADDR|off")]
         relay_listen: Option<RelayListen>,
 
         /// 写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。
-        /// 用于域名、端口转发、反向代理或外部 relay。只在 --controller 时生效
+        /// 用于域名、端口转发、反向代理或外部 relay。作为节点运行时忽略
         #[arg(long, value_name = "URL")]
         relay_url: Vec<Url>,
     },
@@ -266,6 +266,12 @@ fn human_size(s: &str) -> Result<u64, String> {
         [init @ .., b'G'] => parse_u8(init)? * 1000.0 * 1000.0 * 1000.0,
         init => parse_u8(init)?,
     };
+    if !ret.is_finite() || ret < 1.0 || ret >= u64::MAX as f64 {
+        return Err(format!(
+            "{s} must be a positive size below {} bytes",
+            u64::MAX
+        ));
+    }
     Ok(ret as u64)
 }
 
@@ -281,6 +287,32 @@ mod tests {
     use super::{Cli, Commands};
     use clap::Parser;
     use std::path::Path;
+
+    #[test]
+    fn download_rejects_sizes_that_would_silently_become_zero_or_overflow() {
+        for size in [
+            "NaN",
+            "inf",
+            "-1",
+            "0",
+            "0.5",
+            "1e100",
+            "18446744073709551616",
+        ] {
+            assert!(
+                Cli::try_parse_from([
+                    "biliup",
+                    "download",
+                    "https://example.invalid/live.flv",
+                    "--split-size",
+                    size,
+                ])
+                .is_err(),
+                "accepted size {size}"
+            );
+        }
+        assert_eq!(super::human_size("1.5M").unwrap(), 1_500_000);
+    }
 
     #[test]
     fn server_defaults_to_loopback_and_default_cookie_file() {

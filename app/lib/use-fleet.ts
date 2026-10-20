@@ -4,7 +4,7 @@ import type { SystemCpu, SystemDisk, SystemMemory, SystemSample } from './use-sy
 import type { NodeConfigState } from './fleet-config'
 
 /**
- * Fleet 控制面的接口（只有以 `--controller` 启动的实例才有，普通实例全部 404）。
+ * Fleet 控制面的接口（独立实例默认提供，已加入其他控制面的节点不提供）。
  * 时间字段一律是 Unix 毫秒；节点的采样时刻用的是节点自己的时钟。
  */
 
@@ -245,6 +245,7 @@ export const FLEET_REFRESH_MS = 5000
 export async function issueTicket(extraRelays: string[] = []): Promise<IssuedTicket> {
   const res = await fetch(API_BASE + FLEET_TOKENS_KEY, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(extraRelays.length ? { extra_relays: extraRelays } : {}),
   })
@@ -253,7 +254,7 @@ export async function issueTicket(extraRelays: string[] = []): Promise<IssuedTic
 }
 
 export async function revokeNode(id: number): Promise<void> {
-  await handleResponse(await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}`, { method: 'DELETE' }))
+  await handleResponse(await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}`, { method: 'DELETE', credentials: 'include' }))
 }
 
 /** 与后端 `REMOVAL_WAIT` 一致：在线节点确认释放房间最多等这么久 */
@@ -270,7 +271,7 @@ export const EVENTS_SINCE = 3
  * 返回 `state: 'removing'`，结果随后出现在节点列表的 `removals` 里；离线节点当场移除，返回 `done`
  */
 export async function revokeAndReassign(id: number): Promise<Removal> {
-  const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}?reassign=auto`, { method: 'DELETE' })
+  const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}?reassign=auto`, { method: 'DELETE', credentials: 'include' })
   await handleResponse(res)
   return res.json()
 }
@@ -281,6 +282,7 @@ export const FLEET_LOCAL_NODE_KEY = '/v1/fleet/local-node'
 export async function enableLocalNode(allowHooks: boolean): Promise<{ node_id: number }> {
   const res = await fetch(API_BASE + FLEET_LOCAL_NODE_KEY, {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ allow_hooks: allowHooks }),
   })
@@ -295,18 +297,20 @@ export async function enableLocalNode(allowHooks: boolean): Promise<{ node_id: n
 export async function disableLocalNode(id: number, reassign: boolean): Promise<Removal> {
   const res = await fetch(`${API_BASE}${FLEET_NODES_KEY}/${id}${reassign ? '?reassign=auto' : ''}`, {
     method: 'DELETE',
+    credentials: 'include',
   })
   await handleResponse(res)
   return res.json()
 }
 
 export async function voidToken(id: string): Promise<void> {
-  await handleResponse(await fetch(`${API_BASE}${FLEET_TOKENS_KEY}/${encodeURIComponent(id)}`, { method: 'DELETE' }))
+  await handleResponse(await fetch(`${API_BASE}${FLEET_TOKENS_KEY}/${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'include' }))
 }
 
 export async function send<T>(method: string, path: string, body?: unknown): Promise<T | null> {
   const res = await fetch(API_BASE + path, {
     method,
+    credentials: 'include',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })

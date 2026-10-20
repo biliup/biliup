@@ -115,6 +115,26 @@
   gap: 12px;
   font-size: 18px;
 }
+.diskValue {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+
+  small {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--semi-color-text-2);
+  }
+}
+.diskRates {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+}
 .rx {
   color: rgb(var(--semi-cyan-5));
 }

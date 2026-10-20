@@ -81,6 +81,8 @@ pub struct PairPlan {
     /// 按本机已有的行认下（本机新建、控制面刚按它建好的房间与模板）：控制面 id → 本机行 id
     pub adopt_rooms: BTreeMap<i64, i64>,
     pub adopt_templates: BTreeMap<i64, i64>,
+    /// 这一次期望里的版本严格新于本机账本（不是等戳的重复下发）：只有这些版本的暂停位才有权威
+    pub fresh_rooms: BTreeSet<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -692,7 +694,12 @@ impl Reconciler {
         }
         for room in wanted {
             let compare = paired_room(&room.id) || self.adopted.rooms.contains(&room.id);
-            if let Err(error) = self.upsert_room(&room, compare).await {
+            // 没有配对账本（plan 为空）时期望状态自带权威，暂停照常落地；有账本时只有严格新于
+            // 本机记录的版本（fresh_rooms）才动暂停：等戳的重复下发是本机已上报的旧事的回音，
+            // 本机刚改的暂停还没被扫描排进队列时，它们不能把暂停位翻回去。
+            let fresh = plan.as_ref().is_none_or(|plan| plan.fresh_rooms.contains(&room.id));
+            let adopt = plan.as_ref().and_then(|plan| plan.adopt_rooms.get(&room.id).copied());
+            if let Err(error) = self.upsert_room(&room, compare, fresh, adopt).await {
                 errors.insert(room.id, error);
             }
         }
@@ -773,12 +780,18 @@ impl Reconciler {
             );
             info!(room = id, local = local_id, "paired room adopted");
         }
-        // 本机删掉的配对行、控制面之后又改了（后改的赢）：按期望状态重建
+        // 本机删掉的配对行、控制面之后又改了（后改的赢）：按期望状态重建。
+        // 只有严格更新的版本才算「后改」：等戳的重复下发不能把本机刚删的行重建回来，
+        // 那次删除优先，交给扫描登记进账本
         let paired: Vec<(i64, i64)> = self
             .state
             .rooms
             .iter()
-            .filter(|(id, _)| plan.rows.rooms.contains(id) && !plan.keep_rooms.contains(id))
+            .filter(|(id, _)| {
+                plan.rows.rooms.contains(id)
+                    && !plan.keep_rooms.contains(id)
+                    && plan.fresh_rooms.contains(id)
+            })
             .map(|(id, room)| (*id, room.local_id))
             .collect();
         for (id, local_id) in paired {
@@ -892,7 +905,13 @@ impl Reconciler {
         self.persist();
     }
 
-    async fn upsert_room(&mut self, room: &DesiredRoom, pair: bool) -> Result<(), String> {
+    async fn upsert_room(
+        &mut self,
+        room: &DesiredRoom,
+        pair: bool,
+        fresh: bool,
+        adopt: Option<i64>,
+    ) -> Result<(), String> {
         let template = match room.template_id {
             Some(template) => Some(
                 self.state
@@ -959,7 +978,9 @@ impl Reconciler {
                     );
                 }
                 managed.epoch = room.epoch;
-                if managed.error.is_none() {
+                // 等戳的重复下发没有权威：本机刚改的暂停还没被扫描排进队列时，它们不能把
+                // 暂停位翻回去；没有账本可参照（直收期望状态）与严格更新的版本照常落地。
+                if managed.error.is_none() && fresh {
                     apply_paused(&self.services, managed.local_id, room.paused).await;
                     managed.paused = room.paused;
                 }
@@ -969,6 +990,15 @@ impl Reconciler {
                 error.map_or(Ok(()), Err)
             }
             None => {
+                // 配对账本里这一行还挂着本机行号（本机新建后加入配对），但行已经没了：
+                // 是本机刚删掉它、扫描还没认领。等戳场景删除优先，等扫描把删除登记进账本，
+                // 别按期望把行重建回来；控制面之后真改了（fresh）才轮到重建
+                if !fresh
+                    && let Some(local) = adopt
+                    && local_row(&self.services, local).await.is_none()
+                {
+                    return Ok(());
+                }
                 let row: InsertLiveStreamer = local_streamer(&room.spec, template, None)
                     .and_then(|value| serde_json::from_value(value).ok())
                     .ok_or("房间设置的格式不对")?;

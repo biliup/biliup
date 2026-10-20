@@ -14,7 +14,8 @@ use crate::server::workbench::clips::{
     State as ClipState, SubmitState, UpdateOutcome,
 };
 use crate::server::workbench::markers::{self, Timing};
-use crate::server::workbench::{live, recorder, store};
+use crate::server::workbench::renders::encoding::QualityPreset;
+use crate::server::workbench::{live, recorder, session_groups, store};
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, Request, State};
@@ -54,6 +55,8 @@ fn clip_not_found() -> Response {
 pub struct ClipView {
     pub id: i64,
     pub session_id: i64,
+    pub view_session_id: Option<i64>,
+    pub source_session_id: Option<i64>,
     pub marker_id: Option<i64>,
     pub in_ms: i64,
     pub out_ms: i64,
@@ -96,6 +99,8 @@ pub(crate) fn view(clip: Clip, exports: &ClipExports) -> ClipView {
         progress,
         id: clip.id,
         session_id: clip.session_id,
+        view_session_id: None,
+        source_session_id: None,
         marker_id: clip.marker_id,
         in_ms: clip.in_ms,
         out_ms: clip.out_ms,
@@ -119,6 +124,20 @@ pub(crate) fn view(clip: Clip, exports: &ClipExports) -> ClipView {
     }
 }
 
+fn view_in(clip: Clip, exports: &ClipExports, session_id: i64, offset: i64) -> ClipView {
+    let owner = clip.session_id;
+    let mut result = view(clip, exports);
+    if owner != session_id {
+        result.view_session_id = Some(session_id);
+        result.source_session_id = Some(owner);
+        result.in_ms += offset;
+        result.out_ms += offset;
+        result.cut_in_ms = result.cut_in_ms.map(|t| t + offset);
+        result.cut_out_ms = result.cut_out_ms.map(|t| t + offset);
+    }
+    result
+}
+
 #[derive(Debug, Serialize)]
 pub struct ClipList {
     pub clips: Vec<ClipView>,
@@ -135,13 +154,29 @@ pub async fn list_clips(
         Ok(None) => return session_not_found(),
         Err(e) => return internal(e),
     }
-    match clips::list(&pool, id).await {
-        Ok(list) => Json(ClipList {
-            clips: list.into_iter().map(|c| view(c, &exports)).collect(),
-        })
-        .into_response(),
-        Err(e) => internal(e),
+    let mut owners = match session_groups::timeline(&pool, id).await {
+        Ok(rows) => rows,
+        Err(e) => return internal(e),
+    };
+    if !owners.iter().any(|m| m.source_session_id == id) {
+        owners.push(session_groups::TimelineMember {
+            source_session_id: id,
+            offset_ms: 0,
+        });
     }
+    let mut list = Vec::new();
+    for owner in owners {
+        match clips::list(&pool, owner.source_session_id).await {
+            Ok(clips) => list.extend(
+                clips
+                    .into_iter()
+                    .map(|c| view_in(c, &exports, id, owner.offset_ms)),
+            ),
+            Err(e) => return internal(e),
+        }
+    }
+    list.sort_by_key(|c| (c.in_ms, c.id));
+    Json(ClipList { clips: list }).into_response()
 }
 
 /// `GET /v1/clips/{cid}`
@@ -202,6 +237,7 @@ pub struct CreateClip {
     pub title: String,
     pub marker_id: Option<i64>,
     pub export: Option<Mode>,
+    pub quality: Option<QualityPreset>,
 }
 
 /// `POST /v1/sessions/{id}/clips`
@@ -235,25 +271,28 @@ pub async fn create_clip(
                 pressed_at: body.pressed_at,
                 latency_ms: body.latency_ms,
             };
-            match markers::watched_at_ms(id, now, timing) {
-                Some(out_ms) => {
-                    debug!(
-                        session = id,
-                        out_ms,
-                        last_ms,
-                        ?timing,
-                        "按当前画面换算切片出点"
-                    );
-                    ((out_ms - last_ms).max(0), out_ms.max(1))
-                }
-                None if live::is_recording(id) || session.ended_at.is_none() => {
-                    return conflict("这次录制还没开出分段，等画面开始写盘后再剪");
-                }
-                None => {
-                    return conflict(
-                        "这一场没有在录，不能按当前画面剪；请到剪辑台按场次回看后再剪",
-                    );
-                }
+            match markers::watched_at_in_view(&pool, id, now, timing).await {
+                Err(e) => return internal(e),
+                Ok(result) => match result {
+                    Some(out_ms) => {
+                        debug!(
+                            session = id,
+                            out_ms,
+                            last_ms,
+                            ?timing,
+                            "按当前画面换算切片出点"
+                        );
+                        ((out_ms - last_ms).max(0), out_ms.max(1))
+                    }
+                    None if live::is_recording(id) || session.ended_at.is_none() => {
+                        return conflict("这次录制还没开出分段，等画面开始写盘后再剪");
+                    }
+                    None => {
+                        return conflict(
+                            "这一场没有在录，不能按当前画面剪；请到剪辑台按场次回看后再剪",
+                        );
+                    }
+                },
             }
         }
         _ => return bad_request("要么给 in_ms 和 out_ms，要么只给 last_ms"),
@@ -267,7 +306,13 @@ pub async fn create_clip(
             .fetch_optional(&pool)
             .await
         {
-            Ok(Some(session_id)) if session_id == id => {}
+            Ok(Some(session_id)) => {
+                match session_groups::view_offset(&pool, id, session_id).await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => return bad_request("marker_id 不是这一场的标记"),
+                    Err(e) => return internal(e),
+                }
+            }
             Ok(_) => return bad_request("marker_id 不是这一场的标记"),
             Err(e) => return internal(e),
         }
@@ -296,7 +341,7 @@ pub async fn create_clip(
     if let Some(mode) = body.export {
         match clips::begin_export(&pool, clip.id, mode, now).await {
             Ok(Some(exporting)) => {
-                exports.start(exporting.clone());
+                exports.start_with_quality(exporting.clone(), body.quality.unwrap_or_default());
                 clip = exporting;
             }
             Ok(None) => {}
@@ -346,18 +391,43 @@ pub async fn update_clip(
     {
         return bad_request(message);
     }
-    let changes = ClipChanges {
-        in_ms: body.in_ms,
-        out_ms: body.out_ms,
-        title,
-    };
     let before = match clips::get(&pool, cid).await {
-        Ok(Some(clip)) if clip.session_id == id => clip,
+        Ok(Some(clip)) => clip,
         Ok(_) => return clip_not_found(),
         Err(e) => return internal(e),
     };
-    let range_changes = body.in_ms.is_some_and(|v| v != before.in_ms)
-        || body.out_ms.is_some_and(|v| v != before.out_ms);
+    let offset = match session_groups::view_offset(&pool, id, before.session_id).await {
+        Ok(Some(offset)) => offset,
+        Ok(None) => return clip_not_found(),
+        Err(e) => return internal(e),
+    };
+    let changes = ClipChanges {
+        in_ms: body.in_ms.map(|t| t - offset),
+        out_ms: body.out_ms.map(|t| t - offset),
+        title,
+    };
+    if changes.in_ms.is_some_and(|v| v < 0) {
+        return bad_request("入点早于来源场次，请新建合并场次切片以跨来源选段");
+    }
+    let range_changes = changes.in_ms.is_some_and(|v| v != before.in_ms)
+        || changes.out_ms.is_some_and(|v| v != before.out_ms);
+    if range_changes && before.session_id != id {
+        let source = match store::session(&pool, before.session_id).await {
+            Ok(Some(source)) => source,
+            Ok(None) => return clip_not_found(),
+            Err(e) => return internal(e),
+        };
+        if source.ended_at.is_some() {
+            let segments = match store::source_segments(&pool, before.session_id).await {
+                Ok(rows) => rows,
+                Err(e) => return internal(e),
+            };
+            let end = segments.iter().filter_map(|s| s.end_ms).max().unwrap_or(0);
+            if changes.out_ms.unwrap_or(before.out_ms) > end {
+                return bad_request("旧切片保留原来源范围；跨来源选段请新建合并场次切片");
+            }
+        }
+    }
     if range_changes
         && matches!(
             publisher.state_of(cid),
@@ -367,10 +437,10 @@ pub async fn update_clip(
         return conflict("这个切片在发布队列里，等它发完或先移出队列再改范围");
     }
     let now = recorder::now_ms();
-    match clips::update(&pool, id, cid, &changes, now).await {
+    match clips::update(&pool, before.session_id, cid, &changes, now).await {
         Ok(UpdateOutcome::Updated(mut clip)) => {
             if before.output_path.is_some() && clip.output_path.is_none() {
-                exports.remove_outputs(id, cid).await;
+                exports.remove_outputs(before.session_id, cid).await;
             }
             if (clip.in_ms, clip.out_ms) != (before.in_ms, before.out_ms) {
                 publisher.forget_upload(cid);
@@ -395,7 +465,7 @@ pub async fn update_clip(
                     Err(e) => return internal(e),
                 }
             }
-            Json(view(*clip, &exports)).into_response()
+            Json(view_in(*clip, &exports, id, offset)).into_response()
         }
         Ok(UpdateOutcome::NotFound) => clip_not_found(),
         Ok(UpdateOutcome::Busy) => conflict("正在导出，等导出结束后再改范围"),
@@ -413,16 +483,44 @@ pub async fn delete_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
     State(publisher): State<Arc<ClipPublisher>>,
+    State(renders): State<Arc<crate::server::workbench::renders::RenderJobs>>,
     Path((id, cid)): Path<(i64, i64)>,
 ) -> Response {
+    let owner = match clips::get(&pool, cid).await {
+        Ok(Some(clip)) => clip.session_id,
+        Ok(None) => return clip_not_found(),
+        Err(e) => return internal(e),
+    };
+    match session_groups::view_offset(&pool, id, owner).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return clip_not_found(),
+        Err(e) => return internal(e),
+    }
     if publisher.state_of(cid).is_some() {
         return conflict("这个切片在发布队列里，先把它移出队列再删");
     }
-    match clips::delete(&pool, id, cid).await {
+    let active: Option<i64> = match sqlx::query_scalar(
+        "SELECT active_render_id FROM clips WHERE id = ? AND session_id = ?",
+    )
+    .bind(cid)
+    .bind(owner)
+    .fetch_optional(&pool)
+    .await
+    {
+        Ok(value) => value.flatten(),
+        Err(error) => return internal(error),
+    };
+    if let Some(job) = active {
+        if let Err(error) = renders.cancel(job).await {
+            return internal(error);
+        }
+        return conflict("合成任务正在停止，请等任务结束后再删除切片");
+    }
+    match clips::delete(&pool, owner, cid).await {
         Ok(Some(_)) => {
             exports.cancel(cid);
-            exports.remove_outputs(id, cid).await;
-            let _ = tokio::fs::remove_file(cover_file(&exports.dir(id), cid)).await;
+            exports.remove_outputs(owner, cid).await;
+            let _ = tokio::fs::remove_file(cover_file(&exports.dir(owner), cid)).await;
             StatusCode::NO_CONTENT.into_response()
         }
         Ok(None) => clip_not_found(),
@@ -434,18 +532,49 @@ pub async fn delete_clip(
 #[serde(deny_unknown_fields)]
 pub struct ExportClip {
     pub mode: Mode,
+    pub quality: Option<QualityPreset>,
+    #[serde(default)]
+    pub recipe: Option<crate::server::workbench::renders::RenderRecipe>,
 }
 
 /// `POST /v1/clips/{cid}/export`：开始导出（失败后重试也是它），返回 202 和导出中的切片。
 pub async fn export_clip(
     State(pool): State<ConnectionPool>,
     State(exports): State<Arc<ClipExports>>,
+    State(publisher): State<Arc<ClipPublisher>>,
+    State(renders): State<Arc<crate::server::workbench::renders::RenderJobs>>,
     Path(cid): Path<i64>,
     Json(body): Json<ExportClip>,
 ) -> Response {
+    if matches!(
+        publisher.state_of(cid),
+        Some(JobState::Queued | JobState::Running | JobState::Paused)
+    ) {
+        return conflict("这个切片在发布队列里，等它发完或先移出队列再导出");
+    }
+    if let Some(recipe) = body.recipe {
+        if body.mode != Mode::Precise {
+            return bad_request("弹幕和遮挡需要合成导出，不能使用快速剪");
+        }
+        let clip = match clips::get(&pool, cid).await {
+            Ok(Some(clip)) => clip,
+            Ok(None) => return clip_not_found(),
+            Err(error) => return internal(error),
+        };
+        if let Err(error) = renders.enqueue_clip(&clip, recipe).await {
+            return conflict(error);
+        }
+        publisher.forget_upload(cid);
+        return match clips::get(&pool, cid).await {
+            Ok(Some(clip)) => (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response(),
+            Ok(None) => clip_not_found(),
+            Err(error) => internal(error),
+        };
+    }
     match clips::begin_export(&pool, cid, body.mode, recorder::now_ms()).await {
         Ok(Some(clip)) => {
-            exports.start(clip.clone());
+            publisher.forget_upload(cid);
+            exports.start_with_quality(clip.clone(), body.quality.unwrap_or_default());
             (StatusCode::ACCEPTED, Json(view(clip, &exports))).into_response()
         }
         Ok(None) => match clips::get(&pool, cid).await {
@@ -512,7 +641,12 @@ pub async fn download_clip(
     };
     let path = match query.format {
         DownloadFormat::Source => match clip.output_path.as_deref() {
-            Some(path) if matches!(clip.state, ClipState::Ready | ClipState::Published) => {
+            Some(path)
+                if matches!(
+                    clip.state,
+                    ClipState::Ready | ClipState::Published | ClipState::Failed
+                ) =>
+            {
                 std::path::PathBuf::from(path)
             }
             _ => return conflict(DownloadError::NotReady.to_string()),

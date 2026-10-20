@@ -1,8 +1,13 @@
-import { API_BASE } from './api-streamer'
+import { API_BASE, apiFetch, handleResponse } from './api-streamer'
+import { mutate } from 'swr'
+import { ReportedError } from './markers'
 
 /** GET /v1/sessions 的一行（后端 `api/sessions.rs::SessionSummary`） */
 export interface SessionSummary {
   id: number
+  kind?: 'source' | 'group'
+  source_session_ids?: number[]
+  group_session_id?: number | null
   streamer_id: number | null
   streamer_name: string
   title: string
@@ -31,6 +36,7 @@ export type SegmentState = 'recording' | 'finished' | 'missing' | 'deleted' | 'p
 
 export interface SegmentView {
   id: number
+  source_session_id?: number
   container: 'flv' | 'ts' | 'mp4' | 'mkv'
   state: SegmentState
   start_ms: number
@@ -49,6 +55,110 @@ export interface Gap {
 export interface SessionDetail extends SessionSummary {
   segments: SegmentView[]
   gaps: Gap[]
+  members?: SessionMember[]
+}
+
+export interface SessionMember {
+  source_session_id: number
+  offset_ms: number
+  started_at: number
+  ended_at: number | null
+  title: string
+  duration_ms: number
+  gap_before_ms: number
+}
+
+export interface SessionMergeCandidate {
+  id: number
+  streamer_id: number | null
+  streamer_name: string
+  previous_session_id: number
+  source_session_id: number
+  group_session_id: number | null
+  gap_ms: number
+  previous_title: string
+  source_title: string
+  previous_started_at: number
+  source_started_at: number
+  recipe_diff: boolean
+}
+
+export const mergeCandidatesUrl = '/v1/session-merge-candidates'
+
+async function mergeRequest(url: string, body?: unknown): Promise<Response> {
+  const response = await apiFetch(url, body === undefined ? { method: 'POST' } : {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  try {
+    return await handleResponse(response)
+  } catch (error) {
+    if (response.status === 401 || response.status === 403) {
+      throw new ReportedError(error instanceof Error ? error.message : String(error))
+    }
+    throw error
+  }
+}
+
+export async function mergeSessions(sourceSessionIds: number[]): Promise<{ id: number }> {
+  const response = await mergeRequest('/v1/session-groups', { source_session_ids: sourceSessionIds })
+  const result = await response.json()
+  void mutate(mergeCandidatesUrl)
+  return result
+}
+
+export async function confirmSessionMerge(id: number): Promise<{ id: number }> {
+  const response = await mergeRequest(`${mergeCandidatesUrl}/${id}/confirm`)
+  const result = await response.json()
+  void mutate(mergeCandidatesUrl)
+  return result
+}
+
+export async function dismissSessionMerge(id: number): Promise<void> {
+  await mergeRequest(`${mergeCandidatesUrl}/${id}/dismiss`)
+  void mutate(mergeCandidatesUrl)
+}
+
+/** 后续来源以媒体末尾加实际停录间隔定位，不用墙钟差直接平移时间轴。 */
+export function mergePreview(sources: SessionSummary[]): SessionMember[] {
+  const ordered = [...sources].sort((a, b) => a.started_at - b.started_at || a.id - b.id)
+  let end = 0
+  return ordered.map((source, index) => {
+    const previous = ordered[index - 1]
+    const gap = previous ? Math.max(0, source.started_at - (previous.ended_at ?? source.started_at)) : 0
+    const offset = end + gap
+    end = offset + source.duration_ms
+    return { source_session_id: source.id, offset_ms: offset, gap_before_ms: gap,
+      started_at: source.started_at, ended_at: source.ended_at, title: source.title, duration_ms: source.duration_ms }
+  })
+}
+
+export function mergeProblem(sources: SessionSummary[]): string | null {
+  if (sources.length < 2) return '请选择至少两场直播'
+  if (sources.length > 100) return '每次最多合并 100 个来源场次'
+  if (sources.some(source => source.kind === 'group' || source.group_session_id != null)) return '请选择尚未合并的原始场次'
+  const ordered = [...sources].sort((a, b) => a.started_at - b.started_at || a.id - b.id)
+  if (ordered.some(source => source.streamer_id === null)) return '来源场次没有关联主播，不能合并'
+  if (ordered.some(source => source.streamer_id !== ordered[0].streamer_id)) {
+    return '只能合并同一主播的场次'
+  }
+  if (ordered.some((source, index) => index < ordered.length - 1 && (source.recording || source.ended_at === null))) {
+    return '只有最后一个来源场次可以仍在录制'
+  }
+  if (ordered.some((source, index) => index > 0 && source.started_at < (ordered[index - 1].ended_at ?? Infinity))) {
+    return '来源场次的录制时间重叠，不能合并'
+  }
+  return null
+}
+
+/** 视图中的画面换算到对象的真实归属；其他来源或来源之间的缺口返回 null。 */
+export function timeForOwner(detail: SessionDetail, ownerSessionId: number, atMs: number): number | null {
+  if (!Number.isFinite(atMs) || atMs < 0) return null
+  if (ownerSessionId === detail.id) return atMs
+  const member = detail.members?.find(source => source.source_session_id === ownerSessionId)
+  if (!member) return null
+  const end = detail.segments.filter(segment => segment.source_session_id === ownerSessionId)
+    .reduce((end, segment) => Math.max(end, segmentEnd(segment)), member.offset_ms + member.duration_ms)
+  return atMs >= member.offset_ms && atMs <= end ? atMs - member.offset_ms : null
 }
 
 export interface Keyframe {
@@ -62,6 +172,20 @@ export interface KeyframeList {
 }
 
 export const sessionUrl = (id: number) => `/v1/sessions/${id}`
+
+/** 删除场次历史及其工作台记录；原始录像、切片和合成文件保留。 */
+export async function deleteSession(id: number): Promise<void> {
+  const response = await apiFetch(sessionUrl(id), { method: 'DELETE' })
+  try {
+    await handleResponse(response)
+  } catch (error) {
+    if (response.status === 401 || response.status === 403) {
+      throw new ReportedError(error instanceof Error ? error.message : String(error))
+    }
+    throw error
+  }
+}
+
 /** 回看页的地址；`t` 是起播位置（场次时间，毫秒），`clip` 是打开后载入到选段、在右侧切片列表里选中的切片 */
 export const replayHref = (id: number, t?: number | null, clip?: number | null) =>
   `/replay?session=${id}${t === undefined || t === null ? '' : `&t=${Math.max(0, Math.round(t))}`}${

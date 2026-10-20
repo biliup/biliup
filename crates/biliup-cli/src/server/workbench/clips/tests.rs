@@ -93,6 +93,77 @@ async fn ready(pool: &ConnectionPool, session: i64, in_ms: i64, out_ms: i64) -> 
     }
 }
 
+#[tokio::test]
+async fn stale_render_completion_cannot_replace_new_clip_product() {
+    let (_dir, pool, session, _) = flv_session().await;
+    let clip = insert(
+        &pool,
+        session,
+        &NewClip {
+            marker_id: None,
+            in_ms: 1000,
+            out_ms: 2000,
+            title: "render".into(),
+            created_by: None,
+            created_at: 5,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        begin_render_export(&pool, clip.id, 10, 6)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        fail_render_export(&pool, clip.id, 10, "cancelled", 7)
+            .await
+            .unwrap()
+    );
+    assert!(
+        begin_render_export(&pool, clip.id, 11, 8)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    let old = Exported {
+        cut_in_ms: 1000,
+        cut_out_ms: 2000,
+        output_path: "old.mp4".into(),
+        output_bytes: 1,
+        duration_ms: 1000,
+    };
+    assert!(
+        !finish_render_export(&pool, clip.id, 10, &old, 9)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !fail_render_export(&pool, clip.id, 10, "late failure", 9)
+            .await
+            .unwrap()
+    );
+    let new = Exported {
+        output_path: "new.mp4".into(),
+        ..old
+    };
+    assert!(
+        finish_render_export(&pool, clip.id, 11, &new, 10)
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        get(&pool, clip.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .output_path
+            .as_deref(),
+        Some("new.mp4")
+    );
+}
+
 fn spans(plan: &plan::Plan) -> Vec<(i64, i64, i64)> {
     plan.pieces
         .iter()
@@ -153,6 +224,67 @@ async fn cuts_snap_to_keyframes_like_the_keyframe_endpoint() {
         .await
         .unwrap_err();
     assert!(matches!(err, PlanError::Unavailable(_)), "{err}");
+}
+
+#[tokio::test]
+async fn mosaic_pending_recordings_cannot_be_exported_to_unmarked_clips() {
+    for name in [
+        "raw.flv.unmasked",
+        "raw.unmasked.flv",
+        "raw.unmasked.flv.part",
+    ] {
+        let (dir, pool, session) = setup().await;
+        let raw = write(dir.path(), name, &build_flv(0, 100, 25, None).bytes);
+        let id = add_segment(&pool, session, &raw, "finished", 0, Some(FLV_MS)).await;
+        let error = plan::compute(&pool, session, 0, 1000).await.unwrap_err();
+        assert!(matches!(error, PlanError::Unavailable(_)), "{error}");
+        assert!(error.to_string().contains("尚未完成画面遮挡"));
+        // Publication replaces the raw record with a masked, normal path. The
+        // same clip range is then exportable without removing the marker by hand.
+        let done = dir.path().join("masked.flv");
+        std::fs::rename(&raw, &done).unwrap();
+        sqlx::query("UPDATE segments SET path = ? WHERE id = ?")
+            .bind(done.to_string_lossy().as_ref())
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert!(matches!(
+            plan::compute(&pool, session, 0, 1000).await.unwrap(),
+            Attempt::Ready(_)
+        ));
+    }
+}
+
+/// 出点正好落在断流缺口之后那一段的开头（吸附到它的第一个关键帧）：那一段一帧都不在所选范围里，
+/// 不能把它的第一个 GOP 带进来。
+#[tokio::test]
+async fn an_out_point_at_the_start_of_the_segment_after_a_gap_excludes_that_segment() {
+    let (_dir, pool, session, _) = flv_session().await;
+
+    let plan = ready(&pool, session, 5000, 30_000).await;
+    assert_eq!(
+        (plan.cut_in_ms, plan.cut_out_ms),
+        (FLV_MS + 1000, 2 * FLV_MS)
+    );
+    assert_eq!(
+        spans(&plan),
+        vec![(FLV_MS + 1000, 2 * FLV_MS, FLV_MS - 1000)]
+    );
+    assert_eq!(plan.output_ms(30_000), FLV_MS - 1000);
+
+    // 整段落在缺口里，出点碰到下一段开头也一样没有画面
+    let err = plan::compute(&pool, session, 10_000, 30_000)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, PlanError::Unavailable(_)), "{err}");
+
+    // 下一段已被清理时，不碰它的范围照样能剪
+    sqlx::query("UPDATE segments SET state = 'deleted' WHERE start_ms = 30000")
+        .execute(&pool)
+        .await
+        .unwrap();
+    ready(&pool, session, 5000, 30_000).await;
 }
 
 #[tokio::test]

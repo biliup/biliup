@@ -8,7 +8,6 @@
 //! - JSON messages for chat, gifts, super chat, etc.
 
 use std::collections::BTreeMap;
-use std::io::Read;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -21,8 +20,9 @@ use reqwest::header::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, info};
 
+use crate::codec::{MAX_DECOMPRESSED_SIZE, decompress_limited};
 use crate::error::{DanmakuError, Result};
 use crate::message::{
     ChatMessage, DEFAULT_COLOR, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage,
@@ -112,6 +112,50 @@ impl Bilibili {
         let client = reqwest::Client::new();
         let wbi_signer = WbiSigner::new(client.clone());
         Self { client, wbi_signer }
+    }
+
+    fn auth_uid(context: &PlatformContext) -> Result<u64> {
+        let mut cookie_uid = None;
+        let mut has_session = false;
+        for part in context.cookie.as_deref().unwrap_or("").split(';') {
+            let Some((name, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            if name.trim() == "SESSDATA" && !value.trim().is_empty() {
+                has_session = true;
+            }
+            if name.trim() == "DedeUserID" {
+                let uid = value
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|uid| *uid > 0)
+                    .ok_or_else(|| {
+                        DanmakuError::Decode("Invalid Bilibili cookie UID (value redacted)".into())
+                    })?;
+                if cookie_uid.is_some_and(|previous| previous != uid) {
+                    return Err(DanmakuError::Decode(
+                        "Conflicting Bilibili cookie UIDs (values redacted)".into(),
+                    ));
+                }
+                cookie_uid = Some(uid);
+            }
+        }
+        if let (Some(explicit), Some(cookie)) = (context.uid, cookie_uid) {
+            if explicit != cookie {
+                return Err(DanmakuError::Decode(
+                    "Bilibili context UID does not match cookie UID (values redacted)".into(),
+                ));
+            }
+        }
+        // A logged-in API token cannot authenticate an anonymous uid=0 registration.
+        let uid = context.uid.or(cookie_uid).unwrap_or(0);
+        if has_session && cookie_uid.is_none() {
+            return Err(DanmakuError::Decode(
+                "Bilibili session cookie requires its account UID (credentials redacted)".into(),
+            ));
+        }
+        Ok(uid)
     }
 
     /// Build default headers for requests.
@@ -275,23 +319,28 @@ impl Bilibili {
 
     /// Decode a single packet, handling compression.
     fn decode_packet(data: &[u8]) -> Vec<DecodedPacket> {
-        Self::decode_packet_at_depth(data, 0)
+        let mut decompression_budget = MAX_DECOMPRESSED_SIZE;
+        Self::decode_packet_at_depth(data, 0, &mut decompression_budget)
     }
 
-    fn decode_packet_at_depth(data: &[u8], depth: u8) -> Vec<DecodedPacket> {
+    fn decode_packet_at_depth(
+        data: &[u8],
+        depth: u8,
+        decompression_budget: &mut usize,
+    ) -> Vec<DecodedPacket> {
         let mut packets = Vec::new();
         let mut offset = 0;
 
         while offset + 16 <= data.len() {
             let packet_len = BigEndian::read_u32(&data[offset..offset + 4]) as usize;
-            let _header_len = BigEndian::read_u16(&data[offset + 4..offset + 6]);
+            let header_len = BigEndian::read_u16(&data[offset + 4..offset + 6]) as usize;
             let version = BigEndian::read_u16(&data[offset + 6..offset + 8]);
             let operation = BigEndian::read_u32(&data[offset + 8..offset + 12]);
             let _sequence = BigEndian::read_u32(&data[offset + 12..offset + 16]);
 
             // 声明长度必须至少覆盖 16 字节包头，否则该帧不可信：
             // packet_len < 16 时反向切片会 panic，packet_len == 0 还会死循环
-            if packet_len < 16 {
+            if header_len < 16 || packet_len < header_len {
                 debug!(
                     "Malformed packet length {}, dropping remaining {} bytes",
                     packet_len,
@@ -300,26 +349,39 @@ impl Bilibili {
                 break;
             }
 
-            if offset + packet_len > data.len() {
+            if packet_len > data.len() - offset {
                 break;
             }
 
-            let body = &data[offset + 16..offset + packet_len];
+            let body = &data[offset + header_len..offset + packet_len];
 
             match version {
                 ver::ZLIB | ver::BROTLI if depth >= MAX_DECODE_DEPTH => {
-                    debug!("Packet nesting exceeds depth {}, dropping", MAX_DECODE_DEPTH);
+                    debug!(
+                        "Packet nesting exceeds depth {}, dropping",
+                        MAX_DECODE_DEPTH
+                    );
                 }
                 ver::ZLIB => {
                     // Zlib compressed
-                    if let Ok(decompressed) = decompress_zlib(body) {
-                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
+                    if let Ok(decompressed) = decompress_zlib(body, *decompression_budget) {
+                        *decompression_budget -= decompressed.len();
+                        packets.extend(Self::decode_packet_at_depth(
+                            &decompressed,
+                            depth + 1,
+                            decompression_budget,
+                        ));
                     }
                 }
                 ver::BROTLI => {
                     // Brotli compressed
-                    if let Ok(decompressed) = decompress_brotli(body) {
-                        packets.extend(Self::decode_packet_at_depth(&decompressed, depth + 1));
+                    if let Ok(decompressed) = decompress_brotli(body, *decompression_budget) {
+                        *decompression_budget -= decompressed.len();
+                        packets.extend(Self::decode_packet_at_depth(
+                            &decompressed,
+                            depth + 1,
+                            decompression_budget,
+                        ));
                     }
                 }
                 ver::RAW_JSON | ver::POPULARITY => {
@@ -510,7 +572,7 @@ impl Platform for Bilibili {
         url: &str,
         context: &PlatformContext,
     ) -> Result<ConnectionInfo> {
-        let uid = context.uid.unwrap_or(0);
+        let uid = Self::auth_uid(context)?;
         let cookie = context.cookie.as_deref();
         let headers = Self::default_headers(cookie);
 
@@ -554,7 +616,20 @@ impl Platform for Bilibili {
                     // We ignore it for now
                 }
                 op::AUTH_REPLY => {
-                    debug!("Auth reply received");
+                    let reply: Value = serde_json::from_slice(&packet.body).map_err(|_| {
+                        DanmakuError::Decode(
+                            "Invalid Bilibili auth response (body redacted)".into(),
+                        )
+                    })?;
+                    let code = reply.get("code").and_then(Value::as_i64).ok_or_else(|| {
+                        DanmakuError::Decode("Bilibili auth response missing numeric code".into())
+                    })?;
+                    if code != 0 {
+                        return Err(DanmakuError::Decode(format!(
+                            "Bilibili authentication rejected: code={code}"
+                        )));
+                    }
+                    info!("Bilibili danmaku authentication succeeded (code=0)");
                 }
                 _ => {
                     debug!("Unknown operation: {}", packet.operation);
@@ -591,21 +666,13 @@ fn build_packet(body: &[u8], operation: u32) -> Vec<u8> {
 }
 
 /// Decompress zlib data.
-fn decompress_zlib(data: &[u8]) -> Result<Vec<u8>> {
-    let mut decoder = ZlibDecoder::new(data);
-    let mut decompressed = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed)
-        .map_err(|e| DanmakuError::Compression(format!("zlib: {}", e)))?;
-    Ok(decompressed)
+fn decompress_zlib(data: &[u8], limit: usize) -> Result<Vec<u8>> {
+    decompress_limited(ZlibDecoder::new(data), "zlib", limit)
 }
 
 /// Decompress brotli data.
-fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>> {
-    let mut decompressed = Vec::new();
-    brotli::BrotliDecompress(&mut std::io::Cursor::new(data), &mut decompressed)
-        .map_err(|e| DanmakuError::Compression(format!("brotli: {}", e)))?;
-    Ok(decompressed)
+fn decompress_brotli(data: &[u8], limit: usize) -> Result<Vec<u8>> {
+    decompress_limited(brotli::Decompressor::new(data, 4096), "brotli", limit)
 }
 
 /// Generate a fake buvid3.
@@ -631,6 +698,85 @@ fn generate_fake_buvid3() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_identity_uses_the_same_cookie_as_token_headers() {
+        // Synthetic identities only; no real account credentials.
+        for uid in [12345u64, 67890] {
+            let context = PlatformContext::new()
+                .with_cookie(format!("SESSDATA=FIXTURE_ONLY; DedeUserID={uid}"));
+            let selected_uid = Bilibili::auth_uid(&context).unwrap();
+            assert_eq!(selected_uid, uid);
+            let headers = Bilibili::default_headers(context.cookie.as_deref());
+            assert!(
+                headers[COOKIE]
+                    .to_str()
+                    .unwrap()
+                    .ends_with(context.cookie.as_ref().unwrap())
+            );
+            let packet = Bilibili::build_auth_packet(selected_uid, 42, "FIXTURE_TOKEN");
+            assert_eq!(BigEndian::read_u32(&packet[8..12]), op::AUTH);
+            let body: Value = serde_json::from_slice(&packet[16..]).unwrap();
+            assert_eq!(
+                body,
+                serde_json::json!({
+                    "uid": uid, "roomid": 42, "protover": 3, "platform": "web",
+                    "type": 2, "key": "FIXTURE_TOKEN"
+                })
+            );
+        }
+        assert_eq!(Bilibili::auth_uid(&PlatformContext::new()).unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_or_conflicting_cookie_identity_is_rejected_without_credentials() {
+        for cookie in [
+            "SESSDATA=FIXTURE_ONLY",
+            "DedeUserID=0",
+            "DedeUserID=INVALID_FIXTURE",
+            "DedeUserID=18446744073709551616",
+            "DedeUserID=12345; DedeUserID=67890",
+        ] {
+            let error = Bilibili::auth_uid(&PlatformContext::new().with_cookie(cookie))
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("FIXTURE_ONLY"));
+            assert!(!error.contains("INVALID_FIXTURE"));
+            assert!(!error.contains("12345"));
+            assert!(!error.contains("67890"));
+        }
+        let mut context = PlatformContext::new().with_cookie("DedeUserID=12345");
+        context.uid = Some(67890);
+        assert!(Bilibili::auth_uid(&context).is_err());
+        context.uid = Some(0);
+        assert!(Bilibili::auth_uid(&context).is_err());
+        context.uid = Some(12345);
+        assert_eq!(Bilibili::auth_uid(&context).unwrap(), 12345);
+        context.cookie = Some("SESSDATA=FIXTURE_ONLY".into());
+        assert!(Bilibili::auth_uid(&context).is_err());
+    }
+
+    #[test]
+    fn authentication_requires_a_numeric_success_response() {
+        let protocol = Bilibili::new();
+        assert!(
+            protocol
+                .decode_message(&build_packet(br#"{"code":0}"#, op::AUTH_REPLY))
+                .is_ok()
+        );
+        for body in [
+            br#"{"code":-101,"message":"SECRET_FIXTURE"}"#.as_slice(),
+            br#"{"code":"0"}"#,
+            br#"{}"#,
+            b"SECRET_FIXTURE",
+        ] {
+            let error = protocol
+                .decode_message(&build_packet(body, op::AUTH_REPLY))
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("SECRET_FIXTURE"));
+        }
+    }
 
     #[test]
     fn test_extract_room_id() {
@@ -759,6 +905,35 @@ mod tests {
         let decoded = Bilibili::decode_packet(&packet);
         assert_eq!(decoded.len(), 1);
         assert_eq!(decoded[0].body, body);
+    }
+
+    #[test]
+    fn compressed_payloads_stop_at_the_decompression_limit() {
+        let data = vec![b'x'; 1025];
+        assert!(decompress_zlib(&zlib_compress(&data), 1024).is_err());
+        let mut compressed = Vec::new();
+        brotli::BrotliCompress(
+            &mut std::io::Cursor::new(&data),
+            &mut compressed,
+            &brotli::enc::BrotliEncoderParams::default(),
+        )
+        .unwrap();
+        assert!(decompress_brotli(&compressed, 1024).is_err());
+        assert_eq!(decompress_brotli(&compressed, 1025).unwrap(), data);
+    }
+
+    #[test]
+    fn extended_headers_are_respected_and_invalid_headers_are_dropped() {
+        let body = br#"{"cmd":"TEST"}"#;
+        let mut packet = build_packet(body, op::NOTIFICATION);
+        packet.splice(16..16, [0, 0, 0, 0]);
+        packet[..4].copy_from_slice(&((20 + body.len()) as u32).to_be_bytes());
+        packet[4..6].copy_from_slice(&20u16.to_be_bytes());
+        assert_eq!(Bilibili::decode_packet(&packet)[0].body, body);
+        for header_len in [0u16, 15, u16::MAX] {
+            packet[4..6].copy_from_slice(&header_len.to_be_bytes());
+            assert!(Bilibili::decode_packet(&packet).is_empty());
+        }
     }
 
     /// 超过深度上限的恶意多层压缩嵌套被丢弃，不发生栈溢出。

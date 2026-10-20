@@ -181,6 +181,15 @@ mod tests {
 
     /// 与 `router.rs` 同形的全部业务路由，处理函数一律返回 200，只看访问控制层的裁决。
     const ROUTES: &[(&str, &str)] = &[
+        ("GET", "/v1/activity-events"),
+        ("GET", "/v1/files/location"),
+        ("POST", "/v1/files/reveal"),
+        ("GET", "/v1/upload-queue"),
+        ("GET", "/v1/upload-queue/upload-1"),
+        ("GET", "/v1/session-merge-candidates"),
+        ("POST", "/v1/session-merge-candidates/1/confirm"),
+        ("POST", "/v1/session-merge-candidates/1/dismiss"),
+        ("POST", "/v1/session-groups"),
         ("GET", "/v1/streamers"),
         ("POST", "/v1/streamers"),
         ("PUT", "/v1/streamers"),
@@ -188,6 +197,7 @@ mod tests {
         ("PUT", "/v1/streamers/1/pause"),
         ("GET", "/v1/streamers/1/cover"),
         ("GET", "/v1/streamers/1/avatar"),
+        ("GET", "/v1/streamers/1/mosaic-frame"),
         ("GET", "/v1/streamers/1/live"),
         ("GET", "/v1/streamers/1/live-url"),
         ("GET", "/v1/streamers/1/danmaku"),
@@ -196,6 +206,7 @@ mod tests {
         ("GET", "/v1/live-rates"),
         ("GET", "/v1/sessions"),
         ("GET", "/v1/sessions/1"),
+        ("DELETE", "/v1/sessions/1"),
         ("GET", "/v1/sessions/1/keyframes"),
         ("GET", "/v1/sessions/1/media"),
         ("GET", "/v1/sessions/1/markers"),
@@ -212,6 +223,8 @@ mod tests {
         ("GET", "/v1/clips/1/download"),
         ("GET", "/v1/configuration"),
         ("PUT", "/v1/configuration"),
+        ("GET", "/v1/douyu/auth/status"),
+        ("POST", "/v1/douyu/auth/refresh"),
         ("GET", "/v1/streamer-info"),
         ("GET", "/v1/streamer-info/files/1"),
         ("PATCH", "/v1/sessions/1"),
@@ -248,7 +261,12 @@ mod tests {
         let operate = (true, false);
         let admin = (false, false);
         match (method, path) {
-            ("GET", "/v1/streamers")
+            ("GET", "/v1/activity-events")
+            | ("GET", "/v1/files/location")
+            | ("POST", "/v1/files/reveal")
+            | ("GET", "/v1/upload-queue")
+            | ("GET", "/v1/upload-queue/upload-1")
+            | ("GET", "/v1/streamers")
             | ("GET", "/v1/streamers/1/cover")
             | ("GET", "/v1/streamers/1/avatar")
             | ("GET", "/v1/streamers/1/live")
@@ -277,11 +295,16 @@ mod tests {
             | ("GET", "/static/ds_update.log")
             | ("GET", "/static/a.flv")
             | ("GET", "/v1/ws/logs") => view,
-            ("POST", "/v1/streamers")
+            ("GET", "/v1/session-merge-candidates")
+            | ("POST", "/v1/session-merge-candidates/1/confirm")
+            | ("POST", "/v1/session-merge-candidates/1/dismiss")
+            | ("POST", "/v1/session-groups")
+            | ("POST", "/v1/streamers")
             | ("PUT", "/v1/streamers")
             | ("DELETE", "/v1/streamers/1")
             | ("PUT", "/v1/streamers/1/pause")
             | ("PATCH", "/v1/sessions/1")
+            | ("DELETE", "/v1/sessions/1")
             | ("POST", "/v1/upload/streamers")
             | ("DELETE", "/v1/upload/streamers/1")
             | ("GET", "/v1/users")
@@ -311,11 +334,27 @@ mod tests {
                 .delete(|| async { StatusCode::OK })
         };
         Router::new()
+            .route("/v1/activity-events", ok())
+            .route("/v1/files/location", ok())
+            .route("/v1/files/reveal", post(|| async { StatusCode::OK }))
+            .route("/v1/upload-queue", ok())
+            .route("/v1/upload-queue/{id}", ok())
+            .route("/v1/session-merge-candidates", ok())
+            .route(
+                "/v1/session-merge-candidates/{id}/confirm",
+                post(|| async { StatusCode::OK }),
+            )
+            .route(
+                "/v1/session-merge-candidates/{id}/dismiss",
+                post(|| async { StatusCode::OK }),
+            )
+            .route("/v1/session-groups", post(|| async { StatusCode::OK }))
             .route("/v1/streamers", any())
             .route("/v1/streamers/{id}", delete(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/pause", put(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/cover", ok())
             .route("/v1/streamers/{id}/avatar", ok())
+            .route("/v1/streamers/{id}/mosaic-frame", ok())
             .route("/v1/streamers/{id}/live", ok())
             .route("/v1/streamers/{id}/live-url", ok())
             .route("/v1/streamers/{id}/danmaku", ok())
@@ -347,9 +386,12 @@ mod tests {
             .route("/v1/clips/{cid}/export", post(|| async { StatusCode::OK }))
             .route("/v1/clips/{cid}/download", ok())
             .route("/v1/configuration", any())
+            .route("/v1/douyu/auth/status", ok())
+            .route("/v1/douyu/auth/refresh", post(|| async { StatusCode::OK }))
             .route("/v1/streamer-info", ok())
             .route("/v1/streamer-info/files/{id}", ok())
             .route("/v1/sessions/{id}", patch(|| async { StatusCode::OK }))
+            .route("/v1/sessions/{id}", delete(|| async { StatusCode::OK }))
             .route("/v1/upload/streamers", any())
             .route("/v1/upload/streamers/{id}", any())
             .route("/v1/users", any())

@@ -39,6 +39,8 @@ pub struct AlertList {
 #[derive(Debug, Serialize)]
 pub struct FleetSummary {
     pub nodes_total: usize,
+    /// 已加入且未吊销的远端节点；没有远端节点时首页保持单机视图。
+    pub remote_nodes: usize,
     pub nodes_online: usize,
     /// 在线节点正在录制的房间数之和
     pub recording: usize,
@@ -103,6 +105,7 @@ impl Controller {
         let alerts = self.alerts.lock().unwrap();
         Ok(FleetSummary {
             nodes_total: rows.len(),
+            remote_nodes: rows.iter().filter(|row| !self.is_local(row.id)).count(),
             nodes_online,
             recording,
             alerts: alerts.len(),

@@ -21,42 +21,98 @@ use qrcode::QrCode;
 use qrcode::render::unicode;
 use reqwest::Body;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 use tracing::{info, warn};
 
 // 断点续传的数据结构
 #[derive(Serialize, Deserialize, Debug)]
 struct UploadCheckpoint {
+    manifest: UploadManifest,
     videos: Vec<Video>,
     uploaded_files: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+struct UploadManifest {
+    account_id: u64,
+    files: Vec<UploadFileIdentity>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+struct UploadFileIdentity {
+    path: PathBuf,
+    size: u64,
+    modified: Option<(u64, u32)>,
+}
+
+impl UploadManifest {
+    fn new(account_id: u64, paths: &[PathBuf]) -> std::io::Result<Self> {
+        let files = paths
+            .iter()
+            .map(|path| {
+                let path = path.canonicalize()?;
+                let metadata = std::fs::metadata(&path)?;
+                let modified = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| (duration.as_secs(), duration.subsec_nanos()));
+                Ok(UploadFileIdentity {
+                    path,
+                    size: metadata.len(),
+                    modified,
+                })
+            })
+            .collect::<std::io::Result<_>>()?;
+        Ok(Self { account_id, files })
+    }
+
+    fn checkpoint_name(&self) -> std::io::Result<String> {
+        let encoded = serde_json::to_vec(self)?;
+        Ok(format!(
+            "biliup_checkpoint_{:x}.json",
+            Sha256::digest(encoded)
+        ))
+    }
+}
+
 impl UploadCheckpoint {
-    fn new() -> Self {
+    fn new(manifest: UploadManifest) -> Self {
         Self {
+            manifest,
             videos: Vec::new(),
             uploaded_files: Vec::new(),
         }
     }
 
-    fn load(path: &Path) -> Option<Self> {
-        if !path.exists() {
-            return None;
-        }
-        match std::fs::read_to_string(path) {
-            Ok(content) => serde_json::from_str(&content).ok(),
-            Err(_) => None,
-        }
+    fn load(path: &Path, manifest: &UploadManifest, paths: &[PathBuf]) -> Option<Self> {
+        let checkpoint: Self = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        let expected_files: Vec<_> = paths
+            .iter()
+            .map(|path| path.to_string_lossy().to_string())
+            .collect();
+        (checkpoint.manifest == *manifest
+            && checkpoint.videos.len() == checkpoint.uploaded_files.len()
+            && expected_files.starts_with(&checkpoint.uploaded_files))
+        .then_some(checkpoint)
     }
 
     fn save(&self, path: &Path) -> std::io::Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, content)
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        std::fs::create_dir_all(parent)?;
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        serde_json::to_writer_pretty(&mut temporary, self)?;
+        temporary.write_all(b"\n")?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(path).map_err(|error| error.error)?;
+        Ok(())
     }
 
     fn is_uploaded(&self, file_path: &Path) -> bool {
@@ -386,17 +442,11 @@ pub async fn upload(
 ) -> AppResult<Vec<Video>> {
     info!("number of concurrent futures: {limit}");
 
-    // 生成断点续传文件路径（基于视频列表的哈希）
-    let checkpoint_filename = format!(
-        "biliup_checkpoint_{}.json",
-        video_path
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join("_")
-            .chars()
-            .fold(0u64, |acc, c| acc.wrapping_mul(31).wrapping_add(c as u64))
-    );
+    let manifest = UploadManifest::new(bili.login_info.token_info.mid, video_path)
+        .change_context_lazy(|| AppError::Custom("读取上传文件状态失败".into()))?;
+    let checkpoint_filename = manifest
+        .checkpoint_name()
+        .change_context(AppError::Unknown)?;
 
     // 使用平台相关的本地数据目录，Windows 下是 %LOCALAPPDATA%，Linux/macOS 下是 /tmp
     let checkpoint_path = if let Some(data_dir) = dirs::data_local_dir() {
@@ -407,10 +457,11 @@ pub async fn upload(
     };
 
     // 尝试加载已有的断点续传数据
-    let mut checkpoint = UploadCheckpoint::load(&checkpoint_path).unwrap_or_else(|| {
-        info!("No checkpoint found, starting fresh upload");
-        UploadCheckpoint::new()
-    });
+    let mut checkpoint = UploadCheckpoint::load(&checkpoint_path, &manifest, video_path)
+        .unwrap_or_else(|| {
+            info!("No checkpoint found, starting fresh upload");
+            UploadCheckpoint::new(manifest)
+        });
 
     if !checkpoint.uploaded_files.is_empty() {
         info!(
@@ -779,5 +830,124 @@ impl Stream for Progressbar {
             None => Poll::Ready(None),
             Some(s) => Poll::Ready(Some(Ok(s))),
         }
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+
+    #[test]
+    fn checkpoints_resume_only_the_same_account_and_unchanged_physical_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let video = dir.path().join("a.mp4");
+        std::fs::write(&video, b"first video").unwrap();
+        let paths = vec![video.clone()];
+        let manifest = UploadManifest::new(42, &paths).unwrap();
+        let original_name = manifest.checkpoint_name().unwrap();
+        let checkpoint_path = dir.path().join("nested/checkpoint.json");
+        let mut checkpoint = UploadCheckpoint::new(manifest);
+        checkpoint.add_video(&video, Video::new("uploaded-key"));
+        checkpoint.save(&checkpoint_path).unwrap();
+
+        let same = UploadManifest::new(42, &paths).unwrap();
+        let resumed = UploadCheckpoint::load(&checkpoint_path, &same, &paths).unwrap();
+        assert_eq!(resumed.videos[0].filename, "uploaded-key");
+        assert!(resumed.is_uploaded(&video));
+
+        let other_account = UploadManifest::new(43, &paths).unwrap();
+        assert_ne!(original_name, other_account.checkpoint_name().unwrap());
+        assert!(UploadCheckpoint::load(&checkpoint_path, &other_account, &paths).is_none());
+
+        let other_dir = tempfile::tempdir().unwrap();
+        let other = other_dir.path().join("a.mp4");
+        std::fs::write(&other, b"first video").unwrap();
+        let other_paths = vec![other];
+        let other_manifest = UploadManifest::new(42, &other_paths).unwrap();
+        assert_ne!(original_name, other_manifest.checkpoint_name().unwrap());
+        assert!(UploadCheckpoint::load(&checkpoint_path, &other_manifest, &other_paths).is_none());
+
+        std::fs::write(&video, b"a replacement video").unwrap();
+        let replaced = UploadManifest::new(42, &paths).unwrap();
+        assert_ne!(original_name, replaced.checkpoint_name().unwrap());
+        assert!(UploadCheckpoint::load(&checkpoint_path, &replaced, &paths).is_none());
+    }
+
+    #[test]
+    fn checkpoints_require_a_complete_ordered_prefix_and_reject_legacy_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths: Vec<_> = ["a.mp4", "b.mp4"].map(|name| dir.path().join(name)).into();
+        for path in &paths {
+            std::fs::write(path, b"video").unwrap();
+        }
+        let manifest = UploadManifest::new(42, &paths).unwrap();
+        let path = dir.path().join("checkpoint.json");
+        let mut checkpoint = UploadCheckpoint::new(UploadManifest::new(42, &paths).unwrap());
+        checkpoint.add_video(&paths[0], Video::new("uploaded-key"));
+        checkpoint.save(&path).unwrap();
+        assert!(UploadCheckpoint::load(&path, &manifest, &paths).is_some());
+
+        checkpoint.videos.clear();
+        checkpoint.save(&path).unwrap();
+        assert!(UploadCheckpoint::load(&path, &manifest, &paths).is_none());
+
+        checkpoint.videos.push(Video::new("uploaded-key"));
+        checkpoint.uploaded_files[0] = paths[1].to_string_lossy().to_string();
+        checkpoint.save(&path).unwrap();
+        assert!(UploadCheckpoint::load(&path, &manifest, &paths).is_none());
+
+        std::fs::write(&path, r#"{"videos":[],"uploaded_files":[]}"#).unwrap();
+        assert!(UploadCheckpoint::load(&path, &manifest, &paths).is_none());
+        assert!(
+            path.exists(),
+            "untrusted legacy checkpoints are left untouched"
+        );
+        assert!(UploadManifest::new(42, &[dir.path().join("missing.mp4")]).is_err());
+    }
+
+    #[test]
+    fn checkpoints_change_when_equal_sized_files_are_modified() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("video.mp4");
+        std::fs::write(&path, b"first").unwrap();
+        let paths = [path.clone()];
+        let original = UploadManifest::new(42, &paths).unwrap();
+        let original_time = original.files[0].modified.unwrap();
+
+        std::fs::write(&path, b"other").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(UNIX_EPOCH + std::time::Duration::from_secs(original_time.0 + 60))
+            .unwrap();
+
+        let changed = UploadManifest::new(42, &paths).unwrap();
+        assert_eq!(original.files[0].size, changed.files[0].size);
+        assert_ne!(
+            original.checkpoint_name().unwrap(),
+            changed.checkpoint_name().unwrap()
+        );
+    }
+
+    #[test]
+    fn saving_a_checkpoint_atomically_replaces_the_previous_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = [dir.path().join("a.mp4"), dir.path().join("b.mp4")];
+        for path in &paths {
+            std::fs::write(path, b"video").unwrap();
+        }
+        let manifest = UploadManifest::new(42, &paths).unwrap();
+        let checkpoint_path = dir.path().join("checkpoint.json");
+        let mut checkpoint = UploadCheckpoint::new(UploadManifest::new(42, &paths).unwrap());
+        checkpoint.add_video(&paths[0], Video::new("first-key"));
+        checkpoint.save(&checkpoint_path).unwrap();
+        checkpoint.add_video(&paths[1], Video::new("second-key"));
+        checkpoint.save(&checkpoint_path).unwrap();
+
+        let resumed = UploadCheckpoint::load(&checkpoint_path, &manifest, &paths).unwrap();
+        assert_eq!(resumed.videos.len(), 2);
+        assert_eq!(resumed.videos[1].filename, "second-key");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
     }
 }

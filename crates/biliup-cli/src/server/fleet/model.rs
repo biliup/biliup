@@ -6,6 +6,7 @@
 
 use crate::server::config::ConfigPatch;
 use crate::server::infrastructure::models::hook_step::HookStep;
+use biliup::downloader::live::DouyuCookieInput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -20,7 +21,12 @@ pub struct RoomSpec {
     pub time_range: Option<String>,
     #[serde(default)]
     pub format: Option<String>,
-    #[serde(default, rename = "override")]
+    #[serde(
+        default,
+        rename = "override",
+        serialize_with = "serialize_room_override",
+        deserialize_with = "deserialize_room_override"
+    )]
     pub override_cfg: Option<ConfigPatch>,
     #[serde(default)]
     pub preprocessor: Option<Vec<HookStep>>,
@@ -36,6 +42,36 @@ pub struct RoomSpec {
     pub excluded_keywords: Option<Value>,
 }
 
+/// Room overrides cross Fleet/HA machine boundaries. Passport tickets and their
+/// renewal policy are local; only the normal Web-cookie portion may travel.
+fn shared_room_override(mut patch: ConfigPatch) -> ConfigPatch {
+    patch.douyu_ltp0 = None;
+    patch.douyu_refresh_device_id = None;
+    patch.douyu_auto_refresh = None;
+    if let Some(Some(cookie)) = patch.douyu_cookie.as_ref() {
+        patch.douyu_cookie = DouyuCookieInput::parse(cookie)
+            .ok()
+            .map(|parsed| Some(parsed.cookie));
+    }
+    patch
+}
+
+fn serialize_room_override<S: serde::Serializer>(
+    patch: &Option<ConfigPatch>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    patch
+        .clone()
+        .map(shared_room_override)
+        .serialize(serializer)
+}
+
+fn deserialize_room_override<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ConfigPatch>, D::Error> {
+    Option::<ConfigPatch>::deserialize(deserializer).map(|patch| patch.map(shared_room_override))
+}
+
 impl RoomSpec {
     /// 去掉首尾空白、把空串当成没填，与本地表单保存时的处理一致
     pub fn normalized(mut self) -> Self {
@@ -49,6 +85,7 @@ impl RoomSpec {
         self.filename_prefix = clean(self.filename_prefix);
         self.time_range = clean(self.time_range);
         self.format = clean(self.format);
+        self.override_cfg = self.override_cfg.map(shared_room_override);
         for value in [&mut self.opt_args, &mut self.excluded_keywords] {
             if matches!(value, Some(Value::Null)) {
                 *value = None;
@@ -183,6 +220,57 @@ mod tests {
 
     fn room(json: Value) -> RoomSpec {
         serde_json::from_value(json).unwrap()
+    }
+
+    #[test]
+    fn douyu_room_transport_strips_passport_fields_in_both_directions() {
+        let cookie = serde_json::json!([
+            {"name":"acf_uid","value":"42","domain":"www.douyu.com"},
+            {"name":"acf_auth","value":"web","domain":"www.douyu.com"},
+            {"name":"LTP0","value":"private-ticket","domain":"passport.douyu.com"},
+            {"name":"dy_did","value":"private-device","domain":"passport.douyu.com"},
+        ])
+        .to_string();
+        let patch: ConfigPatch = serde_json::from_value(serde_json::json!({
+            "douyu_cookie":cookie,
+            "douyu_ltp0":"explicit-private-ticket",
+            "douyu_refresh_device_id":"explicit-private-device",
+            "douyu_auto_refresh":true,
+            "douyu_rate":0,
+        }))
+        .unwrap();
+        let spec = RoomSpec {
+            url: "https://www.douyu.com/1".into(),
+            remark: "r".into(),
+            override_cfg: Some(patch),
+            ..Default::default()
+        };
+        let outgoing = serde_json::to_value(&spec).unwrap();
+        assert!(!outgoing.to_string().contains("private"));
+        assert_eq!(
+            outgoing["override"]["douyu_cookie"],
+            "acf_auth=web; acf_uid=42"
+        );
+        assert_eq!(outgoing["override"]["douyu_rate"], 0);
+        for parsed in [
+            room(
+                serde_json::json!({"url":"u","remark":"r","override":{"douyu_cookie":cookie,"douyu_ltp0":"private-ticket","douyu_refresh_device_id":"private-device","douyu_auto_refresh":false}}),
+            ),
+            spec.normalized(),
+        ] {
+            let patch = parsed.override_cfg.unwrap();
+            assert!(patch.douyu_ltp0.is_none());
+            assert!(patch.douyu_refresh_device_id.is_none());
+            assert!(patch.douyu_auto_refresh.is_none());
+            assert_eq!(
+                patch.douyu_cookie.as_ref().and_then(|v| v.as_deref()),
+                Some("acf_auth=web; acf_uid=42")
+            );
+        }
+        let invalid = room(
+            serde_json::json!({"url":"u","remark":"r","override":{"douyu_cookie":"private-invalid"}}),
+        );
+        assert!(invalid.override_cfg.unwrap().douyu_cookie.is_none());
     }
 
     #[test]

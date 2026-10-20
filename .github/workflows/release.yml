@@ -1,4 +1,5 @@
 name: Release
+run-name: Release ${{ inputs.tag || github.ref_name }}
 on:
   # schedule:
   # - cron: '0 0 * * *' # midnight UTC
@@ -7,6 +8,17 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
     ## - release
+  # 从默认分支运行工作流，并显式指定要补发的旧 tag；不受提交说明中的跳过指令影响。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建并发布的已有 tag，如 v1.3.0'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
   BIN_NAME: biliup
@@ -18,8 +30,32 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Validate tag and resolve commit
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a release tag in the form v1.2.3"
+            exit 1
+          fi
+          # 使用完整 tag 引用，兼容轻量/附注 tag，并为所有任务固定到同一个提交。
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
   dist:
     name: Dist
+    needs: [prepare]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false # don't fail other jobs if one fails
@@ -79,6 +115,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           submodules: true
 
       - uses: actions/setup-node@v4
@@ -168,8 +205,10 @@ jobs:
 
   publish:
     name: Publish
-    needs: [dist]
+    needs: [prepare, dist]
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
     permissions:
       # 向 Release 上传产物需要写权限
       contents: write
@@ -177,23 +216,23 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           submodules: false
+      # 随包字体不进仓库：按固定 SHA-256 取回后再打进发布包
+      - name: Fetch render fonts
+        run: |
+          dir=crates/biliup-cli/assets/render-tools/fonts
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/NotoSansSC-Regular.otf" 'https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf'
+          echo "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b  $dir/NotoSansSC-Regular.otf" | sha256sum -c -
+          curl -fsSL --retry 3 -o "$dir/NotoEmoji.ttf" 'https://raw.githubusercontent.com/google/fonts/47d54ca1ebb14fd864695f1d39dc734f39017c33/ofl/notoemoji/NotoEmoji%5Bwght%5D.ttf'
+          echo "de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551  $dir/NotoEmoji.ttf" | sha256sum -c -
 
       - uses: actions/download-artifact@v4
         # with:
         #   path: dist
       # - run: ls -al ./dist
       - run: ls -al bins-*
-
-      - name: Calculate tag name
-        run: |
-          name=dev
-          if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            name=${GITHUB_REF:10}
-          fi
-          echo "val=$name" >> "$GITHUB_OUTPUT"
-          echo TAG=$name >> $GITHUB_ENV
-        id: tagname
 
       - name: Build archive
         shell: bash
@@ -213,6 +252,10 @@ jobs:
               mkdir tmp/$pkgname
               # cp LICENSE README.md tmp/$pkgname
               mv bins-$platform/$BIN_NAME$exe tmp/$pkgname
+              # Rust 弹幕排版派生自 DanmakuFactory，随包保留 MIT 来源声明
+              cp crates/danmaku-factory/THIRD-PARTY-NOTICES.txt tmp/$pkgname/
+              # External font resources stay beside the executable, with their licenses.
+              cp -R crates/biliup-cli/assets/render-tools tmp/$pkgname/render-tools
               chmod +x tmp/$pkgname/$BIN_NAME$exe
               if [ "$exe" = "" ]; then
                   tar cJf dist/$pkgname.tar.xz -C tmp $pkgname
@@ -226,10 +269,5 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: dist/*
           file_glob: true
-          tag: ${{ steps.tagname.outputs.val }}
+          tag: ${{ needs.prepare.outputs.tag }}
           overwrite: true
-
-      - name: Extract version
-        id: extract-version
-        run: |
-          echo "tag-name=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"

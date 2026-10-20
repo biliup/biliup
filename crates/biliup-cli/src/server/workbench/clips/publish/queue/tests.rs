@@ -11,6 +11,7 @@ struct Fake {
     uploads: Mutex<Vec<PathBuf>>,
     covers: Mutex<Vec<PathBuf>>,
     submitted: Mutex<Vec<Studio>>,
+    submit_attempts: AtomicU64,
     /// 下一次上传 / 投稿返回的失败（先进先出）。
     upload_failures: Mutex<VecDeque<Failure>>,
     submit_failures: Mutex<VecDeque<Failure>>,
@@ -84,6 +85,7 @@ impl Connection for FakeConnection {
     }
 
     async fn submit(&self, studio: &Studio) -> Result<Submitted, Failure> {
+        self.0.submit_attempts.fetch_add(1, Ordering::Relaxed);
         tokio::time::sleep(self.0.delay).await;
         if let Some(failure) = lock(&self.0.submit_failures).pop_front() {
             return Err(failure);
@@ -108,10 +110,15 @@ struct Env {
     exports: Arc<ClipExports>,
     fake: Arc<Fake>,
     publisher: Arc<ClipPublisher>,
+    observations: Option<Arc<UploadObservations>>,
 }
 
 /// 录完的一场（三段 FLV），主播绑定了一个选了「自制」的模板。
 async fn env() -> Env {
+    env_with_upload_observations(false, true).await
+}
+
+async fn env_with_upload_observations(observe: bool, spawn: bool) -> Env {
     let (dir, pool, session, _) = flv_session().await;
     let template: i64 = sqlx::query_scalar(
         r#"INSERT INTO uploadstreamers (template_name, title, tid, copyright, tags, user_cookie, extra_fields)
@@ -140,12 +147,21 @@ async fn env() -> Env {
         delay: Duration::from_millis(30),
         ..Default::default()
     });
-    let publisher = Arc::new(ClipPublisher::new(
-        pool.clone(),
-        exports.clone(),
-        Arc::new(fake.clone()),
-    ));
-    publisher.spawn();
+    let observations = if observe {
+        let observations = UploadObservations::new(pool.clone());
+        observations.initialize().await.unwrap();
+        Some(observations)
+    } else {
+        None
+    };
+    let mut publisher = ClipPublisher::new(pool.clone(), exports.clone(), Arc::new(fake.clone()));
+    if let Some(observations) = &observations {
+        publisher = publisher.with_observations(observations.clone());
+    }
+    let publisher = Arc::new(publisher);
+    if spawn {
+        publisher.spawn();
+    }
     Env {
         _dir: dir,
         pool,
@@ -153,6 +169,7 @@ async fn env() -> Env {
         exports,
         fake,
         publisher,
+        observations,
     }
 }
 
@@ -536,6 +553,7 @@ fn rate_limits_and_bilibili_rejections_are_told_apart() {
         message,
         "提交视频失败：B 站拒绝了投稿：您投稿的频率过快（code 21070）"
     );
+    assert!(matches!(describe_submit(&report), Failure::Other(_)));
     assert_eq!(
         bilibili_message(
             r#"ResponseData { code: 21566, data: None, message: "封面格式不对", ttl: Some(1) }"#,
@@ -543,6 +561,68 @@ fn rate_limits_and_bilibili_rejections_are_told_apart() {
         ),
         "B 站拒绝了封面：封面格式不对（code 21566）"
     );
+}
+
+#[tokio::test]
+async fn submit_timeouts_preserve_the_marker_and_require_confirmation() {
+    // A local server accepts the request but never replies, as if the response was lost.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (_socket, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+    });
+    let error = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_millis(30))
+        .build()
+        .unwrap()
+        .post(format!("http://{address}/submit"))
+        .send()
+        .await
+        .unwrap_err();
+    server.abort();
+    assert!(error.is_timeout());
+    let report = Report::new(Kind::from(error)).change_context(AppError::Unknown);
+    let failure = describe_submit(&report);
+    assert!(matches!(&failure, Failure::Unknown(message) if message.contains(UNKNOWN_HINT)));
+
+    let env = env().await;
+    let clip = env.clip(1000, 2000, "a").await;
+    lock(&env.fake.submit_failures).push_back(failure);
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    let (failed, _) = env.wait(job.id, JobState::Failed).await;
+    assert_eq!(failed.detail, "投稿结果未知");
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, Some(SubmitState::Submitting));
+    assert_eq!(row.submit_job, Some(job.id as i64));
+    assert!(matches!(
+        env.publisher.retry(job.id),
+        Err(ActionError::Conflict(message)) if message.contains(UNKNOWN_HINT)
+    ));
+    assert_eq!(env.fake.submit_attempts.load(Ordering::Relaxed), 1);
+
+    env.publisher.remove(job.id).unwrap();
+    assert!(
+        env.publisher
+            .check(std::slice::from_ref(&row), false)
+            .is_err()
+    );
+    let confirmed = env
+        .publisher
+        .enqueue(
+            env.session,
+            std::slice::from_ref(&row),
+            Settings::default(),
+            Mode::Quick,
+            None,
+            true,
+        )
+        .unwrap();
+    env.wait(confirmed.id, JobState::Done).await;
+    assert_eq!(env.fake.submit_attempts.load(Ordering::Relaxed), 2);
+    let row = clips::get(&env.pool, clip.id).await.unwrap().unwrap();
+    assert_eq!(row.submit_state, None);
 }
 
 /// 投稿请求到了 B 站、还没记账时进程退出：重启后切片记为投稿结果未知，再次发布要显式确认。
@@ -664,4 +744,51 @@ async fn bookkeeping_failures_are_shown_and_block_publishing_again() {
         .unwrap_err();
     assert!(matches!(refused, EnqueueError::Conflict(ref m) if m.contains(UNKNOWN_HINT)));
     assert_eq!(lock(&env.fake.submitted).len(), 1);
+}
+
+#[tokio::test]
+async fn clip_task_is_registered_when_enqueued_with_real_queue_order() {
+    let env = env_with_upload_observations(true, false).await;
+    let clip = env.clip(1_000, 2_000, "first").await;
+    let job = env.enqueue(std::slice::from_ref(&clip));
+    let id = lock(&env.publisher.queue)
+        .jobs
+        .iter()
+        .find(|queued| queued.view.id == job.id)
+        .and_then(|queued| queued.observation.as_ref())
+        .unwrap()
+        .observation()
+        .id()
+        .to_owned();
+    let task = env
+        .observations
+        .as_ref()
+        .unwrap()
+        .detail(&id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(task.task.source, "clip");
+    assert_eq!(task.task.scheduler_group, "clip-publish");
+    assert_eq!(task.task.state, "queued");
+    assert_eq!(task.task.queue_position, Some(1));
+    lock(&env.publisher.queue)
+        .jobs
+        .iter_mut()
+        .find(|queued| queued.view.id == job.id)
+        .unwrap()
+        .view
+        .state = JobState::Failed;
+    env.publisher.retry(job.id).unwrap();
+    let retried = env
+        .observations
+        .as_ref()
+        .unwrap()
+        .detail(&id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(retried.task.id, id);
+    assert!(retried.task.order > task.task.order);
+    assert_eq!(retried.task.state, "queued");
 }

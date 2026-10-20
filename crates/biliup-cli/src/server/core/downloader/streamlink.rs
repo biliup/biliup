@@ -378,7 +378,6 @@ impl StreamOutput {
     }
 }
 
-
 /// Rewrite already-resolved progressive HTTP(S) media URLs so Streamlink's
 /// built-in `http` plugin matches them.
 ///
@@ -591,10 +590,7 @@ mod tests {
     #[test]
     fn progressive_flv_gets_httpstream_prefix() {
         let url = "https://cdn.example/live/abc.flv?wsSecret=sig&wsTime=1";
-        assert_eq!(
-            streamlink_cli_url(url),
-            format!("httpstream://{url}")
-        );
+        assert_eq!(streamlink_cli_url(url), format!("httpstream://{url}"));
     }
 
     #[test]
@@ -657,7 +653,8 @@ mod tests {
             )
             .expect("args");
         assert!(
-            args.iter().any(|a| a == "httpstream://https://cdn.example/live.flv?sig=1"),
+            args.iter()
+                .any(|a| a == "httpstream://https://cdn.example/live.flv?sig=1"),
             "expected httpstream URL in args: {args:?}"
         );
         assert!(args.iter().any(|a| a == "best"));

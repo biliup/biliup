@@ -12,7 +12,7 @@
 //! （[`retention::pin`]），与标记的增删改在同一个事务里：被覆盖的分段在删除点推迟删除，标记删掉后
 //! 由清理任务删。
 
-use super::{live, retention};
+use super::{live, retention, session_groups};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use serde::Serialize;
 use sqlx::sqlite::SqliteRow;
@@ -34,6 +34,12 @@ pub const MAX_DELAY_MS: i64 = 60_000;
 pub struct Marker {
     pub id: i64,
     pub session_id: i64,
+    /// 查看合并场次时的坐标所属场次；`session_id` 始终保留标记的真实归属。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_session_id: Option<i64>,
+    /// 从来源场次继承的标记，供调用方显示来源。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_session_id: Option<i64>,
     /// 场次时间轴上的位置（毫秒）。
     pub at_ms: i64,
     pub label: String,
@@ -51,6 +57,8 @@ impl Marker {
         Ok(Self {
             id: row.try_get("id")?,
             session_id: row.try_get("session_id")?,
+            view_session_id: None,
+            source_session_id: None,
             at_ms: row.try_get("at_ms")?,
             label: row.try_get("label")?,
             color: row.try_get("color")?,
@@ -59,6 +67,15 @@ impl Marker {
             lookback_ms: row.try_get("lookback_ms")?,
             lookahead_ms: row.try_get("lookahead_ms")?,
         })
+    }
+
+    fn in_view(mut self, view_session_id: i64, offset_ms: i64) -> Self {
+        if view_session_id != self.session_id {
+            self.view_session_id = Some(view_session_id);
+            self.source_session_id = Some(self.session_id);
+            self.at_ms = self.at_ms.saturating_add(offset_ms);
+        }
+        self
     }
 }
 
@@ -122,6 +139,39 @@ pub fn watched_at_ms(session_id: i64, server_now: i64, timing: Timing) -> Option
     Some(anchor.session_ms_at(wall))
 }
 
+/// 合并场次使用仍在录的真实来源锚点，再平移到查看坐标。
+pub async fn watched_at_in_view(
+    pool: &ConnectionPool,
+    session_id: i64,
+    server_now: i64,
+    timing: Timing,
+) -> sqlx::Result<Option<i64>> {
+    let Some(source) = session_groups::active_source(pool, session_id).await? else {
+        return Ok(None);
+    };
+    Ok(watched_at_ms(source.source_session_id, server_now, timing)
+        .map(|at_ms| at_ms.saturating_add(source.offset_ms)))
+}
+
+/// 返回允许通过此场次操作的标记归属和坐标偏移。
+pub async fn owner_in_view(
+    pool: &ConnectionPool,
+    session_id: i64,
+    id: i64,
+) -> sqlx::Result<Option<(i64, i64)>> {
+    let Some(owner): Option<i64> =
+        sqlx::query_scalar("SELECT session_id FROM markers WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+    else {
+        return Ok(None);
+    };
+    Ok(session_groups::view_offset(pool, session_id, owner)
+        .await?
+        .map(|offset_ms| (owner, offset_ms)))
+}
+
 fn pin_owner(id: i64) -> String {
     format!("marker:{id}")
 }
@@ -145,6 +195,7 @@ pub async fn insert(
     session_id: i64,
     marker: &NewMarker,
 ) -> sqlx::Result<Marker> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let sql = format!(
         "INSERT INTO markers (session_id, at_ms, label, color, created_by, created_at, lookback_ms, lookahead_ms)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING {COLUMNS}"
@@ -169,13 +220,21 @@ pub async fn insert(
 
 /// 场次的全部标记，按时间轴排序。
 pub async fn list(pool: &ConnectionPool, session_id: i64) -> sqlx::Result<Vec<Marker>> {
-    let sql = format!("SELECT {COLUMNS} FROM markers WHERE session_id = ? ORDER BY at_ms, id");
+    let sql = format!(
+        "SELECT {COLUMNS}, COALESCE((
+             SELECT offset_ms FROM session_group_members gm
+             WHERE gm.group_session_id = ?1 AND gm.source_session_id = markers.session_id), 0) AS view_offset
+         FROM markers
+         WHERE session_id = ?1 OR session_id IN (
+             SELECT source_session_id FROM session_group_members WHERE group_session_id = ?1)
+         ORDER BY at_ms + view_offset, id"
+    );
     sqlx::query(&sql)
         .bind(session_id)
         .fetch_all(pool)
         .await?
         .iter()
-        .map(Marker::from_row)
+        .map(|row| Ok(Marker::from_row(row)?.in_view(session_id, row.try_get("view_offset")?)))
         .collect()
 }
 
@@ -186,6 +245,14 @@ pub async fn update(
     id: i64,
     changes: &MarkerChanges,
 ) -> sqlx::Result<Option<Marker>> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
+    let Some((owner_session_id, offset_ms)) = owner_in_view(pool, session_id, id).await? else {
+        return Ok(None);
+    };
+    let local_at_ms = changes.at_ms.map(|at_ms| at_ms.saturating_sub(offset_ms));
+    if local_at_ms.is_some_and(|at_ms| at_ms < 0) {
+        return Err(sqlx::Error::Protocol("标记不能移到来源场次开始之前".into()));
+    }
     let (color_set, color) = match &changes.color {
         Some(color) => (true, color.clone()),
         None => (false, None),
@@ -202,14 +269,14 @@ pub async fn update(
     );
     let mut tx = pool.begin().await?;
     let marker = sqlx::query(&sql)
-        .bind(changes.at_ms)
+        .bind(local_at_ms)
         .bind(&changes.label)
         .bind(color_set)
         .bind(color)
         .bind(changes.lookback_ms)
         .bind(changes.lookahead_ms)
         .bind(id)
-        .bind(session_id)
+        .bind(owner_session_id)
         .fetch_optional(&mut *tx)
         .await?
         .as_ref()
@@ -223,15 +290,19 @@ pub async fn update(
         pin(&mut tx, marker).await?;
     }
     tx.commit().await?;
-    Ok(marker)
+    Ok(marker.map(|marker| marker.in_view(session_id, offset_ms)))
 }
 
 /// 删一个标记，返回是否删到了。它的引用一起撤销。
 pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Result<bool> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
+    let Some((owner_session_id, _)) = owner_in_view(pool, session_id, id).await? else {
+        return Ok(false);
+    };
     let mut tx = pool.begin().await?;
     let done = sqlx::query("DELETE FROM markers WHERE id = ? AND session_id = ?")
         .bind(id)
-        .bind(session_id)
+        .bind(owner_session_id)
         .execute(&mut *tx)
         .await?;
     let deleted = done.rows_affected() > 0;
@@ -244,6 +315,7 @@ pub async fn delete(pool: &ConnectionPool, session_id: i64, id: i64) -> sqlx::Re
 
 /// 给还没有登记引用的标记补登，返回补了几个。启动时调用，补上引用接入之前打的标记。
 pub async fn pin_unpinned(pool: &ConnectionPool) -> sqlx::Result<usize> {
+    let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let mut tx = pool.begin().await?;
     let sessions: Vec<i64> = sqlx::query_scalar(
         "INSERT INTO segment_pins (owner, session_id, from_ms, to_ms)
@@ -266,9 +338,14 @@ pub async fn counts(pool: &ConnectionPool, session_ids: &[i64]) -> sqlx::Result<
     if session_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let placeholders = vec!["?"; session_ids.len()].join(", ");
+    let placeholders = vec!["(?)"; session_ids.len()].join(", ");
     let sql = format!(
-        "SELECT session_id, COUNT(*) FROM markers WHERE session_id IN ({placeholders}) GROUP BY session_id"
+        "WITH requested(session_id) AS (SELECT DISTINCT column1 FROM (VALUES {placeholders}))
+         SELECT r.session_id, COUNT(m.id) FROM requested r JOIN markers m
+           ON m.session_id = r.session_id OR EXISTS (
+               SELECT 1 FROM session_group_members gm
+               WHERE gm.group_session_id = r.session_id AND gm.source_session_id = m.session_id)
+         GROUP BY r.session_id"
     );
     let mut query = sqlx::query_as::<_, (i64, i64)>(&sql);
     for id in session_ids {
@@ -310,6 +387,118 @@ mod tests {
             lookback_ms: DEFAULT_LOOKBACK_MS,
             lookahead_ms: 0,
         }
+    }
+
+    async fn group(pool: &ConnectionPool, first: i64) -> (i64, i64) {
+        let second: i64 = sqlx::query_scalar(
+            "INSERT INTO stream_sessions (name, url, title, date, live_cover_path)
+             VALUES ('a', 'https://a', 't2', '2026-09-24 00:01:00', '') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let second = live::unique_session_id(pool, second).await;
+        let view: i64 = sqlx::query_scalar(
+            "INSERT INTO stream_sessions (name, url, title, date, live_cover_path, kind)
+             VALUES ('a', 'https://a', 'merged', '2026-09-24 00:00:00', '', 'group') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        for (ordinal, source, offset) in [(0, first, 0), (1, second, 60_000)] {
+            sqlx::query(
+                "INSERT INTO session_group_members(group_session_id, source_session_id, ordinal, offset_ms)
+                 VALUES (?, ?, ?, ?)",
+            )
+            .bind(view)
+            .bind(source)
+            .bind(ordinal)
+            .bind(offset)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        (view, second)
+    }
+
+    #[tokio::test]
+    async fn inherited_markers_keep_ownership_and_translate_edits() {
+        let (_dir, pool, first) = setup().await;
+        let (view, second) = group(&pool, first).await;
+        let a = insert(&pool, first, &new_marker(1_000)).await.unwrap();
+        let b = insert(&pool, second, &new_marker(2_000)).await.unwrap();
+        let c = insert(&pool, view, &new_marker(40_000)).await.unwrap();
+        let all = list(&pool, view).await.unwrap();
+        assert_eq!(
+            all.iter().map(|m| (m.id, m.at_ms)).collect::<Vec<_>>(),
+            [(a.id, 1_000), (c.id, 40_000), (b.id, 62_000)]
+        );
+        assert_eq!(all[2].session_id, second);
+        assert_eq!(all[2].source_session_id, Some(second));
+        assert_eq!(all[2].view_session_id, Some(view));
+        assert_eq!(
+            counts(&pool, &[view, first, second]).await.unwrap(),
+            HashMap::from([(view, 3), (first, 1), (second, 1)])
+        );
+
+        let changes = MarkerChanges {
+            at_ms: Some(63_000),
+            ..Default::default()
+        };
+        let changed = update(&pool, view, b.id, &changes).await.unwrap().unwrap();
+        assert_eq!(changed.at_ms, 63_000);
+        let source = list(&pool, second).await.unwrap();
+        assert_eq!(source[0].at_ms, 3_000);
+        assert_eq!(source[0].view_session_id, None);
+        assert!(
+            update(&pool, first, b.id, &changes)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            update(
+                &pool,
+                view,
+                b.id,
+                &MarkerChanges {
+                    at_ms: Some(59_999),
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err()
+        );
+        assert_eq!(list(&pool, second).await.unwrap()[0].at_ms, 3_000);
+        assert!(delete(&pool, view, b.id).await.unwrap());
+        assert!(list(&pool, second).await.unwrap().is_empty());
+        assert!(
+            !pinned(&pool)
+                .await
+                .iter()
+                .any(|(owner, _, _)| owner == &pin_owner(b.id))
+        );
+    }
+
+    #[tokio::test]
+    async fn live_group_marker_time_uses_the_tail_source_anchor() {
+        let (_dir, pool, first) = setup().await;
+        let (view, second) = group(&pool, first).await;
+        let guard = live::register(second, 1, None);
+        guard.anchor(2_000, 100_000);
+        assert_eq!(
+            watched_at_in_view(&pool, view, 100_500, Timing::default())
+                .await
+                .unwrap(),
+            Some(62_500)
+        );
+        drop(guard);
+        assert_eq!(
+            watched_at_in_view(&pool, view, 100_500, Timing::default())
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

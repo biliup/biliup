@@ -10,6 +10,7 @@ template = "blog/page.html"
 authors = ["Public"]
 
 [extra]
+language_code = "en-US"
 lead = "Mathematical notation in a project can be enabled by using third party JavaScript libraries."
 math = true
 +++

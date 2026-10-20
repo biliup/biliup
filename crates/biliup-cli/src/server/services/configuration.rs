@@ -35,10 +35,23 @@ pub async fn apply_config(
 ) -> Result<Config, ApplyConfigError> {
     let mut new_config = new_config;
     new_config.normalize_segment_limits();
-    new_config.validate_segment_limits()?;
+    new_config
+        .validate_segment_limits()
+        .map_err(|error| ApplyConfigError::Invalid(error.current_context().to_string()))?;
+    new_config
+        .validate_mosaic()
+        .map_err(ApplyConfigError::Invalid)?;
     new_config
         .validate_pool_sizes()
         .map_err(ApplyConfigError::Invalid)?;
+    // Validate before saving or resizing pools: a rejected form must not
+    // partially take effect or persist a filter that fails again on restart.
+    let new_filter = new_config
+        .loggers_level
+        .as_deref()
+        .map(EnvFilter::try_new)
+        .transpose()
+        .map_err(|_| ApplyConfigError::Invalid("日志级别格式无效".to_string()))?;
     // 界面拿到的 key 是掩码，交回来时换回原值；整块都没填时去掉，不多出 `auto_clip` 这个键
     new_config.auto_clip = match new_config
         .auto_clip
@@ -62,22 +75,20 @@ pub async fn apply_config(
     saved_config.normalize_segment_limits();
     saved_config.validate_segment_limits()?;
     crate::tools::set_configured_ffmpeg(saved_config.ffmpeg_path.as_deref());
+    crate::tools::set_configured_render_fonts(saved_config.render_fonts_dir.as_deref());
+    crate::tools::warn_legacy_danmaku_factory_path(saved_config.danmaku_factory_path.as_deref());
     // 下载池 / 上传池的容量不是每次从配置里读的，要在这里同步过去才能不重启就生效
     managers.resize_pools(saved_config.pool1_size, saved_config.pool2_size);
     *config.write().unwrap() = saved_config;
     crate::server::auto_clip::runner::kick();
     crate::server::fleet::ha::config_changed();
-    let guard = config.read().unwrap();
-    if let Some(loggers_level) = &guard.loggers_level {
-        let new_filter = EnvFilter::try_new(loggers_level)
-            .change_context(AppError::Custom(String::from("Invalid log level format")))?;
-
+    if let Some(new_filter) = new_filter {
         log_handle
             .modify(|filter| *filter = new_filter)
             .change_context(AppError::Unknown)?;
     }
 
-    Ok(guard.clone())
+    Ok(config.read().unwrap().clone())
 }
 
 /// 把配置写进 `configuration` 表 `key = 'config'` 的那一行（没有就插入），返回写入后的整行
@@ -241,6 +252,41 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn custom_segment_time_saves_and_invalid_duration_does_not_change_runtime_or_database() {
+        let f = fixture().await;
+        let valid = Config {
+            segment_time: Some("00:07:30".into()),
+            ..Config::default()
+        };
+        f.apply(valid.clone()).await.unwrap();
+        assert_eq!(
+            f.saved_rows().await[0].segment_time.as_deref(),
+            Some("00:07:30")
+        );
+        assert_eq!(
+            f.config.read().unwrap().segment_time.as_deref(),
+            Some("00:07:30")
+        );
+        let original_sizes = f.pool_sizes();
+        for value in ["7:60", "bad", "-1", "0.0000000001"] {
+            let result = f
+                .apply(Config {
+                    segment_time: Some(value.into()),
+                    pool1_size: 8,
+                    ..valid.clone()
+                })
+                .await;
+            assert!(
+                matches!(result, Err(ApplyConfigError::Invalid(_))),
+                "{value}"
+            );
+            assert_eq!(f.saved_rows().await[0], valid);
+            assert_eq!(*f.config.read().unwrap(), valid);
+            assert_eq!(f.pool_sizes(), original_sizes);
+        }
+    }
+
     /// WebUI 的「上传重试次数限制」整份配置提交上来时存进库、读回内存；清空（`null`）后回到未设置
     #[tokio::test]
     async fn max_upload_limit_from_the_web_form_is_saved() {
@@ -254,6 +300,23 @@ mod tests {
             assert_eq!(applied.max_upload_limit, expected);
             assert_eq!(f.saved_rows().await[0].max_upload_limit, expected);
             assert_eq!(f.config.read().unwrap().max_upload_limit, expected);
+        }
+    }
+
+    /// 遮挡配置错误时，数据库和运行中的设置均保持不变。
+    #[tokio::test]
+    async fn invalid_mosaic_cannot_be_saved_or_applied() {
+        let f = fixture().await;
+        for mosaic in [json!({"enabled": true, "regions": []}), json!("invalid")] {
+            let result = f
+                .apply(Config {
+                    mosaic_config: Some(mosaic),
+                    ..Config::default()
+                })
+                .await;
+            assert!(matches!(result, Err(ApplyConfigError::Invalid(_))));
+            assert!(f.saved_rows().await.is_empty());
+            assert!(f.config.read().unwrap().mosaic_config.is_none());
         }
     }
 
@@ -334,10 +397,17 @@ mod tests {
         assert_ne!(f.config.read().unwrap().pool1_size, 9);
     }
 
-    /// 日志级别写错时报错；此前的步骤已经完成，配置已落库并生效
+    /// 非法日志级别与其它非法输入一样，在任何持久化和运行状态修改前拒绝。
     #[tokio::test]
-    async fn an_invalid_log_level_is_reported_after_the_config_takes_effect() {
+    async fn an_invalid_log_level_does_not_change_saved_or_running_config() {
         let f = fixture().await;
+        f.apply(Config {
+            pool1_size: 2,
+            loggers_level: Some("warn".to_string()),
+            ..Config::default()
+        })
+        .await
+        .unwrap();
         let result = f
             .apply(Config {
                 pool1_size: 4,
@@ -346,21 +416,24 @@ mod tests {
             })
             .await;
 
-        let Err(ApplyConfigError::Internal(report)) = result else {
-            panic!("非法的日志级别应报内部错误：{result:?}");
+        let Err(ApplyConfigError::Invalid(message)) = result else {
+            panic!("非法的日志级别应在保存前拒绝：{result:?}");
         };
-        assert!(matches!(
-            report.current_context(),
-            AppError::Custom(message) if message == "Invalid log level format"
-        ));
-        assert_eq!(f.saved_rows().await[0].pool1_size, 4);
-        assert_eq!(f.config.read().unwrap().pool1_size, 4);
-        assert_eq!(f.pool_sizes().0, 4);
+        assert_eq!(message, "日志级别格式无效");
+        let saved = f.saved_rows().await;
+        assert_eq!(saved[0].pool1_size, 2);
+        assert_eq!(saved[0].loggers_level.as_deref(), Some("warn"));
+        assert_eq!(f.config.read().unwrap().pool1_size, 2);
+        assert_eq!(
+            f.config.read().unwrap().loggers_level.as_deref(),
+            Some("warn")
+        );
+        assert_eq!(f.pool_sizes().0, 2);
         assert_eq!(
             f.log_handle
                 .with_current(|filter| filter.to_string())
                 .unwrap(),
-            "info"
+            "warn"
         );
     }
 }

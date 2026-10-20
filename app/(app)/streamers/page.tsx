@@ -22,13 +22,12 @@ import {
 import React, { useMemo, useState } from 'react'
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
-import TemplateModal from '../../ui/TemplateModal'
+import { useRouter } from 'next/navigation'
 import OverrideModal from '../../ui/OverrideModal'
 import {
   LiveStreamerEntity,
   put,
   requestDelete,
-  sendRequest,
   fetcher,
   proxy,
   StreamerInfo,
@@ -89,23 +88,23 @@ export default function StreamersPage() {
   const managedIds = useMemo(() => new Set(fleet?.streamers ?? []), [fleet])
   const managedHint = fleet
     ? fleet.local
-      ? '这是分派到本机的 Fleet 房间，请到「节点 › 房间」修改'
+      ? '这是分派到本机的 Fleet 房间，请到「任务平台 › 节点管理 › 房间」修改'
       : `由控制面 ${fleet.controller} 管理，请到控制面修改`
     : undefined
   // 一主一备里的节点：配对里的直播间照常增删改、暂停，改动与对端双向同步
   const pair = fleet?.pair
   const pairedIds = useMemo(() => new Set(pair?.streamers ?? []), [pair])
   const pairHint = pair
-    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来。run 命令与边录边传（sync-downloader）不随配对同步，请到控制面的「节点 › 房间」设置，这里改了会被退回`
+    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来。run 命令与边录边传（sync-downloader）不随配对同步，请到控制面的「任务平台 › 节点管理 › 房间」设置，这里改了会被退回`
     : undefined
   // 被控制面移除后转为本机自管并暂停、等确认恢复的直播间；手动恢复后标记立即消失
   const revokedIds = useMemo(() => new Set(me?.fleet_revoked?.streamers ?? []), [me?.fleet_revoked])
   const awaitingResume = (item: LiveStreamerEntity) => revokedIds.has(item.id) && item.status === 'Pause'
 
   // ---- 增删改 ----
+  const router = useRouter()
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
   const { trigger: updateStreamers } = useSWRMutation('/v1/streamers', put)
-  const { trigger } = useSWRMutation('/v1/streamers', sendRequest)
 
   const onConfirm = async (id: number) => {
     await deleteStreamers(id)
@@ -119,31 +118,14 @@ export default function StreamersPage() {
     return values
   }
 
-  const handleOk = async (values: any) => {
-    // 提交:表单 {cmd, value} → 后端 HookStep
-    if (values?.postprocessor) {
-      values.postprocessor = formListToHookStep(values.postprocessor)
-    }
-    try {
-      await trigger(values)
-    } catch (e: any) {
-      Notification.error({
-        title: '创建失败',
-        content: e?.message ?? String(e),
-      })
-      // 重新抛出,Modal onOk 保持打开,不丢失已填输入
-      throw e
-    }
-  }
-
   const handleUpdate = async (values: any) => {
     delete values.status
     delete values.statusTag
     delete values.upload_status
-    if (values?.postprocessor) {
-      values.postprocessor = formListToHookStep(values.postprocessor)
-    }
     try {
+      if (values?.postprocessor) {
+        values.postprocessor = formListToHookStep(values.postprocessor)
+      }
       await updateStreamers(values)
     } catch (e: any) {
       Notification.error({
@@ -252,7 +234,7 @@ export default function StreamersPage() {
     }
   }
 
-  // 编辑 / 暂停 / 删除 / 高级四个操作，网格卡片与列表行共用，只是外层容器不同
+  // 编辑 / 暂停 / 删除 / 画面遮挡 / 高级操作，网格卡片与列表行共用，只是外层容器不同
   // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
   // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
   // 按角色只渲染有权限的按钮（只读观察者一个都没有）
@@ -282,9 +264,7 @@ export default function StreamersPage() {
         </Tooltip>
       ),
       canEdit && (
-        <TemplateModal key="edit" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" {...lock} />
-        </TemplateModal>
+        <Button key="edit" onClick={() => router.push(`/streamers/editor?id=${item.id}`)} theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" {...lock} />
       ),
       canControl && <PauseButton key="pause" streamer={item} {...lock} />,
       canEdit && (
@@ -299,8 +279,33 @@ export default function StreamersPage() {
         </Popconfirm>
       ),
       canHooks && (
+        <OverrideModal
+          key="mosaic"
+          initialPanel="mosaic"
+          onOk={handleUpdate}
+          entity={handleEntityPostprocessor({ ...item })}
+        >
+          <Button
+            theme="borderless"
+            type="tertiary"
+            size="small"
+            title="配置录制分段的马赛克、模糊或纯色遮挡"
+            {...lock}
+          >
+            画面遮挡
+          </Button>
+        </OverrideModal>
+      ),
+      canHooks && (
         <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button theme="borderless" type="tertiary" icon={<IconWrench />} aria-label="高级" {...lock} />
+          <Button
+            theme="borderless"
+            type="tertiary"
+            icon={<IconWrench />}
+            aria-label="配置覆写"
+            title="配置覆写（平台与下载设置）"
+            {...lock}
+          />
         </OverrideModal>
       ),
     ].filter(Boolean)
@@ -329,11 +334,9 @@ export default function StreamersPage() {
         icon={<IconVideoListStroked size="large" />}
         actions={
           canEdit && (
-            <TemplateModal onOk={handleOk}>
-              <Button icon={<IconPlusCircle />} theme="solid">
-                新建
-              </Button>
-            </TemplateModal>
+            <Button onClick={() => router.push('/streamers/editor')} icon={<IconPlusCircle />} theme="solid">
+              新建
+            </Button>
           )
         }
       />
@@ -361,8 +364,8 @@ export default function StreamersPage() {
             description={
               fleet.local
                 ? managedIds.size > 0
-                  ? `已启用「本机」节点：标着「托管」的 ${managedIds.size} 个直播间是分派到本机的 Fleet 房间，这里只能查看，编辑、暂停、删除请到「节点 › 房间」。这里自己添加的直播间不受影响。`
-                  : '已启用「本机」节点：分派到本机的 Fleet 房间会出现在这里并标为「托管」，请到「节点 › 房间」修改。这里自己添加的直播间不受影响。'
+                  ? `已启用「本机」节点：标着「托管」的 ${managedIds.size} 个直播间是分派到本机的 Fleet 房间，这里只能查看，编辑、暂停、删除请到「任务平台 › 节点管理 › 房间」。这里自己添加的直播间不受影响。`
+                  : '已启用「本机」节点：分派到本机的 Fleet 房间会出现在这里并标为「托管」，请到「任务平台 › 节点管理 › 房间」修改。这里自己添加的直播间不受影响。'
                 : managedIds.size > 0
                   ? `本机已加入控制面：标着「托管」的 ${managedIds.size} 个直播间由控制面 ${fleet.controller} 管理，这里只能查看，编辑、暂停、删除请到控制面操作。本机自己添加的直播间不受影响。`
                   : `本机已加入控制面 ${fleet.controller}；控制面分派来的直播间会由控制面 ${fleet.controller} 管理，这里只能查看。本机自己添加的直播间不受影响。`

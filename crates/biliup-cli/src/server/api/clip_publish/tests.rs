@@ -23,6 +23,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
+use tokio::sync::Notify;
 use tower::ServiceExt;
 use tower_sessions::SessionManagerLayer;
 use tower_sessions_sqlx_store::SqliteStore;
@@ -31,6 +32,12 @@ use tower_sessions_sqlx_store::SqliteStore;
 struct Fake {
     submitted: Mutex<Vec<Value>>,
     upload_failures: Mutex<VecDeque<Failure>>,
+    connect_hold: Mutex<Option<ConnectHold>>,
+}
+
+struct ConnectHold {
+    reached: Arc<Notify>,
+    release: Arc<Notify>,
 }
 
 struct FakeConnection(Arc<Fake>);
@@ -38,6 +45,11 @@ struct FakeConnection(Arc<Fake>);
 #[async_trait]
 impl Bilibili for Arc<Fake> {
     async fn connect(&self, _: &UploadStreamer) -> Result<Box<dyn Connection>, Failure> {
+        let hold = self.connect_hold.lock().unwrap().take();
+        if let Some(hold) = hold {
+            hold.reached.notify_one();
+            hold.release.notified().await;
+        }
         Ok(Box::new(FakeConnection(self.clone())))
     }
 }
@@ -73,6 +85,7 @@ impl Connection for FakeConnection {
 
 #[derive(Clone, FromRef)]
 struct AppState {
+    renders: Arc<crate::server::workbench::renders::RenderJobs>,
     pool: ConnectionPool,
     clips: Arc<ClipExports>,
     publisher: Arc<ClipPublisher>,
@@ -83,6 +96,7 @@ struct Fixture {
     dir: tempfile::TempDir,
     app: Router,
     pool: ConnectionPool,
+    clips: Arc<ClipExports>,
     fake: Arc<Fake>,
     publisher: Arc<ClipPublisher>,
     session: i64,
@@ -159,6 +173,7 @@ async fn fixture() -> Fixture {
     )
     .build();
     let clips = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let fixture_clips = clips.clone();
     let fake = Arc::new(Fake::default());
     let publisher = Arc::new(ClipPublisher::new(
         pool.clone(),
@@ -167,6 +182,10 @@ async fn fixture() -> Fixture {
     ));
     publisher.spawn();
     let state = AppState {
+        renders: Arc::new(crate::server::workbench::renders::RenderJobs::new(
+            pool.clone(),
+            dir.path().join("renders"),
+        )),
         pool: pool.clone(),
         clips,
         publisher: publisher.clone(),
@@ -174,6 +193,10 @@ async fn fixture() -> Fixture {
     };
     let app = Router::new()
         .route("/v1/sessions/{id}/clips", post(create_clip))
+        .route(
+            "/v1/sessions/{id}",
+            delete(crate::server::api::sessions::delete_session),
+        )
         .route(
             "/v1/sessions/{id}/clips/{cid}",
             patch(update_clip).delete(delete_clip),
@@ -198,11 +221,100 @@ async fn fixture() -> Fixture {
         dir,
         app,
         pool,
+        clips: fixture_clips,
         fake,
         publisher,
         session,
         template,
     }
+}
+
+#[tokio::test]
+async fn group_publish_jobs_include_sources_and_preserve_canonical_owners() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+        .await
+        .unwrap();
+    for (id, kind) in [(1, "source"), (2, "source"), (3, "group"), (4, "source")] {
+        sqlx::query("INSERT INTO stream_sessions(id,name,url,title,date,live_cover_path,kind) VALUES(?, '主播', 'https://example.test/1', '直播', '2026-10-13', '', ?)")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    for (ordinal, source) in [(0, 1), (1, 2)] {
+        sqlx::query("INSERT INTO session_group_members(group_session_id,source_session_id,ordinal,offset_ms) VALUES(3,?,?,?)")
+            .bind(source)
+            .bind(ordinal)
+            .bind(ordinal * 2000)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let exports = Arc::new(ClipExports::new(pool.clone(), dir.path().join("clips")));
+    let publisher = Arc::new(ClipPublisher::new(
+        pool.clone(),
+        exports,
+        Arc::new(Arc::new(Fake::default())),
+    ));
+    let mut expected = Vec::new();
+    for session in 1..=4 {
+        let clip = clips::insert(
+            &pool,
+            session,
+            &clips::NewClip::builder()
+                .in_ms(0)
+                .out_ms(1000)
+                .title("切片")
+                .created_at(1)
+                .build(),
+        )
+        .await
+        .unwrap();
+        let job = publisher
+            .enqueue(
+                session,
+                &[clip],
+                Settings::default(),
+                Mode::Quick,
+                None,
+                false,
+            )
+            .unwrap();
+        if session <= 3 {
+            expected.push((job.id, session));
+        }
+    }
+
+    let Json(group) = list_publish_jobs(
+        State(pool.clone()),
+        State(publisher.clone()),
+        Query(JobsQuery { session: Some(3) }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        group
+            .jobs
+            .iter()
+            .map(|job| (job.id, job.session_id))
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let Json(source) = list_publish_jobs(
+        State(pool.clone()),
+        State(publisher.clone()),
+        Query(JobsQuery { session: Some(1) }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(source.jobs.len(), 1);
+    assert_eq!(source.jobs[0].session_id, 1);
+    let Json(all) = list_publish_jobs(State(pool), State(publisher), Query(JobsQuery::default()))
+        .await
+        .unwrap();
+    assert_eq!(all.jobs.len(), 4);
 }
 
 async fn login(app: &Router, username: &str, password: &str) -> String {
@@ -275,6 +387,13 @@ async fn json_of(response: Response, status: StatusCode) -> Value {
 
 async fn text_of(response: Response, status: StatusCode) -> String {
     String::from_utf8(body_of(response, status).await).unwrap()
+}
+
+fn assert_admission_attempted(attempts: &mut tokio::sync::mpsc::UnboundedReceiver<()>) {
+    assert!(
+        attempts.try_recv().is_ok(),
+        "handler did not attempt admission lock"
+    );
 }
 
 impl Fixture {
@@ -723,6 +842,126 @@ async fn rate_limit_pauses_and_clips_in_the_queue_are_locked() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     let response = send(&f.app, Some(&op), "DELETE", "/v1/publish-jobs/99", None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn deleting_a_session_before_publish_admission_rejects_the_stale_clip() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+
+    // Poll each handler once while the guard is held. Their first operation is acquiring this
+    // mutex, so Pending proves both handlers reached and are waiting at the admission boundary.
+    let mut attempts = f.publisher.watch_session_admission_attempts();
+    let admission = f.publisher.lock_session_admission().await;
+    assert_admission_attempted(&mut attempts); // consume the test's own lock attempt
+    let mut delete = Box::pin(crate::server::api::sessions::delete_session(
+        State(f.pool.clone()),
+        State(f.publisher.clone()),
+        Path(f.session),
+    ));
+    assert!(futures::poll!(delete.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    let mut publish = Box::pin(publish_clip(
+        Caller::unrestricted(),
+        State(f.pool.clone()),
+        State(f.clips.clone()),
+        State(f.publisher.clone()),
+        Path(id),
+        Json(PublishClip::default()),
+    ));
+    assert!(futures::poll!(publish.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    drop(admission);
+
+    let deleted = delete.await;
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    let published = publish.await;
+    assert_eq!(published.status(), StatusCode::NOT_FOUND);
+    assert!(f.publisher.view(Some(f.session)).jobs.is_empty());
+}
+
+#[tokio::test]
+async fn publish_admission_before_session_deletion_makes_delete_conflict() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+    let reached = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    *f.fake.connect_hold.lock().unwrap() = Some(ConnectHold {
+        reached: reached.clone(),
+        release: release.clone(),
+    });
+
+    // DELETE is queued second and must observe the publish job after admission releases the gate.
+    let mut attempts = f.publisher.watch_session_admission_attempts();
+    let admission = f.publisher.lock_session_admission().await;
+    assert_admission_attempted(&mut attempts); // consume the test's own lock attempt
+    let mut publish = Box::pin(publish_clip(
+        Caller::unrestricted(),
+        State(f.pool.clone()),
+        State(f.clips.clone()),
+        State(f.publisher.clone()),
+        Path(id),
+        Json(PublishClip::default()),
+    ));
+    assert!(futures::poll!(publish.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    let mut delete = Box::pin(crate::server::api::sessions::delete_session(
+        State(f.pool.clone()),
+        State(f.publisher.clone()),
+        Path(f.session),
+    ));
+    assert!(futures::poll!(delete.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    drop(admission);
+
+    let published = publish.await;
+    assert_eq!(published.status(), StatusCode::ACCEPTED);
+    tokio::time::timeout(Duration::from_secs(5), reached.notified())
+        .await
+        .expect("publish worker did not reach the held connection");
+    let deleted = delete.await;
+    assert_eq!(deleted.status(), StatusCode::CONFLICT);
+    assert!(!f.publisher.view(Some(f.session)).jobs.is_empty());
+    release.notify_one();
+}
+
+#[tokio::test]
+async fn deleting_a_session_before_batch_publish_admission_rejects_its_clips() {
+    let f = fixture().await;
+    let op = login(&f.app, "op", "operator-password").await;
+    let id = f.clip(&op, 1000, 2000, "a").await;
+
+    let mut attempts = f.publisher.watch_session_admission_attempts();
+    let admission = f.publisher.lock_session_admission().await;
+    assert_admission_attempted(&mut attempts); // consume the test's own lock attempt
+    let mut delete = Box::pin(crate::server::api::sessions::delete_session(
+        State(f.pool.clone()),
+        State(f.publisher.clone()),
+        Path(f.session),
+    ));
+    assert!(futures::poll!(delete.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    let mut publish = Box::pin(publish_batch(
+        Caller::unrestricted(),
+        State(f.pool.clone()),
+        State(f.clips.clone()),
+        State(f.publisher.clone()),
+        Json(PublishBatch {
+            clip_ids: vec![id],
+            ..PublishBatch::default()
+        }),
+    ));
+    assert!(futures::poll!(publish.as_mut()).is_pending());
+    assert_admission_attempted(&mut attempts);
+    drop(admission);
+
+    let deleted = delete.await;
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    let published = publish.await;
+    assert_eq!(published.status(), StatusCode::NOT_FOUND);
+    assert!(f.publisher.view(Some(f.session)).jobs.is_empty());
 }
 
 /// 集中发布：有切片已经在队列里（哪怕排在后面）就整批不排；检查之后才被别的请求抢先排上的，

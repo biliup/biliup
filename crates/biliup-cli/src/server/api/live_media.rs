@@ -1,123 +1,78 @@
-//! 正在录制的直播间封面 / 主播头像接口。
+//! 直播间最近有效封面 / 主播头像接口。
 //!
 //! - 封面每场直播都可能换：服务端以直播间页面地址作 Referer 去取（页面直连图片 CDN 会被
-//!   B 站等按站外 Referer 拒绝），按图片 URL 做一份短暂的内存缓存后转发。
+//!   B 站等按站外 Referer 拒绝），保存到本地并定期刷新，离线时继续返回最近有效图片。
 //! - 头像几乎不变：开播时下载一次存到 `data/avatar/`，这里直接读本地文件；
 //!   本地还没有（或地址变了）时现场下载一次再返回。
 //!
-//! 只按主播 id 取 worker 里已经拿到的地址，不接受任意 URL，避免变成开放代理。
+//! 只按已注册主播 id 获取缓存或公共房间元数据，不接受任意代理 URL。
 //! 路由注册在 `router()` 里，`--auth` 时与 `/v1/streamers` 同一道登录校验。
 
-use crate::server::common::live_image::{
-    AvatarStore, FetchedImage, LiveImage, avatar_store, fetch_image, image_client, upstream_url,
-};
+use crate::server::common::live_image::{AvatarStore, LiveImage, avatar_store, cover_store};
+use crate::server::common::room_metadata::refresh_room_cover;
 use crate::server::core::download_manager::DownloadManager;
+use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Worker, WorkerStatus};
 use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
-use reqwest::Client;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 use tracing::warn;
 
-/// 封面在内存里的缓存时间
-const CACHE_TTL: Duration = Duration::from_secs(300);
-/// 缓存条目上限（按图片 URL）。默认 pool1_size = 5，远用不到这个数
-const MAX_CACHE_ENTRIES: usize = 64;
-
-#[derive(Debug, Clone)]
-struct CachedImage {
-    fetched_at: Instant,
-    content_type: String,
-    body: Bytes,
-}
-
-/// 封面的抓取客户端与内存缓存，进程内唯一，放在 `ServiceRegister` 里。
-pub struct ImageProxy {
-    client: Client,
-    cache: Mutex<HashMap<String, CachedImage>>,
-}
-
-impl Default for ImageProxy {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ImageProxy {
-    pub fn new() -> Self {
-        Self {
-            client: image_client(),
-            cache: Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn cached(&self, url: &str, now: Instant) -> Option<CachedImage> {
-        let cache = self.cache.lock().unwrap();
-        cache
-            .get(url)
-            .filter(|image| now.duration_since(image.fetched_at) < CACHE_TTL)
-            .cloned()
-    }
-
-    fn store(&self, url: String, image: CachedImage, now: Instant) {
-        let mut cache = self.cache.lock().unwrap();
-        cache.retain(|_, image| now.duration_since(image.fetched_at) < CACHE_TTL);
-        if cache.len() >= MAX_CACHE_ENTRIES
-            && let Some(oldest) = cache
-                .iter()
-                .min_by_key(|(_, image)| image.fetched_at)
-                .map(|(url, _)| url.clone())
-        {
-            cache.remove(&oldest);
-        }
-        cache.insert(url, image);
-    }
-
-    /// 取图：命中缓存直接返回，否则带 Referer 去上游拉一次并缓存。
-    async fn fetch(
-        &self,
-        url: &str,
-        referer: &str,
-        kind: LiveImage,
-    ) -> Result<CachedImage, String> {
-        let url = upstream_url(url, kind);
-        let now = Instant::now();
-        if let Some(image) = self.cached(&url, now) {
-            return Ok(image);
-        }
-        let FetchedImage { content_type, body } = fetch_image(&self.client, &url, referer).await?;
-        let image = CachedImage {
-            fetched_at: Instant::now(),
-            content_type,
-            body,
-        };
-        self.store(url, image.clone(), image.fetched_at);
-        Ok(image)
-    }
-}
-
-/// `GET /v1/streamers/{id}/cover`：正在录制的直播间封面，服务端转发并短暂缓存。
+/// `GET /v1/streamers/{id}/cover`：读取最近有效封面；录制时优先刷新为本场封面。
 pub async fn get_live_cover(
     State(managers): State<Arc<DownloadManager>>,
-    State(proxy): State<Arc<ImageProxy>>,
+    State(pool): State<ConnectionPool>,
     Path(id): Path<i64>,
 ) -> Response {
     let worker = managers.get_room_by_id(id).await;
-    let (url, referer) = match resolve_target(worker.as_deref(), LiveImage::Cover) {
-        Ok(target) => target,
-        Err(rejection) => return rejection.into_response(),
+    let room_url = match worker.as_deref() {
+        Some(worker) => Some(worker.live_streamer.url.clone()),
+        None => sqlx::query_scalar::<_, String>("SELECT url FROM livestreamers WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&pool)
+            .await
+            .unwrap_or_default(),
     };
-    match proxy.fetch(&url, &referer, LiveImage::Cover).await {
-        Ok(image) => image_response(&image.content_type, image.body, "private, max-age=300"),
-        Err(reason) => {
-            warn!(url, referer, reason, "拉取直播间封面失败");
-            (StatusCode::BAD_GATEWAY, format!("拉取封面失败: {reason}")).into_response()
-        }
+    let Some(room_url) = room_url else {
+        return (StatusCode::NOT_FOUND, "直播间不存在").into_response();
+    };
+    let live_cover = resolve_target(worker.as_deref(), LiveImage::Cover)
+        .ok()
+        .map(|(url, _)| url);
+    if cover_store().load(id).await.is_some() {
+        // 已有图片立即返回；CDN超时不会延迟旧图，失败时后台刷新保留旧文件。
+        tokio::spawn({
+            let pool = pool.clone();
+            let room_url = room_url.clone();
+            async move {
+                refresh_room_cover(&pool, id, &room_url, live_cover.as_deref()).await;
+            }
+        });
+    } else {
+        // 新房间首次访问也主动获取元数据；并发请求由刷新注册表合并。
+        let _ = tokio::time::timeout(
+            Duration::from_secs(20),
+            refresh_room_cover(&pool, id, &room_url, live_cover.as_deref()),
+        )
+        .await;
     }
+    if let Some(stored) = cover_store().load(id).await {
+        return match tokio::fs::read(cover_store().image_path(&stored)).await {
+            Ok(bytes) => image_response(
+                &stored.content_type,
+                Bytes::from(bytes),
+                "private, max-age=300",
+            ),
+            Err(error) => {
+                warn!(id, error = %error, "读取本地直播间封面失败");
+                (StatusCode::INTERNAL_SERVER_ERROR, "读取本地直播间封面失败").into_response()
+            }
+        };
+    }
+    (StatusCode::NOT_FOUND, "该直播间没有可用的封面").into_response()
 }
 
 /// `GET /v1/streamers/{id}/avatar`：主播头像，读 `data/avatar/` 里的本地文件。
@@ -188,6 +143,10 @@ fn resolve_target(
     Ok((url, worker.live_streamer.url.clone()))
 }
 
+/// 图片的类型来自上游（通用插件的封面是任意网页给的缩略图，可能是带脚本的 SVG），却从本站的源发出：
+/// 用 CSP `sandbox` 与 `nosniff` 保证直接打开这个地址时脚本跑不起来，`<img>` 里显示不受影响。
+const IMAGE_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+
 fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) -> Response {
     let mut response = body.into_response();
     let headers = response.headers_mut();
@@ -198,6 +157,14 @@ fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) 
         header::CACHE_CONTROL,
         HeaderValue::from_static(cache_control),
     );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(IMAGE_CSP),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
     response
 }
 
@@ -205,6 +172,7 @@ fn image_response(content_type: &str, body: Bytes, cache_control: &'static str) 
 mod tests {
     use super::*;
     use crate::server::common::download::DownloadTask;
+    use crate::server::common::live_image::{fetch_image, image_client};
     use crate::server::config::Config;
     use crate::server::core::downloader::{DownloaderRuntime, DownloaderType};
     use crate::server::infrastructure::context::Stage;
@@ -213,7 +181,8 @@ mod tests {
     use axum::routing::get;
     use axum::{Router, http::HeaderMap};
     use biliup::downloader::live::{DownloaderHint, LiveStream};
-    use std::sync::RwLock;
+    use std::collections::HashMap;
+    use std::sync::{Mutex, RwLock};
 
     fn streamer(url: &str) -> LiveStreamer {
         LiveStreamer {
@@ -340,25 +309,23 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let proxy = ImageProxy::new();
+        let dir = tempfile::tempdir().unwrap();
+        let store = AvatarStore::new(dir.path());
         let url = format!("http://{addr}/cover.jpg");
         let referer = "https://live.bilibili.com/1";
-        let first = proxy.fetch(&url, referer, LiveImage::Cover).await.unwrap();
+        let first = store.ensure(7, &url, referer).await.unwrap();
         assert_eq!(first.content_type, "image/jpeg");
-        assert_eq!(first.body.len(), 6);
-        let second = proxy.fetch(&url, referer, LiveImage::Cover).await.unwrap();
-        assert_eq!(second.body, first.body);
+        let body = Bytes::from(tokio::fs::read(store.image_path(&first)).await.unwrap());
+        assert_eq!(body.len(), 6);
+        let second = store.ensure(7, &url, referer).await.unwrap();
+        assert_eq!(second, first);
         assert_eq!(
             *seen.lock().unwrap(),
             vec![Some(referer.to_string())],
             "第二次应命中缓存，上游只被请求一次，且带直播间页面作 Referer"
         );
 
-        let response = image_response(
-            &first.content_type,
-            first.body.clone(),
-            "private, max-age=300",
-        );
+        let response = image_response(&first.content_type, body.clone(), "private, max-age=300");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
@@ -370,7 +337,30 @@ mod tests {
         );
         assert_eq!(
             to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-            first.body
+            body
+        );
+    }
+
+    /// 封面 / 头像的类型来自上游（通用插件的封面是任意网页给的缩略图），可能是带脚本的 SVG。
+    /// 它们从 biliup 自己的源发出：直接打开这个地址时不能让里面的脚本拿着当前登录态跑起来。
+    #[test]
+    fn proxied_images_cannot_run_scripts_on_our_origin() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#;
+        let response = image_response(
+            "image/svg+xml",
+            Bytes::from_static(svg),
+            "private, max-age=300",
+        );
+        let headers = response.headers();
+        let csp = headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        assert!(csp.contains("sandbox"), "{csp:?}");
+        assert!(csp.contains("default-src 'none'"), "{csp:?}");
+        assert_eq!(
+            headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
+            "nosniff"
         );
     }
 
@@ -386,50 +376,23 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-        let proxy = ImageProxy::new();
-        let err = proxy
-            .fetch(
-                &format!("http://{addr}/html"),
-                "https://live.bilibili.com/1",
-                LiveImage::Cover,
-            )
-            .await
-            .unwrap_err();
+        let client = image_client();
+        let err = fetch_image(
+            &client,
+            &format!("http://{addr}/html"),
+            "https://live.bilibili.com/1",
+        )
+        .await
+        .unwrap_err();
         assert!(err.contains("不是图片"), "{err}");
-        let err = proxy
-            .fetch(
-                &format!("http://{addr}/missing"),
-                "https://live.bilibili.com/1",
-                LiveImage::Cover,
-            )
-            .await
-            .unwrap_err();
+        let err = fetch_image(
+            &client,
+            &format!("http://{addr}/missing"),
+            "https://live.bilibili.com/1",
+        )
+        .await
+        .unwrap_err();
         assert!(err.contains("403"), "{err}");
-    }
-
-    #[test]
-    fn cache_expires_and_evicts_the_oldest_entry_when_full() {
-        let proxy = ImageProxy::new();
-        let t0 = Instant::now();
-        let image = |at: Instant| CachedImage {
-            fetched_at: at,
-            content_type: "image/png".into(),
-            body: Bytes::from_static(b"x"),
-        };
-        proxy.store("a".into(), image(t0), t0);
-        assert!(proxy.cached("a", t0 + Duration::from_secs(10)).is_some());
-        assert!(proxy.cached("a", t0 + CACHE_TTL).is_none(), "到期后失效");
-
-        for i in 0..MAX_CACHE_ENTRIES {
-            let at = t0 + Duration::from_secs(i as u64);
-            proxy.store(format!("u{i}"), image(at), at);
-        }
-        let now = t0 + Duration::from_secs(MAX_CACHE_ENTRIES as u64);
-        proxy.store("newest".into(), image(now), now);
-        let cache = proxy.cache.lock().unwrap();
-        assert!(cache.len() <= MAX_CACHE_ENTRIES);
-        assert!(!cache.contains_key("u0"), "最旧的条目被淘汰");
-        assert!(cache.contains_key("newest"));
     }
 
     /// 头像接口：录制中首次请求会现场下载落盘；之后（包括不在录制时）直接读本地文件

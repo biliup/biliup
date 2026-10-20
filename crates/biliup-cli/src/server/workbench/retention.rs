@@ -28,6 +28,10 @@ pub const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 const HOUR_MS: i64 = 3_600_000;
 
+/// Serialize cleanup's file operations with creation of media references and
+/// retention changes. Pins cannot protect files selected by an earlier query.
+pub(crate) static MEDIA_LIFECYCLE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
 /// 删除点要用到的上下文：数据库，以及删之前还要保留多久。
 #[derive(Debug, Clone)]
 pub struct Retention {
@@ -76,12 +80,19 @@ struct Tracked {
     id: i64,
     danmaku_path: Option<String>,
     pin_count: i64,
+    rendering: bool,
     retain_until: Option<i64>,
 }
 
 async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Tracked>> {
     sqlx::query_as(
-        "SELECT g.id, g.danmaku_path, g.pin_count, s.retain_until
+        "SELECT g.id, g.danmaku_path, g.pin_count,
+                MAX(COALESCE(s.retain_until, 0), COALESCE((
+                    SELECT MAX(gs.retain_until)
+                    FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+                    WHERE gm.source_session_id = s.id), 0)) AS retain_until,
+                EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                        WHERE r.segment_id = g.id AND j.state IN ('queued','running')) AS rendering
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.path = ? AND g.state IN ('recording', 'finished', 'missing', 'pending_delete')
          ORDER BY g.id DESC LIMIT 1",
@@ -94,27 +105,28 @@ async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Trac
 /// 删除点：删掉 `paths`（视频与弹幕文件混在一起，与后处理拿到的列表相同）。
 ///
 /// 工作台记录的分段在被引用、场次保留期内或 `keep_for_ms > 0` 时推迟删除，同一批里它的弹幕文件
-/// 跟着留下；其余的立即删，分段行标 `deleted`，关键帧索引一起删。数据库出错时按原来的方式立即删。
+/// 跟着留下；其余的立即删，分段行标 `deleted`，关键帧索引一起删。数据库出错时停止删除，避免
+/// 无法确认引用或保留期时丢失源录像。
 /// 删文件出错时返回错误，与原来的 `rm` 一样停在出错的那个文件。
 pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Disposal>> {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let now = now_ms();
     let mut outcome: Vec<Option<Disposal>> = vec![None; paths.len()];
     let mut kept_danmaku: Vec<PathBuf> = Vec::new();
     for (i, path) in paths.iter().enumerate() {
-        let segment = match tracked(&retention.pool, path).await {
-            Ok(segment) => segment,
-            Err(e) => {
-                warn!(path = %path.display(), error = %e, "查询分段记录失败，按原方式直接删除");
-                None
-            }
-        };
+        let segment = tracked(&retention.pool, path).await.map_err(|e| {
+            warn!(path = %path.display(), error = %e, "查询分段记录失败，保留文件并停止删除");
+            io::Error::other(e)
+        })?;
         let Some(segment) = segment else {
             continue;
         };
-        let referenced = segment.pin_count > 0 || segment.retain_until.is_some_and(|t| t > now);
+        let referenced = segment.rendering
+            || segment.pin_count > 0
+            || segment.retain_until.is_some_and(|t| t > now);
         if referenced || retention.keep_for_ms > 0 {
             let danmaku = danmaku_in_batch(path, segment.danmaku_path.as_deref(), paths);
-            match defer(
+            defer(
                 &retention.pool,
                 segment.id,
                 retention.keep_for_ms,
@@ -122,22 +134,19 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
                 danmaku.as_deref(),
             )
             .await
-            {
-                Ok(()) => {
-                    info!(
-                        path = %path.display(),
-                        referenced,
-                        keep_hours = retention.keep_for_ms / HOUR_MS,
-                        "分段被引用或在保留期内，暂不删除，到期后由清理任务删除"
-                    );
-                    outcome[i] = Some(Disposal::Deferred);
-                    kept_danmaku.extend(danmaku);
-                    continue;
-                }
-                Err(e) => {
-                    warn!(path = %path.display(), error = %e, "标记推迟删除失败，按原方式直接删除")
-                }
-            }
+            .map_err(|e| {
+                warn!(path = %path.display(), error = %e, "标记推迟删除失败，保留文件并停止删除");
+                io::Error::other(e)
+            })?;
+            info!(
+                path = %path.display(),
+                referenced,
+                keep_hours = retention.keep_for_ms / HOUR_MS,
+                "分段被引用或在保留期内，暂不删除，到期后由清理任务删除"
+            );
+            outcome[i] = Some(Disposal::Deferred);
+            kept_danmaku.extend(danmaku);
+            continue;
         }
         delete_video(path).await?;
         if let Err(e) = set_deleted(&retention.pool, segment.id).await {
@@ -321,7 +330,8 @@ pub async fn unpin(conn: &mut SqliteConnection, owner: &str) -> sqlx::Result<boo
     }
 }
 
-/// 按 `segment_pins` 重算场次里每个分段的 `pin_count`。仍在录的分段（`end_ms` 为空）算到无穷远。
+/// 重算来源场次的引用，或合并场次所有成员的引用。合并场次区间保留在合并坐标中，
+/// 与来源分段比较时才应用成员偏移。仍在录的分段（`end_ms` 为空）算到无穷远。
 pub(crate) async fn refresh_pin_counts<'e, E>(executor: E, session_id: i64) -> sqlx::Result<()>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -329,10 +339,17 @@ where
     sqlx::query(
         "UPDATE segments SET pin_count = (
              SELECT COUNT(*) FROM segment_pins p
-             WHERE p.session_id = segments.session_id
+             WHERE (p.session_id = segments.session_id
                AND p.to_ms >= segments.start_ms
                AND (segments.end_ms IS NULL OR p.from_ms < segments.end_ms))
-         WHERE session_id = ?",
+                OR EXISTS (
+                    SELECT 1 FROM session_group_members gm
+                    WHERE gm.group_session_id = p.session_id
+                      AND gm.source_session_id = segments.session_id
+                      AND p.to_ms >= segments.start_ms + gm.offset_ms
+                      AND (segments.end_ms IS NULL OR p.from_ms < segments.end_ms + gm.offset_ms)))
+         WHERE session_id = ?1 OR session_id IN (
+             SELECT source_session_id FROM session_group_members WHERE group_session_id = ?1)",
     )
     .bind(session_id)
     .execute(executor)
@@ -347,6 +364,7 @@ pub async fn set_session_retention(
     session_id: i64,
     retain_until: Option<i64>,
 ) -> sqlx::Result<bool> {
+    let _lifecycle = MEDIA_LIFECYCLE.read().await;
     let done = sqlx::query("UPDATE stream_sessions SET retain_until = ? WHERE id = ?")
         .bind(retain_until)
         .bind(session_id)
@@ -389,12 +407,18 @@ fn delete_segment_files(segment: &Doomed) -> io::Result<()> {
 /// 删掉到期（`delete_after` 已过）、没有引用、场次也不在保留期内的 `pending_delete` 分段，
 /// 返回删了几个。
 pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usize> {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let due: Vec<Doomed> = sqlx::query_as(
         "SELECT g.id, g.path, g.index_path, g.danmaku_path
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state = 'pending_delete' AND g.pin_count = 0
+           AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                           WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
            AND (g.delete_after IS NULL OR g.delete_after <= ?1)
            AND (s.retain_until IS NULL OR s.retain_until <= ?1)
+           AND NOT EXISTS (
+               SELECT 1 FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+               WHERE gm.source_session_id = s.id AND gs.retain_until > ?1)
          ORDER BY g.id",
     )
     .bind(now)
@@ -438,11 +462,17 @@ pub async fn enforce_free_space<F>(
 where
     F: FnMut(&Path) -> io::Result<u64>,
 {
+    let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let candidates: Vec<Candidate> = sqlx::query_as(
         "SELECT g.id, g.path, g.index_path, g.danmaku_path,
-                (g.pin_count > 0 OR COALESCE(s.retain_until, 0) > ?) AS referenced
+                (g.pin_count > 0 OR COALESCE(s.retain_until, 0) > ?1
+                 OR EXISTS (
+                     SELECT 1 FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
+                     WHERE gm.source_session_id = s.id AND gs.retain_until > ?1)) AS referenced
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state IN ('finished', 'pending_delete')
+           AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
+                           WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
          ORDER BY referenced, COALESCE(s.started_at, 0) + g.start_ms, g.id",
     )
     .bind(now)

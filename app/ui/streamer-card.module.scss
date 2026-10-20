@@ -146,6 +146,15 @@
 .cover[data-state='ok'] img {
   opacity: 1;
 }
+.coverPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--semi-color-text-2);
+  font-size: 12px;
+}
 
 /* 可预览时封面可点:中央播放标记,悬停加深 */
 .coverClickable {

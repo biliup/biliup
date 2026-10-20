@@ -25,7 +25,7 @@
 * 按场次回看录像，选段即剪，切片直接投稿
 * 多机录制（Fleet）：控制面统一分派房间，节点凭票据加入
 * 多用户，三种角色分级权限
-* 自动切片：大模型挑出高光候选，人工确认后再切（未发版）
+* 自动切片：大模型挑出高光候选，人工确认后再切
 * 作为自动化流程中的命令行工具封装使用
 * 边录边传 0 落盘
 
@@ -143,18 +143,19 @@ docker compose up -d
 - **回看**：「剪辑台」（`/workbench`）→「直播场次」→ 回看页（`/replay`），直播中也能回看已落盘部分。
 - **剪**：快速剪按关键帧切、不转码，入点取不晚于它的最近关键帧，保持源格式（FLV / TS / fMP4）；精确剪由 FFmpeg 重新编码为 MP4。**没装 FFmpeg 时只能快速剪、不能下载 MP4。**
 - **发布**：切片按投稿模板投稿，可多选集中发布，一律按转载。队列单并发，B 站返回 601（上传太频繁）时暂停，等手动「继续」。
+- **录后合成**：需要本地保留纯净录像和弹幕 XML 时，在直播间「配置覆写」里使用本地素材录制预设；下播后可在回看工作台拖拽缩放图片遮挡、调整弹幕并一次导出合成 MP4。详见[录后弹幕合成与本地素材工作流](https://biliup.github.io/biliup/docs/tutorials/post-recording-render/)。
 - **保留**：被标记、被切片引用的分段推迟到引用释放后再删。「空间配置」可设 `retention_hours`（投稿后保留小时数，默认 0）与 `min_free_space`（磁盘水位，默认关；低于阈值时先删未引用的最旧分段，不够再删被引用的，正在录的不删）。
 
 ## 🖧 多机录制 Fleet
 
-一台控制面统一分派房间，节点各自录制、投稿。不用 Fleet 时行为不变（不监听 19160）。
+`biliup server` 默认开启控制面。没有其他节点加入时，已有直播间、投稿模板与配置仍按单机方式使用，不会自动迁移或接管；其他节点加入后，任务平台显示多机分派、配置与告警功能，各节点仍各自录制、投稿。
 
-1. **控制面**：`biliup server --controller`，需开放一个节点能连到的 **TCP 端口，默认 19160**（`--relay-listen` 可改）；网卡上没有公网地址时用 `--relay-url` 声明外部地址。UDP 非必需。
-2. **节点**：控制面「节点」→「添加节点」生成票据，节点机执行 `biliup node join <票据>` 后重启 `biliup server`；Docker 用环境变量 `BILIUP_JOIN_TICKET`。票据带控制面的 relay 地址，节点只需出站连接，加密内建，无需证书。
-3. **分派**：「节点 › 房间」手动指定或按负载自动选；改派时等原节点释放再接手（「强制迁移」除外）。未发版：节点标签、统一下发配置（Cookie、密码留在节点本地）、告警（离线 / 磁盘 / 投稿失败）、控制面「本机」当节点。
+1. **控制面**：直接运行 `biliup server`，原来的 `--controller` 参数仍可使用。需要接入其他节点时，开放节点能连到的 **TCP 端口，默认 19160**（`--relay-listen` 可改）；默认端口被占用时自动选择空闲端口，加入票据包含实际端口。显式指定 `--controller` 或 relay 参数时，监听失败会报错。网卡上没有公网地址时用 `--relay-url` 声明外部地址。UDP 非必需。
+2. **节点**：在控制面「任务平台 › 节点管理」→「添加节点」生成票据，节点机执行 `biliup node join <票据>` 后重启 `biliup server`；Docker 用环境变量 `BILIUP_JOIN_TICKET`。已有节点身份或加入票据时优先作为节点运行。票据带控制面的 relay 地址，节点只需出站连接，加密内建，无需证书。
+3. **分派**：「任务平台 › 节点管理 › 房间」手动指定或按负载自动选；改派时等原节点释放再接手（「强制迁移」除外）。已支持节点标签、统一下发配置（Cookie、密码留在节点本地）、告警（离线 / 磁盘 / 投稿失败），也可将控制面「本机」启用为录制节点。
 4. **备份**：控制面的 `data/fleet.sqlite3` **含控制面私钥，务必备份**，丢失需全部节点重新加入。节点凭据在 `data/node.json`（0600）；已加入的节点不能用 `--config` 启动，回到单机先 `biliup node leave`。
 
-## 🤖 自动切片（master，未发版）
+## 🤖 自动切片
 
 下播后按场次：FFmpeg 抽音、跳过静音 → 语音转写 → 连同弹幕密度（模型支持看图时加关键帧缩图）交大模型挑候选 → 候选进回看页，**人工接受才建切片，不自动导出或投稿**。
 
@@ -250,9 +251,9 @@ Options:
       --auth                     开启登录密码认证
       --secure-session-cookie    为会话 Cookie 附加 Secure 属性。仅当通过 HTTPS 反向代理访问 Web UI 时开启； 直接通过 HTTP 远程访问时开启会导致浏览器丢弃登录态
   -c, --config <FILE>            使用 biliup 1.0.7 风格配置文件启动录制
-      --controller               以 Fleet 控制面运行：接受其他 biliup 节点加入并显示它们的状态（数据在 data/fleet.sqlite3）
-      --relay-listen <ADDR|off>  控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它； off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。只在 --controller 时生效
-      --relay-url <URL>          写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。 用于域名、端口转发、反向代理或外部 relay。只在 --controller 时生效
+      --controller               显式以 Fleet 控制面运行（默认自动开启；已有节点身份时作为节点运行）
+      --relay-listen <ADDR|off>  控制面内嵌 relay 的 TCP 监听地址（默认 0.0.0.0:19160），节点必须能连到它； off 表示不起内嵌 relay，此时必须用 --relay-url 指定外部 relay。作为节点运行时忽略
+      --relay-url <URL>          写进加入票据的 relay 地址，可重复；不给时自动列出本机网卡地址。用于域名、端口转发、反向代理或外部 relay。作为节点运行时忽略
   -h, --help                     Print help
 ```
 
@@ -322,12 +323,11 @@ graph TB
         AUTOCLIP[自动切片<br/>biliup-cli auto_clip<br/>OpenAI 兼容客户端]
         CORE[核心库<br/>biliup<br/>直播解析 / 下载 / 上传]
         DANMAKU[弹幕库<br/>danmaku<br/>多平台协议 / XML输出]
-        GEARS[Python绑定<br/>stream-gears<br/>python -m biliup 入口]
+        GEARS[Python绑定<br/>stream-gears<br/>上传 / 下载 / 登录 API]
     end
 
     subgraph "🐍 Python包"
-        PYENTRY[最小入口<br/>biliup.__main__<br/>调用 stream_gears.main_loop]
-        PYUPLOAD[投稿库<br/>bili_webup / bili_webup_sync<br/>供外部项目调用]
+        PYAPI[stream_gears<br/>上传 / 直链下载 / 登录]
     end
 
     subgraph "🗄️ 数据层"
@@ -349,9 +349,8 @@ graph TB
     AUTOCLIP --> LLM
     CORE --> STREAMS & BILI
     DANMAKU --> STREAMS & FILES
-    GEARS --> CLI
-    PYENTRY --> GEARS
-    PYUPLOAD --> BILI
+    GEARS --> CORE
+    PYAPI --> GEARS
 
     classDef ui fill:#e1f5fe
     classDef rust fill:#f3e5f5
@@ -360,7 +359,7 @@ graph TB
     classDef ext fill:#ffebee
     class UI ui
     class CLI,FLEET,AUTOCLIP,CORE,DANMAKU,GEARS rust
-    class PYENTRY,PYUPLOAD py
+    class PYAPI py
     class DB,FLEETDB,FILES data
     class BILI,STREAMS,LLM ext
 ```
@@ -372,12 +371,11 @@ graph TB
 | `crates/biliup` | 核心库：直播解析、下载器、B 站投稿与凭据管理 |
 | `crates/biliup-cli` | 命令行与 Web 服务：REST API、WebUI 托管、录制调度 |
 | `crates/biliup-cli/src/server/{api,fleet,auto_clip}` | 分别是 Web API 路由、Fleet 控制面与节点、自动切片 |
-| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–14） |
-| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–4） |
+| `crates/biliup-cli/migrations` | 主库 `data.sqlite3` 迁移（1–15） |
+| `crates/biliup-cli/fleet_migrations` | Fleet 库 `fleet.sqlite3` 迁移（1–7） |
 | `crates/danmaku` | 弹幕客户端：多平台协议解析与 XML 输出 |
-| `crates/stream-gears` | PyO3 绑定，暴露给 `python -m biliup` |
+| `crates/stream-gears` | PyO3 基础 API 绑定，不依赖服务端 |
 | `app`、`public` | Next.js WebUI 源码；`npm run build` 产物输出到 `out/` 并由后端内嵌 |
-| `crates/stream-gears/biliup` | 精简 Python 包：最小入口与可供外部调用的投稿库 |
 | `tauri-app` | Windows 桌面端（Tauri，进程内运行 biliup 服务） |
 
 </details>
@@ -391,9 +389,7 @@ graph TB
 
 ### Python
 
-1. 安装依赖 `maturin develop -m crates/stream-gears/Cargo.toml`
-2. `npm run build` 
-3. 启动 Biliup：`python3 -m biliup`
+安装绑定：`maturin develop -m crates/stream-gears/Cargo.toml`，然后 `import stream_gears` 使用上传、直链下载和登录 API。Python 包不含录制服务、前端、字体或命令行入口；运行完整应用请使用原生 CLI、桌面版或 Docker。构建 Python 包无需构建前端。
 
 ### Rust-cli
 
@@ -403,6 +399,8 @@ graph TB
 
 > [!NOTE]
 > `biliup-cli` 通过 `rust-embed` 内嵌前端产物目录 `out/`，因此在 `cargo build` / `cargo test` 之前必须先执行 `npm run build`，否则编译会因 `out/` 不存在而失败。
+>
+> 字体位于 `crates/biliup-cli/assets/render-tools/fonts/`，作为独立文件随 CLI 发布包、桌面版和 Docker 镜像分发，不内嵌进二进制。字体文件一律不进仓库：CI 与各发布流程按固定 commit 与 SHA-256 取回（两个文件的命令见 `crates/biliup-cli/assets/render-tools/README.txt`），本地跑依赖字体的测试前也执行同一组命令。自行部署时，将 `render-tools/` 放在可执行文件旁，或把配置里的 `render_fonts_dir` 指向该目录。
 
 ### 测试
 
@@ -416,7 +414,7 @@ cargo test -p biliup -p biliup-cli -p danmaku
 
 ### 数据库迁移
 
-主库 `data/data.sqlite3` 与 Fleet 库 `data/fleet.sqlite3` 各有一套迁移、独立编号，启动时自动执行（Fleet 库只在 `--controller` 时打开）。迁移不能回滚，升级前请备份 `data/`。
+主库 `data/data.sqlite3` 与 Fleet 库 `data/fleet.sqlite3` 各有一套迁移、独立编号，启动时自动执行（默认控制面会打开 Fleet 库，已加入其他控制面的节点不会）。迁移不能回滚，升级前请备份 `data/`。
 
 ## 🤝Credits
 * Thanks `ykdl, youtube-dl, streamlink` provides downloader.

@@ -1,0 +1,18 @@
+[package]
+name = "danmaku-factory"
+version.workspace = true
+edition = "2024"
+description = "Safe native Rust XML to ASS danmaku conversion"
+license = "(MIT OR Apache-2.0) AND MIT"
+
+[dependencies]
+serde = { workspace = true }
+quick-xml = "0.37"
+tempfile = "3.14"
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = "3.14"
+
+# Integration-test hosts set LC_NUMERIC and, on Unix, a process file-size limit.
+libc = "0.2"

@@ -9,6 +9,7 @@ sort_by = "weight"
 template = "docs/page.html"
 
 [extra]
+language_code = "en-US"
 lead = "Answers to frequently asked questions."
 toc = true
 top = false

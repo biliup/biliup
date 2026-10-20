@@ -1,13 +1,12 @@
+use biliup::error::Result as AppResult;
 use biliup::uploader::bilibili::BiliBili;
 use biliup::uploader::credential::{Credential, save_login_info};
-use biliup_cli::server::errors::{AppError, AppResult};
-use error_stack::ResultExt;
 use std::path::Path;
 
 pub async fn login_by_cookies(file: &str, proxy: Option<&str>) -> AppResult<BiliBili> {
     let login_info = biliup::uploader::credential::login_by_cookies(file, proxy)
         .await
-        .change_context_lazy(|| AppError::Unknown)?;
+        .map_err(|error| biliup::error::Kind::Custom(format!("cookies file {file}: {error}")))?;
     Ok(login_info)
 }
 
@@ -16,10 +15,7 @@ pub async fn send_sms(
     phone: u64,
     proxy: Option<&str>,
 ) -> AppResult<serde_json::Value> {
-    let ret = Credential::new(proxy)
-        .send_sms(phone, country_code)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
+    let ret = Credential::new(proxy).send_sms(phone, country_code).await?;
     Ok(ret)
 }
 
@@ -29,21 +25,13 @@ pub async fn login_by_sms(
     proxy: Option<&str>,
     file: &Path,
 ) -> AppResult<bool> {
-    let info = Credential::new(proxy)
-        .login_by_sms(code, res)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
-    save_login_info(file, &info)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
+    let info = Credential::new(proxy).login_by_sms(code, res).await?;
+    save_login_info(file, &info).await?;
     Ok(true)
 }
 
 pub async fn get_qrcode(proxy: Option<&str>) -> AppResult<serde_json::Value> {
-    let qrcode = Credential::new(proxy)
-        .get_qrcode()
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
+    let qrcode = Credential::new(proxy).get_qrcode().await?;
     Ok(qrcode)
 }
 
@@ -55,11 +43,8 @@ pub async fn login_by_web_cookies(
 ) -> AppResult<bool> {
     let info = Credential::new(proxy)
         .login_by_web_cookies(sess_data, bili_jct)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
-    save_login_info(file, &info)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
+        .await?;
+    save_login_info(file, &info).await?;
     Ok(true)
 }
 
@@ -71,10 +56,7 @@ pub async fn login_by_web_qrcode(
 ) -> AppResult<bool> {
     let info = Credential::new(proxy)
         .login_by_web_qrcode(sess_data, dede_user_id)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
-    save_login_info(file, &info)
-        .await
-        .change_context_lazy(|| AppError::Unknown)?;
+        .await?;
+    save_login_info(file, &info).await?;
     Ok(true)
 }

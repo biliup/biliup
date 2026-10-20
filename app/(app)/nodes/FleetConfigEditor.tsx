@@ -26,6 +26,8 @@ import {
   FLEET_CONFIG_HISTORY_KEY,
   FLEET_CONFIG_KEY,
   globalPayload,
+  FleetConfigConflictError,
+  mergeConfigDraft,
   nodeConfigKey,
   overridePayload,
   PER_NODE_KEYS,
@@ -47,7 +49,7 @@ import styles from './fleet-config.module.scss'
 
 const { Text } = Typography
 
-export const FLEET_CONFIG_BACK = { href: '/nodes', label: '节点' }
+export const FLEET_CONFIG_BACK = { href: '/nodes', label: '节点管理' }
 
 const TAB_GLOBAL = 'global'
 const TAB_PLATFORM = 'platform'
@@ -132,6 +134,8 @@ function ConfigForm({
   withFfmpegPath,
   apiRef,
   snapshotRef,
+  pendingRestoreRef,
+  onDraftRestored,
   onSubmit,
 }: {
   scope: string
@@ -143,10 +147,36 @@ function ConfigForm({
   withFfmpegPath: boolean
   apiRef: React.MutableRefObject<FormApi | undefined>
   snapshotRef: React.MutableRefObject<ConfigValues>
+  pendingRestoreRef: React.MutableRefObject<{ baseline: ConfigValues; draft: ConfigValues; clearAll?: boolean } | null>
+  onDraftRestored: () => void
   onSubmit: (values: ConfigValues) => void
 }) {
   const [tab, setTab] = useState(TAB_GLOBAL)
   const [platform, setPlatform] = useState(PLATFORMS[0].key)
+  const previousFormKeyRef = useRef(formKey)
+  React.useEffect(() => {
+    const formChanged = previousFormKeyRef.current !== formKey
+    previousFormKeyRef.current = formKey
+    if (!formChanged) return
+    const restore = pendingRestoreRef.current
+    const api = apiRef.current
+    if (!restore || !api) return
+    const latest = { ...(api.getValues() ?? {}) }
+    snapshotRef.current = latest
+    const merged = restore.clearAll
+      ? Object.fromEntries(DELIVERABLE_KEYS.map((key) => [key, undefined]))
+      : mergeConfigDraft(
+          latest,
+          restore.baseline,
+          restore.draft,
+          withFfmpegPath ? ['file_size', 'segment_time'] : [],
+        )
+    // Semi's default setValues updates fields without replacing the submitted
+    // form state. Restore both so the visible draft is also sent on save.
+    api.setValues(restore.clearAll ? { ...latest, ...merged } : merged, { isOverride: true })
+    pendingRestoreRef.current = null
+    onDraftRestored()
+  }, [formKey, apiRef, onDraftRestored, pendingRestoreRef, snapshotRef, withFfmpegPath])
   return (
     <div className={styles.formHost} data-field-scope={scope}>
       <style>{fieldMarksCss(scope, marks)}</style>
@@ -202,15 +232,26 @@ function ConfigForm({
             <div className={dashboard.pane}>
               <Developer />
               {withFfmpegPath ? (
-                <Form.Input
-                  field="ffmpeg_path"
-                  label="ffmpeg 路径（ffmpeg_path）"
-                  placeholder="留空则用节点自己的设置"
-                  extraText="这台节点上 ffmpeg 可执行文件的路径，保存后节点立即换用"
-                  style={{ width: '100%' }}
-                  fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
-                  showClear
-                />
+                <>
+                  <Form.Input
+                    field="ffmpeg_path"
+                    label="ffmpeg 路径（ffmpeg_path）"
+                    placeholder="留空则用节点自己的设置"
+                    extraText="这台节点上 ffmpeg 可执行文件的路径，保存后节点立即换用"
+                    style={{ width: '100%' }}
+                    fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
+                    showClear
+                  />
+                  <Form.Input
+                    field="render_fonts_dir"
+                    label="弹幕字体目录（render_fonts_dir）"
+                    placeholder="留空则用随包字体"
+                    extraText="预览与合成共用这里的字体；填目录本身或它下面的 fonts/ 都可以"
+                    style={{ width: '100%' }}
+                    fieldStyle={{ alignSelf: 'stretch', padding: 0 }}
+                    showClear
+                  />
+                </>
               ) : null}
             </div>
           </TabPane>
@@ -220,7 +261,7 @@ function ConfigForm({
             </TabPane>
           ) : null}
         </Tabs>
-        <FormSnapshot snapshotRef={snapshotRef} />
+        <FormSnapshot snapshotRef={snapshotRef} freeze />
       </Form>
     </div>
   )
@@ -276,15 +317,27 @@ const GLOBAL_TITLE = 'Fleet 配置'
 
 /** `/nodes/config`：全局配置，保存后下发到所有在线节点 */
 export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
-  const { data, error, isLoading, mutate } = useSWR<FleetConfig>(FLEET_CONFIG_KEY, fetcher, SWR_OPTIONS)
+  const { data, error, isLoading, isValidating, mutate } = useSWR<FleetConfig>(FLEET_CONFIG_KEY, fetcher, SWR_OPTIONS)
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
+  const pendingRestoreRef = useRef<{ baseline: ConfigValues; draft: ConfigValues; clearAll?: boolean } | null>(null)
+  const [conflictDraft, setConflictDraft] = useState<{ baseline: ConfigValues; draft: ConfigValues; clearAll?: boolean } | null>(null)
   const { saving, run } = useSaving()
 
   const save = (values: ConfigValues) =>
     run(async () => {
       if (!data) return
-      const saved = await saveFleetConfig(globalPayload(data.config, snapshotRef.current, values))
+      if (conflictDraft) return
+      let saved: FleetConfig
+      try {
+        saved = await saveFleetConfig(data.version, globalPayload(data.config, snapshotRef.current, values))
+      } catch (e) {
+        if (e instanceof FleetConfigConflictError) {
+          setConflictDraft({ baseline: { ...snapshotRef.current }, draft: { ...values } })
+          return
+        }
+        throw e
+      }
       if (saved.changed) {
         Toast.success(`已保存为第 ${saved.version} 版，正在下发到在线节点`)
       } else {
@@ -294,6 +347,18 @@ export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
       revalidate(FLEET_CONFIG_HISTORY_KEY).catch(() => undefined)
       revalidate(FLEET_NODES_KEY).catch(() => undefined)
     })
+
+  const refreshAndMerge = async () => {
+    if (!conflictDraft) return
+    pendingRestoreRef.current = conflictDraft
+    try {
+      const latest = await mutate()
+      if (!latest) throw new Error('没有读到最新配置，请重试')
+    } catch (e) {
+      pendingRestoreRef.current = null
+      Toast.error({ content: errorMessage(e), duration: 6 })
+    }
+  }
 
 
   if (isLoading) return <FleetConfigStatePage title={GLOBAL_TITLE}><Loading /></FleetConfigStatePage>
@@ -313,6 +378,7 @@ export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
       okText={canManage ? '保存' : undefined}
       onOk={() => apiRef.current?.submitForm()}
       okLoading={saving}
+      okDisabled={!!conflictDraft}
       fill
     >
       <div className={styles.intro}>
@@ -346,6 +412,19 @@ export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
           closeIcon={null}
           description={`带「按节点」标记的字段（${PER_NODE_TEXT}）跟机器走，全局配置不管，请在节点卡片的「节点覆盖」里设置。Cookie、密码等不在这里，留在各节点本机的「空间配置」里。`}
         />
+        {conflictDraft ? (
+          <Banner
+            type="warning"
+            fullMode={false}
+            closeIcon={null}
+            title="配置已被其他管理员更新，当前草稿已保留"
+            description="先刷新最新配置并合并草稿，再检查后保存。"
+          >
+            <Button loading={isValidating} onClick={refreshAndMerge}>
+              刷新并合并草稿
+            </Button>
+          </Banner>
+        ) : null}
       </div>
       <ConfigForm
         scope="fleet-global"
@@ -356,11 +435,13 @@ export function FleetGlobalConfigPage({ canManage }: { canManage: boolean }) {
           lock: PER_NODE_KEYS,
           badges: [{ keys: PER_NODE_KEYS, text: '按节点', tone: 'grey' }],
         }}
-        editable={canManage}
+        editable={canManage && !conflictDraft}
         withHistory
         withFfmpegPath={false}
         apiRef={apiRef}
         snapshotRef={snapshotRef}
+        pendingRestoreRef={pendingRestoreRef}
+        onDraftRestored={() => setConflictDraft(null)}
         onSubmit={save}
       />
     </FormPage>
@@ -380,16 +461,26 @@ export function NodeOverrideSheet({
   canManage: boolean
   onClose: () => void
 }) {
-  const { data, error, isLoading, mutate } = useSWR<NodeConfig>(node ? nodeConfigKey(node.id) : null, fetcher, SWR_OPTIONS)
+  const { data, error, isLoading, isValidating, mutate } = useSWR<NodeConfig>(node ? nodeConfigKey(node.id) : null, fetcher, SWR_OPTIONS)
   const apiRef = useRef<FormApi>(undefined)
   const snapshotRef = useRef<ConfigValues>({})
+  const pendingRestoreRef = useRef<{ baseline: ConfigValues; draft: ConfigValues; clearAll?: boolean } | null>(null)
+  const [conflictDraft, setConflictDraft] = useState<{ baseline: ConfigValues; draft: ConfigValues; clearAll?: boolean } | null>(null)
   const { saving, run } = useSaving()
   const where = node?.online ? `正在下发到 ${node.name}` : `${node?.name ?? '节点'} 上线后下发`
 
   const store = (override: ConfigValues, message: string) =>
     run(async () => {
-      if (!node) return
-      await saveNodeOverride(node.id, override)
+      if (!node || !data) return
+      try {
+        await saveNodeOverride(node.id, data.override, data.global.version, override)
+      } catch (e) {
+        if (e instanceof FleetConfigConflictError) {
+          setConflictDraft({ baseline: { ...snapshotRef.current }, draft: {}, clearAll: true })
+          return
+        }
+        throw e
+      }
       Toast.success(message)
       await mutate()
       revalidate(FLEET_NODES_KEY).catch(() => undefined)
@@ -397,6 +488,7 @@ export function NodeOverrideSheet({
 
   const save = (values: ConfigValues) => {
     if (!data) return
+    if (conflictDraft) return
     const global = data.global.saved ? data.global.config : null
     const override = overridePayload(data.override, snapshotRef.current, values, global)
     if (JSON.stringify(override) === JSON.stringify(data.override)) {
@@ -404,7 +496,33 @@ export function NodeOverrideSheet({
       return
     }
     const count = Object.keys(override).length
-    return store(override, count ? `已保存 ${count} 项覆盖，${where}` : `已撤掉全部覆盖，${where}`)
+    return run(async () => {
+      if (!node) return
+      try {
+        await saveNodeOverride(node.id, data.override, data.global.version, override)
+      } catch (e) {
+        if (e instanceof FleetConfigConflictError) {
+          setConflictDraft({ baseline: { ...snapshotRef.current }, draft: { ...values } })
+          return
+        }
+        throw e
+      }
+      Toast.success(count ? `已保存 ${count} 项覆盖，${where}` : `已撤掉全部覆盖，${where}`)
+      await mutate()
+      revalidate(FLEET_NODES_KEY).catch(() => undefined)
+    })
+  }
+
+  const refreshAndMerge = async () => {
+    if (!conflictDraft) return
+    pendingRestoreRef.current = conflictDraft
+    try {
+      const latest = await mutate()
+      if (!latest) throw new Error('没有读到最新节点覆盖，请重试')
+    } catch (e) {
+      pendingRestoreRef.current = null
+      Toast.error({ content: errorMessage(e), duration: 6 })
+    }
   }
 
   const ready = !!node && !!data
@@ -461,6 +579,19 @@ export function NodeOverrideSheet({
                 : '还没保存过全局配置，节点只收这里的覆盖，其余字段用它本机的值。'
             }带「按节点」标记的字段（${PER_NODE_TEXT}）控制面不知道节点本机的值，空着表示节点保留自己的。`}
           />
+          {conflictDraft ? (
+            <Banner
+              type="warning"
+              fullMode={false}
+              closeIcon={null}
+              title="节点覆盖已被其他管理员更新，当前草稿已保留"
+              description="先刷新最新覆盖并合并草稿，再检查后保存。"
+            >
+              <Button loading={isValidating} onClick={refreshAndMerge}>
+                刷新并合并草稿
+              </Button>
+            </Banner>
+          ) : null}
         </div>
         <ConfigForm
           scope={`fleet-node-${node.id}`}
@@ -473,11 +604,13 @@ export function NodeOverrideSheet({
               { keys: PER_NODE_KEYS.filter((key) => !overrideKeys.includes(key)), text: '按节点', tone: 'grey' },
             ],
           }}
-          editable={canManage}
+          editable={canManage && !conflictDraft}
           withHistory={false}
           withFfmpegPath
           apiRef={apiRef}
           snapshotRef={snapshotRef}
+          pendingRestoreRef={pendingRestoreRef}
+          onDraftRestored={() => setConflictDraft(null)}
           onSubmit={save}
         />
       </>
@@ -494,6 +627,7 @@ export function NodeOverrideSheet({
       okText={canManage && ready ? '保存' : undefined}
       onOk={() => apiRef.current?.submitForm()}
       confirmLoading={saving}
+      okDisabled={!!conflictDraft}
       footerExtra={
         !node || !data ? undefined : canManage ? (
           <Popconfirm
@@ -501,7 +635,7 @@ export function NodeOverrideSheet({
             content="共享字段回到全局配置，按节点的字段回到它接入时本机的值"
             onConfirm={() => store({}, `已清空覆盖，${where}`)}
           >
-            <Button type="danger" disabled={!overrideKeys.length || saving}>
+            <Button type="danger" disabled={!overrideKeys.length || saving || !!conflictDraft}>
               清空覆盖
             </Button>
           </Popconfirm>

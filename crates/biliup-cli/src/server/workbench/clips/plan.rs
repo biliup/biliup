@@ -14,7 +14,7 @@
 use super::super::dvr::{self, flv, ts};
 use super::super::index::{Container, KeyframeIndex};
 use super::super::store::{self, SegmentRow, SegmentState};
-use super::super::{live, readable, segment_index};
+use super::super::{readable, segment_index};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -111,8 +111,10 @@ pub enum Attempt {
 /// 录制端关段和开下一段是先后两个事件，中间分段表里暂时没有下一段。
 const NEXT_SEGMENT_GRACE: Duration = Duration::from_secs(5);
 
+/// 分段和 `[in_ms, out_ms)` 有交集。出点不含：正好从出点开始的分段（断流缺口之后的那一段）一帧都不在
+/// 所选范围里，带上它会多剪出它的第一个 GOP。
 fn overlaps(segment: &SegmentRow, in_ms: i64, out_ms: i64) -> bool {
-    segment.start_ms <= out_ms && segment.end_ms.is_none_or(|end| end > in_ms)
+    segment.start_ms < out_ms && segment.end_ms.is_none_or(|end| end > in_ms)
 }
 
 fn unavailable(segment: &SegmentRow) -> PlanError {
@@ -179,6 +181,14 @@ pub async fn compute(
         // 空分段（开了就断）不占时间轴
         .filter(|s| s.end_ms != Some(s.start_ms) || readable(s))
         .collect();
+    if segments
+        .iter()
+        .any(|segment| crate::server::common::processing::masking::is_unmasked(Path::new(&segment.path)))
+    {
+        return Err(PlanError::Unavailable(
+            "所选录像尚未完成画面遮挡，请等待处理完成后重新导出".into(),
+        ));
+    }
     if let Some(bad) = segments.iter().find(|s| !readable(s)) {
         return Err(unavailable(bad));
     }
@@ -286,7 +296,7 @@ pub async fn compute(
     let cut_in_ms = first.start_ms;
     let open_ended = cut_out_ms.is_none()
         && pieces.last().map(|p| p.segment_id) == last_segment
-        && live::is_recording(session_id);
+        && super::super::session_groups::is_recording(pool, session_id).await?;
     let cut_out_ms = cut_out_ms.unwrap_or_else(|| pieces.last().map_or(out_ms, |p| p.end_ms));
     let plan = Plan {
         container,

@@ -10,6 +10,7 @@ draft = false
 authors = ["Aaran Xu"]
 
 [extra]
+language_code = "en-US"
 lead = 'Introducing AdiDoks, a Zola theme helping you build modern documentation websites, which is a port of the Hugo theme <a href="https://github.com/h-enk/doks">Doks</a> for Zola.'
 images = []
 +++

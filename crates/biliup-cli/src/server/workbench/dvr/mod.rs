@@ -18,6 +18,7 @@ pub(in crate::server::workbench) mod ts;
 
 use super::index::{self, Container};
 use super::live::{self, LiveWatch};
+use super::session_groups;
 use super::store::{self, SegmentRow, SegmentState};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use bytes::{Bytes, BytesMut};
@@ -196,6 +197,7 @@ pub struct Dvr {
     cursor: Cursor,
     pending: BytesMut,
     live: Option<LiveWatch>,
+    group_changes: tokio::sync::watch::Receiver<u64>,
     /// 上次读文件前写盘计数器的值；读到末尾后等它变化。
     seen: u64,
     clock: Clock,
@@ -252,6 +254,12 @@ fn timescale_of(container: Container, index_timescale: u32) -> i64 {
     }
 }
 
+async fn view_watch(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<LiveWatch>> {
+    Ok(session_groups::active_source(pool, id)
+        .await?
+        .and_then(|m| live::watch(m.source_session_id)))
+}
+
 /// 打开场次 `session_id` 从场次时间 `from_ms` 起的回看流。
 pub async fn open(pool: &ConnectionPool, session_id: i64, from_ms: i64) -> Result<Dvr, OpenError> {
     if store::session(pool, session_id).await?.is_none() {
@@ -265,7 +273,7 @@ pub async fn open(pool: &ConnectionPool, session_id: i64, from_ms: i64) -> Resul
             "分片 MP4（B 站 hls_fmp4）录像暂不支持回看，只能等录完后下载或切片".into(),
         ));
     }
-    let row = store::segment(pool, located.segment_id)
+    let row = store::timeline_segment(pool, session_id, located.segment_id)
         .await?
         .ok_or(OpenError::NoMedia)?;
     let mut file = File::open(&located.path).await?;
@@ -297,7 +305,7 @@ pub async fn open(pool: &ConnectionPool, session_id: i64, from_ms: i64) -> Resul
         }
     };
     file.seek(SeekFrom::Start(located.offset)).await?;
-    let live = live::watch(session_id);
+    let live = view_watch(pool, session_id).await?;
     Ok(Dvr {
         container: located.container,
         start_ms: located.keyframe_ms,
@@ -316,6 +324,7 @@ pub async fn open(pool: &ConnectionPool, session_id: i64, from_ms: i64) -> Resul
         },
         pending: BytesMut::with_capacity(READ_CHUNK),
         live,
+        group_changes: session_groups::updates(pool, session_id),
         seen: 0,
         clock: Clock::default(),
         video: Tracker::default(),
@@ -338,6 +347,9 @@ enum Step {
 
 impl Dvr {
     pub fn into_stream(self) -> impl futures::Stream<Item = io::Result<Bytes>> + Send + 'static {
+        // 结束之后再被 poll 也只返回 None：消费者用 timeout 包着 next() 时，超时可能赢过一次
+        // 「流已经返回 None」的 poll，循环会继续拉，而未 fuse 的 unfold 会 panic。
+        use futures::StreamExt as _;
         futures::stream::unfold(self, |mut dvr| async move {
             match dvr.next_chunk().await {
                 Ok(Some(chunk)) => {
@@ -352,6 +364,7 @@ impl Dvr {
                 }
             }
         })
+        .fuse()
     }
 
     async fn next_chunk(&mut self) -> io::Result<Option<Bytes>> {
@@ -411,7 +424,7 @@ impl Dvr {
     /// 等写盘计数器增长或分段表变更。返回 `false`：这一路不能跟随（录制已停 / 没有写盘计数）。
     async fn wait_for_writes(&mut self) -> bool {
         if self.live.is_none() {
-            self.live = live::watch(self.session_id);
+            self.live = view_watch(&self.pool, self.session_id).await.ok().flatten();
         }
         let Some(LiveWatch { changes, bytes }) = self.live.as_mut() else {
             return false;
@@ -422,6 +435,10 @@ impl Dvr {
         self.woke = true;
         let threshold = self.seen + empty_wake_step(self.empty_streak);
         tokio::select! {
+            _ = self.group_changes.changed()=> {
+                self.live=None;
+                self.cursor.row_stale=true;
+            }
             total = bytes.grown_since(threshold) => {
                 self.seen = total;
                 self.stats.byte_wakes += 1;
@@ -440,11 +457,12 @@ impl Dvr {
     /// 等流式索引更新一次（或分段表变更）。索引任务在录制结束、放弃跟踪时也会通知，不会一直等。
     async fn wait_for_index(&mut self, updates: &mut tokio::sync::watch::Receiver<u64>) {
         if self.live.is_none() {
-            self.live = live::watch(self.session_id);
+            self.live = view_watch(&self.pool, self.session_id).await.ok().flatten();
         }
         self.stats.index_wakes += 1;
         match self.live.as_mut() {
             Some(live) => tokio::select! {
+                _ = self.group_changes.changed()=> { self.live=None; }
                 _ = updates.changed() => {}
                 changed = live.changes.changed() => {
                     if changed.is_err() {
@@ -461,7 +479,7 @@ impl Dvr {
     async fn at_end_of_file(&mut self) -> io::Result<Step> {
         if self.cursor.row_stale {
             self.cursor.row_stale = false;
-            match store::segment(&self.pool, self.cursor.row.id)
+            match store::timeline_segment(&self.pool, self.session_id, self.cursor.row.id)
                 .await
                 .map_err(io::Error::other)?
             {
@@ -513,14 +531,17 @@ impl Dvr {
         let Some(next) = segments.get(after).cloned() else {
             // 场次还在录：等新分段开出来
             if self.live.is_none() {
-                self.live = live::watch(self.session_id);
+                self.live = view_watch(&self.pool, self.session_id)
+                    .await
+                    .map_err(io::Error::other)?;
             }
             let Some(live) = self.live.as_mut() else {
                 return Ok(Step::End("没在录了，已回放到最新"));
             };
             self.stats.change_wakes += 1;
-            if live.changes.changed().await.is_err() {
-                self.live = None;
+            tokio::select! {
+                _ = self.group_changes.changed()=> { self.live=None; }
+                changed = live.changes.changed()=> { if changed.is_err() { self.live=None; } }
             }
             return Ok(Step::Continue);
         };

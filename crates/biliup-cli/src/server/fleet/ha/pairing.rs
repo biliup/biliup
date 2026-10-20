@@ -160,6 +160,18 @@ fn peer(standby: i64) -> String {
     format!("node:{standby}")
 }
 
+/// 控制面当备机：节点在这条连接上应答了期望状态（它那边的主机已经起好），备机还没接上这条连接就接上、先上报。
+/// 节点进程重启后，新连接会在控制面发现旧连接断开之前把它顶掉，被顶掉的旧连接不报离线（[`Pairing::node_offline`]
+/// 只认在线表里的那一条）；只看「接没接着」时备机会一直挂在已经关掉的旧连接上，节点上的主机收不到上报与之后的
+/// 场次消息（不知道备机在投，两边各投一份）
+fn link_standby(standby: &Arc<Standby>, link: Link) {
+    if standby.linked_to(&link) {
+        return;
+    }
+    let report = standby.link_up(link.clone());
+    link.ha(report);
+}
+
 /// `PUT /v1/fleet/ha`
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -505,12 +517,8 @@ impl Pairing {
             .member
             .link_up(Link::Controller(outbox.clone()))
             .await;
-        if let Upload::Standby(standby) = &active.upload
-            && !standby.linked()
-        {
-            let link = Link::Controller(outbox);
-            let report = standby.link_up(link.clone());
-            link.ha(report);
+        if let Upload::Standby(standby) = &active.upload {
+            link_standby(standby, Link::Controller(outbox));
         }
     }
 
@@ -1665,6 +1673,51 @@ mod tests {
             Some(Refused::Conflict(m)) if m.contains("房间 7") && m.contains("等它了结")
         ));
         assert_eq!(switch_refusal(Some(5), true, true, None), None);
+    }
+
+    /// 上传主机换到节点后控制面当备机。节点进程重启，新连接顶掉了旧连接（旧连接没有先报离线）：
+    /// 节点在新连接上应答时备机改接新连接、重新上报，不再往旧连接发；同一条连接上再应答不重复上报
+    #[tokio::test]
+    async fn the_controller_standby_follows_a_connection_that_superseded_the_old_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let services = super::super::member::tests::services(dir.path()).await;
+        let mut pair = pair();
+        pair.leader_node_id = Some(pair.standby_node_id);
+        let standby = Standby::start(
+            dir.path().join(STATE_FILE_NAME),
+            &peer(pair.standby_node_id),
+            HaAssignment::of(&pair, vec![7]),
+            None,
+            services,
+        );
+        let connection = || {
+            let (frames, received) = mpsc::unbounded_channel::<ControllerMessage>();
+            (Link::Controller(frames), received)
+        };
+        let reports = |received: &mut mpsc::UnboundedReceiver<ControllerMessage>| {
+            std::iter::from_fn(|| received.try_recv().ok())
+                .filter(|frame| {
+                    matches!(
+                        frame,
+                        ControllerMessage::Ha(HaMessage::StandbyReport { .. })
+                    )
+                })
+                .count()
+        };
+
+        let (old, mut old_frames) = connection();
+        link_standby(&standby, old.clone());
+        assert_eq!(reports(&mut old_frames), 1);
+        link_standby(&standby, old.clone());
+        assert_eq!(reports(&mut old_frames), 0, "同一条连接不重复上报");
+
+        // 节点重启：旧连接被顶掉、写帧的一端随之关掉，控制面没有收到它的离线
+        drop(old_frames);
+        let (new, mut new_frames) = connection();
+        link_standby(&standby, new.clone());
+        assert_eq!(reports(&mut new_frames), 1, "改接新连接并先上报");
+        assert!(standby.linked_to(&new) && !standby.linked_to(&old));
+        standby.stop();
     }
 
     #[test]

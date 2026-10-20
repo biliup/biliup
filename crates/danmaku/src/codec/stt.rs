@@ -7,15 +7,26 @@
 
 use std::collections::HashMap;
 
+const MAX_DECODE_DEPTH: usize = 64;
+
 /// Decode STT format to a nested structure.
 pub fn decode(input: &str) -> SttValue {
+    decode_at_depth(input, 0)
+}
+
+fn decode_at_depth(input: &str, depth: usize) -> SttValue {
+    // Repeated `@=` separators can otherwise exhaust the thread stack.
+    if depth >= MAX_DECODE_DEPTH {
+        return SttValue::String(decode_string(input));
+    }
+
     if input.contains('/') {
         let items: Vec<&str> = input.split('/').filter(|s| !s.is_empty()).collect();
         let mut dict = HashMap::new();
         let mut list = Vec::new();
 
         for item in items {
-            let decoded = decode(item);
+            let decoded = decode_at_depth(item, depth + 1);
             if let SttValue::Map(map) = decoded {
                 dict.extend(map);
             } else {
@@ -32,7 +43,7 @@ pub fn decode(input: &str) -> SttValue {
         if let Some((key, value)) = input.split_once("@=") {
             let mut map = HashMap::new();
             let key_decoded = decode_string(key);
-            let value_decoded = decode(value);
+            let value_decoded = decode_at_depth(value, depth + 1);
             map.insert(key_decoded, value_decoded);
             SttValue::Map(map)
         } else {
@@ -45,7 +56,7 @@ pub fn decode(input: &str) -> SttValue {
 
 /// Decode special characters in STT string.
 fn decode_string(s: &str) -> String {
-    s.replace("@A", "@").replace("@S", "/")
+    s.replace("@S", "/").replace("@A", "@")
 }
 
 /// Encode a string for STT format.
@@ -115,5 +126,18 @@ mod tests {
         assert_eq!(result.get_str("nn"), Some("user1"));
         assert_eq!(result.get_str("txt"), Some("test message"));
         assert_eq!(result.get_str("col"), Some("1"));
+    }
+
+    #[test]
+    fn escaped_literal_escape_sequences_round_trip() {
+        let text = "literal @S and @A / @";
+        let input = format!("txt@={}/", encode_string(text));
+        assert_eq!(decode(&input).get_str("txt"), Some(text));
+    }
+
+    #[test]
+    fn deeply_nested_values_do_not_overflow_the_stack() {
+        let input = "key@=".repeat(100_000);
+        let _ = decode(&input);
     }
 }

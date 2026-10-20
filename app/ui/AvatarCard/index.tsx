@@ -1,6 +1,6 @@
 import { Avatar, Button, Popconfirm } from '@douyinfe/semi-ui'
-import { IconClose, IconMinusCircle } from '@douyinfe/semi-icons'
-import React, { MouseEventHandler } from 'react'
+import { IconMinusCircle } from '@douyinfe/semi-icons'
+import React from 'react'
 import styles from './AvatarCard.module.scss'
 
 interface ICardProps {
@@ -31,6 +31,8 @@ const AvatarCard: React.FC<ICardProps> = ({ abbr, label, value, onRemove, url })
         type="danger"
         theme="borderless"
         icon={<IconMinusCircle />}
+        aria-label={`删除 B 站账号 ${label}`}
+        title={`删除 B 站账号 ${label}`}
       />
     </Popconfirm>
     {/*<IconMinusCircle  className={styles['semi-icon-close']} onClick={onRemove}/>*/}
