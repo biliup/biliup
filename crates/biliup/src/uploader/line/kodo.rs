@@ -137,6 +137,7 @@ impl Kodo {
                     title: None,
                     filename: truncated_filename,
                     desc: "".into(),
+                    cid: None,
                 }
             }
         })

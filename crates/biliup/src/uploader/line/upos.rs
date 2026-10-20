@@ -266,6 +266,7 @@ fn uploaded_video(upos_uri: &str) -> Result<Video> {
         title: None,
         filename: filename.to_string(),
         desc: "".into(),
+        cid: None,
     })
 }
 
@@ -405,6 +406,8 @@ mod tests {
         let video = uploaded_video(&format!("upos://bucket/{key}.mp4")).unwrap();
         assert_eq!(video.filename, key);
         assert!(video.title.is_none());
+        assert!(video.cid.is_none());
+        assert!(serde_json::to_value(&video).unwrap().get("cid").is_none());
         assert!(uploaded_video("").is_err());
     }
 

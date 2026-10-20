@@ -335,6 +335,13 @@ pub struct Video {
     pub title: Option<String>,
     pub filename: String,
     pub desc: String,
+    /// 已发布分P的 cid。
+    ///
+    /// 编辑稿件时 B 站要求已存在的分P回传自己的 cid，否则会把它们当作本次新增的
+    /// 分P，长稿件就会返回 21058「单次投稿添加的分P数已达最大上限」。
+    /// 新上传的分P没有 cid，序列化时省略。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cid: Option<u64>,
 }
 
 impl Video {
@@ -343,6 +350,7 @@ impl Video {
             title: None,
             filename: filename.into(),
             desc: "".into(),
+            cid: None,
         }
     }
 
@@ -357,6 +365,42 @@ impl Video {
         // 截断到max_chars-3个字符，然后添加"..."
         let truncated: String = title.chars().take(max_chars - 3).collect();
         format!("{}...", truncated)
+    }
+}
+
+#[cfg(test)]
+mod video_cid_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn editing_an_archive_keeps_existing_cids_and_omits_them_for_new_parts() {
+        // studio_data reads these entries from the archive view, then append
+        // extends this list before web/app edits serialize the same Studio.
+        let mut videos: Vec<Video> = serde_json::from_value(json!([
+            {"title": "existing part", "filename": "existing-key", "desc": "", "cid": 12345678901u64}
+        ])).unwrap();
+        videos.push(Video::new("new-key"));
+        let mut studio: Studio =
+            serde_json::from_value(json!({"tid": 171, "title": "existing archive"})).unwrap();
+        studio.videos = videos;
+        let wire = serde_json::to_value(&studio).unwrap();
+        assert_eq!(wire["videos"][0]["cid"], 12345678901u64);
+        assert_eq!(wire["videos"][0]["filename"], "existing-key");
+        assert!(wire["videos"][1].get("cid").is_none());
+        assert_eq!(wire["videos"][1]["filename"], "new-key");
+    }
+
+    #[test]
+    fn old_checkpoints_without_cid_and_null_cids_remain_readable() {
+        for payload in [
+            json!({"title": null, "filename": "key", "desc": ""}),
+            json!({"title": null, "filename": "key", "desc": "", "cid": null}),
+        ] {
+            let video: Video = serde_json::from_value(payload).unwrap();
+            assert!(video.cid.is_none());
+            assert!(serde_json::to_value(video).unwrap().get("cid").is_none());
+        }
     }
 }
 
