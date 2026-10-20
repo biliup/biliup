@@ -20,7 +20,7 @@ use reqwest::header::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::codec::{MAX_DECOMPRESSED_SIZE, decompress_limited};
 use crate::error::{DanmakuError, Result};
@@ -112,6 +112,50 @@ impl Bilibili {
         let client = reqwest::Client::new();
         let wbi_signer = WbiSigner::new(client.clone());
         Self { client, wbi_signer }
+    }
+
+    fn auth_uid(context: &PlatformContext) -> Result<u64> {
+        let mut cookie_uid = None;
+        let mut has_session = false;
+        for part in context.cookie.as_deref().unwrap_or("").split(';') {
+            let Some((name, value)) = part.trim().split_once('=') else {
+                continue;
+            };
+            if name.trim() == "SESSDATA" && !value.trim().is_empty() {
+                has_session = true;
+            }
+            if name.trim() == "DedeUserID" {
+                let uid = value
+                    .trim()
+                    .parse::<u64>()
+                    .ok()
+                    .filter(|uid| *uid > 0)
+                    .ok_or_else(|| {
+                        DanmakuError::Decode("Invalid Bilibili cookie UID (value redacted)".into())
+                    })?;
+                if cookie_uid.is_some_and(|previous| previous != uid) {
+                    return Err(DanmakuError::Decode(
+                        "Conflicting Bilibili cookie UIDs (values redacted)".into(),
+                    ));
+                }
+                cookie_uid = Some(uid);
+            }
+        }
+        if let (Some(explicit), Some(cookie)) = (context.uid, cookie_uid) {
+            if explicit != cookie {
+                return Err(DanmakuError::Decode(
+                    "Bilibili context UID does not match cookie UID (values redacted)".into(),
+                ));
+            }
+        }
+        // A logged-in API token cannot authenticate an anonymous uid=0 registration.
+        let uid = context.uid.or(cookie_uid).unwrap_or(0);
+        if has_session && cookie_uid.is_none() {
+            return Err(DanmakuError::Decode(
+                "Bilibili session cookie requires its account UID (credentials redacted)".into(),
+            ));
+        }
+        Ok(uid)
     }
 
     /// Build default headers for requests.
@@ -528,7 +572,7 @@ impl Platform for Bilibili {
         url: &str,
         context: &PlatformContext,
     ) -> Result<ConnectionInfo> {
-        let uid = context.uid.unwrap_or(0);
+        let uid = Self::auth_uid(context)?;
         let cookie = context.cookie.as_deref();
         let headers = Self::default_headers(cookie);
 
@@ -572,7 +616,20 @@ impl Platform for Bilibili {
                     // We ignore it for now
                 }
                 op::AUTH_REPLY => {
-                    debug!("Auth reply received");
+                    let reply: Value = serde_json::from_slice(&packet.body).map_err(|_| {
+                        DanmakuError::Decode(
+                            "Invalid Bilibili auth response (body redacted)".into(),
+                        )
+                    })?;
+                    let code = reply.get("code").and_then(Value::as_i64).ok_or_else(|| {
+                        DanmakuError::Decode("Bilibili auth response missing numeric code".into())
+                    })?;
+                    if code != 0 {
+                        return Err(DanmakuError::Decode(format!(
+                            "Bilibili authentication rejected: code={code}"
+                        )));
+                    }
+                    info!("Bilibili danmaku authentication succeeded (code=0)");
                 }
                 _ => {
                     debug!("Unknown operation: {}", packet.operation);
@@ -641,6 +698,85 @@ fn generate_fake_buvid3() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auth_identity_uses_the_same_cookie_as_token_headers() {
+        // Synthetic identities only; no real account credentials.
+        for uid in [12345u64, 67890] {
+            let context = PlatformContext::new()
+                .with_cookie(format!("SESSDATA=FIXTURE_ONLY; DedeUserID={uid}"));
+            let selected_uid = Bilibili::auth_uid(&context).unwrap();
+            assert_eq!(selected_uid, uid);
+            let headers = Bilibili::default_headers(context.cookie.as_deref());
+            assert!(
+                headers[COOKIE]
+                    .to_str()
+                    .unwrap()
+                    .ends_with(context.cookie.as_ref().unwrap())
+            );
+            let packet = Bilibili::build_auth_packet(selected_uid, 42, "FIXTURE_TOKEN");
+            assert_eq!(BigEndian::read_u32(&packet[8..12]), op::AUTH);
+            let body: Value = serde_json::from_slice(&packet[16..]).unwrap();
+            assert_eq!(
+                body,
+                serde_json::json!({
+                    "uid": uid, "roomid": 42, "protover": 3, "platform": "web",
+                    "type": 2, "key": "FIXTURE_TOKEN"
+                })
+            );
+        }
+        assert_eq!(Bilibili::auth_uid(&PlatformContext::new()).unwrap(), 0);
+    }
+
+    #[test]
+    fn invalid_or_conflicting_cookie_identity_is_rejected_without_credentials() {
+        for cookie in [
+            "SESSDATA=FIXTURE_ONLY",
+            "DedeUserID=0",
+            "DedeUserID=INVALID_FIXTURE",
+            "DedeUserID=18446744073709551616",
+            "DedeUserID=12345; DedeUserID=67890",
+        ] {
+            let error = Bilibili::auth_uid(&PlatformContext::new().with_cookie(cookie))
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("FIXTURE_ONLY"));
+            assert!(!error.contains("INVALID_FIXTURE"));
+            assert!(!error.contains("12345"));
+            assert!(!error.contains("67890"));
+        }
+        let mut context = PlatformContext::new().with_cookie("DedeUserID=12345");
+        context.uid = Some(67890);
+        assert!(Bilibili::auth_uid(&context).is_err());
+        context.uid = Some(0);
+        assert!(Bilibili::auth_uid(&context).is_err());
+        context.uid = Some(12345);
+        assert_eq!(Bilibili::auth_uid(&context).unwrap(), 12345);
+        context.cookie = Some("SESSDATA=FIXTURE_ONLY".into());
+        assert!(Bilibili::auth_uid(&context).is_err());
+    }
+
+    #[test]
+    fn authentication_requires_a_numeric_success_response() {
+        let protocol = Bilibili::new();
+        assert!(
+            protocol
+                .decode_message(&build_packet(br#"{"code":0}"#, op::AUTH_REPLY))
+                .is_ok()
+        );
+        for body in [
+            br#"{"code":-101,"message":"SECRET_FIXTURE"}"#.as_slice(),
+            br#"{"code":"0"}"#,
+            br#"{}"#,
+            b"SECRET_FIXTURE",
+        ] {
+            let error = protocol
+                .decode_message(&build_packet(body, op::AUTH_REPLY))
+                .unwrap_err()
+                .to_string();
+            assert!(!error.contains("SECRET_FIXTURE"));
+        }
+    }
 
     #[test]
     fn test_extract_room_id() {
