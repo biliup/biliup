@@ -39,6 +39,7 @@ bon = "3.7.2"
 regex = "1.11.1"
 reqwest = { version = "0.13.4", features = ["cookies", "form", "query"] }
 url = "2.5"
+quick-xml = "0.36"
 
 
 [profile.dev]
