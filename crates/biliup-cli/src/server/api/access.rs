@@ -191,6 +191,8 @@ mod tests {
         ("POST", "/v1/session-merge-candidates/1/dismiss"),
         ("POST", "/v1/session-groups"),
         ("GET", "/v1/streamers"),
+        ("GET", "/v1/streamers/page"),
+        ("GET", "/v1/overview"),
         ("POST", "/v1/streamers"),
         ("PUT", "/v1/streamers"),
         ("DELETE", "/v1/streamers/1"),
@@ -267,6 +269,8 @@ mod tests {
             | ("GET", "/v1/upload-queue")
             | ("GET", "/v1/upload-queue/upload-1")
             | ("GET", "/v1/streamers")
+            | ("GET", "/v1/streamers/page")
+            | ("GET", "/v1/overview")
             | ("GET", "/v1/streamers/1/cover")
             | ("GET", "/v1/streamers/1/avatar")
             | ("GET", "/v1/streamers/1/live")
@@ -350,6 +354,8 @@ mod tests {
             )
             .route("/v1/session-groups", post(|| async { StatusCode::OK }))
             .route("/v1/streamers", any())
+            .route("/v1/streamers/page", ok())
+            .route("/v1/overview", ok())
             .route("/v1/streamers/{id}", delete(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/pause", put(|| async { StatusCode::OK }))
             .route("/v1/streamers/{id}/cover", ok())

@@ -63,7 +63,7 @@ export default function UploadQueuePage() {
   const total = data?.total ?? 0
 
   return <>
-    <PageHeader icon={<IconCloudStroked size="large" />} title="上传队列" description="查看各投稿来源的任务顺序、上传速度和处理状态" />
+    <PageHeader icon={<IconCloudStroked size="large" />} title="上传队列" />
     <div className={dc.content}>
       {!canView ? <div className={styles.notice}>需要“文件查看”权限才能查看上传队列。</div> : <>
         <section className={styles.summary} aria-label="上传队列概况">

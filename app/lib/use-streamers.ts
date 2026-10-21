@@ -6,7 +6,7 @@ import {
   LiveStreamerEntity,
   User
 } from "./api-streamer";
-import {useEffect, useState} from "react";
+import {boundedTasks} from "./bounded-tasks";
 import {useMe} from "./use-me";
 
 
@@ -21,13 +21,14 @@ export default function useStreamers() {
 
 const NO_USERS: any[] = [];
 
-export function useBiliUsers() {
+export function useBiliUsers(enabled = true) {
   // 账号列表归「编辑投稿模板」权限；没有这项权限的角色（只读观察者）不去请求，免得满屏 403
   const {can} = useMe();
-  const {data, error, isLoading} = useSWR<User[]>(can("template.edit") ? "/v1/users" : null, fetcher);
-  const [list, setList] = useState<any[]>(NO_USERS);
-  useEffect(() => {
-    if (!data) return;
+  const {data, error, isLoading} = useSWR<User[]>(enabled && can("template.edit") ? "/v1/users" : null, fetcher);
+  // Shared SWR key deduplicates profile requests across all mounted consumers.
+  const {data: list, isLoading: profilesLoading} = useSWR(
+    enabled && data?.length ? ['bili-user-profiles', data] : null,
+    async ([, users]: [string, User[]]) => {
     const updateList = async (item: User) => {
       try {
         const res = await fetcher(`/v1/users/${item.id}`, undefined);
@@ -47,14 +48,15 @@ export function useBiliUsers() {
     };
     // data 为空数组时这里解析为 [],顺带把上一批账号的补全结果清掉,
     // 之后再有账号时不会先闪一下旧数据
-    Promise.all(data.map(updateList)).then(setList);
-  }, [data])
+    const results = await boundedTasks(users, updateList);
+    return results.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+  }, { dedupingInterval: 60_000, revalidateOnFocus: false });
 
   return {
-    isLoading,
+    isLoading: isLoading || profilesLoading,
     isError: error,
     // 没有账号时直接派生为空列表,不必等 effect 里再 setState 一轮
-    biliUsers: !data || data.length === 0 ? NO_USERS : list,
+    biliUsers: !enabled || !data?.length ? NO_USERS : list ?? NO_USERS,
   };
 }
 

@@ -144,13 +144,6 @@ const { data: entity, error, isLoading, mutate } = useSWR('/v1/configuration', f
       <PageHeader
         icon={<IconStar size="large" />}
         title="空间配置"
-        description={
-          managedBy
-            ? `只读：由控制面 ${managedBy} 统一下发`
-            : editable
-              ? '全局下载 / 上传参数、各平台录制参数与开发者选项。修改后需点击右上角「保存」才会生效'
-              : '只读：当前角色可以查看配置，敏感字段已隐藏；修改需要超级管理员'
-        }
         actions={
           managedBy ? (
             can('config.edit') && (

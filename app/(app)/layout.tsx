@@ -48,7 +48,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       {
         href: '/',
         perm: 'streamer.view',
-        label: '控制台',
+        label: '概览',
         icon: <Ic d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" />,
       },
     ],
@@ -432,7 +432,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             href="/"
             prefetch={false}
             onClick={() => isMobile && setMobileNavOpen(false)}
-            aria-label="回到控制台"
+            aria-label="回到概览"
           >
             <Image
               src="/logo.png"

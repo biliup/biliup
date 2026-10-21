@@ -120,7 +120,7 @@ export default function LiveView({ streamerId }: { streamerId: number }) {
       <div className={styles.center}>
         <Empty title={`找不到直播间 #${streamerId}`} description="这个直播间可能已经被删除">
           <Button theme="solid" onClick={() => router.push('/')}>
-            去控制台
+            去概览
           </Button>
         </Empty>
       </div>

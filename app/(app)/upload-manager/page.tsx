@@ -177,9 +177,6 @@ export default function UploadManager() {
       <PageHeader
         icon={<IconCloudStroked size="large" />}
         title="投稿管理"
-        description={
-          canEditTemplates ? '管理上传模板,选择录制文件一键投稿' : '查看已配置的上传模板'
-        }
         actions={canEditTemplates || canManageAccounts ? actions : undefined}
       />
       <div className={dc.content}>

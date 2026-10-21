@@ -398,7 +398,6 @@ export default function UsersPage() {
       <PageHeader
         icon={<IconUserGroup size="large" />}
         title="用户管理"
-        description="为其他人开设账号并分配角色。改动即时生效，至少保留一个启用中的超级管理员"
         actions={
           <Button
             icon={<IconPlusCircle />}

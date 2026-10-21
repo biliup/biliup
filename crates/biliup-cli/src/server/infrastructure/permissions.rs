@@ -137,7 +137,7 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
     use Permission::*;
     let get = method == Method::GET || method == Method::HEAD;
     let permission = match route {
-        "/v1/streamers" if get => StreamerView,
+        "/v1/streamers" | "/v1/streamers/page" | "/v1/overview" if get => StreamerView,
         "/v1/streamers" if method == Method::POST || method == Method::PUT => StreamerEdit,
         "/v1/streamers/{id}" if method == Method::DELETE => StreamerEdit,
         "/v1/streamers/{id}/pause" if method == Method::PUT => RecordingControl,

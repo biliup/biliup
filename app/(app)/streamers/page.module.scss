@@ -19,6 +19,7 @@
 
 /* ===== 工具栏 ===== */
 .toolbar {
+  scroll-margin-top: 90px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -135,12 +136,6 @@
   gap: 12px;
   align-items: start;
 }
-.cardActions {
-  gap: 4px;
-}
-.cardActions :global(.semi-button) {
-  padding: 5px;
-}
 
 /* ===== 列表视图 ===== */
 .tableWrap {
@@ -216,11 +211,10 @@
 }
 .rowActions {
   display: flex;
-  gap: 2px;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
-}
-.rowActions :global(.semi-button) {
-  padding: 4px 6px;
 }
 
 /* ===== 响应式 ===== */
@@ -231,4 +225,18 @@
   .search {
     width: 100%;
   }
+}
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 24px;
+  color: var(--semi-color-text-2);
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .pagination { justify-content: center; }
+  .pagination :global(.semi-page) { flex-wrap: wrap; justify-content: center; gap: 8px; }
 }

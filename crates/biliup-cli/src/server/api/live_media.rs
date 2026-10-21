@@ -60,10 +60,10 @@ pub async fn get_live_cover(
         .await;
     }
     if let Some(stored) = cover_store().load(id).await {
-        return match tokio::fs::read(cover_store().image_path(&stored)).await {
-            Ok(bytes) => image_response(
-                &stored.content_type,
-                Bytes::from(bytes),
+        return match cover_store().read_thumbnail(id, &stored).await {
+            Ok(image) => image_response(
+                &image.content_type,
+                image.body,
                 "private, max-age=300",
             ),
             Err(error) => {
@@ -104,10 +104,10 @@ async fn serve_avatar(worker: &Worker, store: &AvatarStore) -> Response {
     let Some(stored) = stored else {
         return (StatusCode::NOT_FOUND, "该直播间没有可用的头像").into_response();
     };
-    match tokio::fs::read(store.image_path(&stored)).await {
-        Ok(bytes) => image_response(
-            &stored.content_type,
-            Bytes::from(bytes),
+    match store.read_thumbnail(id, &stored).await {
+        Ok(image) => image_response(
+            &image.content_type,
+            image.body,
             "private, max-age=3600",
         ),
         Err(e) => {

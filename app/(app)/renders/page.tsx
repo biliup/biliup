@@ -35,7 +35,7 @@ export default function RenderTasksPage() {
     setOffset(Math.max(0, Math.ceil(total / PAGE_SIZE) - 1) * PAGE_SIZE)
   }
   return <>
-    <PageHeader icon={<IconVideo size="large" />} title="压制任务" description="查看所有场次的压制进度、结果和所用编码设备" />
+    <PageHeader icon={<IconVideo size="large" />} title="压制任务" />
     <div className={dc.content}>
       <GpuMonitorCard allowed={canView} />
       <section>

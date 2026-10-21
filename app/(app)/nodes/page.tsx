@@ -48,13 +48,6 @@ const { Text } = Typography
 
 type Tab = 'nodes' | 'rooms' | 'templates' | 'alerts' | 'ha'
 
-const DESCRIPTIONS: Record<Tab, string> = {
-  nodes: '加入本控制面的 biliup 实例。各节点仍各自录制、各自上传，这里汇总它们的状态',
-  rooms: '把直播间分派给节点录制；迁移时上一台先停录、确认释放后才交给新节点',
-  templates: '房间录完按模板投稿；账号按 mid 在节点本机的凭据里找，凭据不出节点',
-  alerts: '节点离线、磁盘不足、配置或房间没能落地、录制出错、投稿失败；只在这里显示',
-  ha: '「本机」与一台节点录同样的直播间、只由一台投稿；在哪台上改都会同步',
-}
 const TABS: Tab[] = ['nodes', 'rooms', 'templates', 'alerts', 'ha']
 
 function NotController() {
@@ -357,7 +350,6 @@ function Nodes() {
     <>
       <TaskPlatformHeader
         active="nodes"
-        description={controller && !hasFleet ? '本机独立录制；需要多机协作时再添加节点' : DESCRIPTIONS[controller ? tab : 'nodes']}
         actions={actions}
       />
       <div className={dc.content}>

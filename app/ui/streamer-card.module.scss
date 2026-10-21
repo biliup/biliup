@@ -6,7 +6,7 @@
   border: 1px solid var(--semi-color-fill-2);
   border-radius: 12px;
   background: var(--semi-color-bg-1);
-  padding: 14px 16px 15px;
+  padding: 0 16px 15px;
   box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
   transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
 }
@@ -29,22 +29,6 @@
   opacity: 0.78;
 }
 
-/* ===== 头部行 ===== */
-.topRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 9px;
-}
-
-.left {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-
 .chk {
   width: 15px;
   height: 15px;
@@ -61,6 +45,7 @@
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
+  line-height: 18px;
   padding: 2px 9px;
   border-radius: 999px;
   white-space: nowrap;
@@ -75,7 +60,7 @@
 
 .badgeLive {
   background: rgba(var(--semi-green-4), 0.13);
-  color: rgb(var(--semi-green-5));
+  color: var(--semi-color-text-1);
 }
 .badgeLive .bdot {
   background: rgb(var(--semi-green-5));
@@ -109,41 +94,45 @@
   background: var(--semi-color-text-2);
 }
 
-/* 平台 chip:品牌色点缀(颜色由组件内联注入) */
+/* 平台名称使用品牌色(颜色由组件内联注入) */
 .platChip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
   padding: 2px 9px;
   border-radius: 999px;
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 400;
+  color: var(--semi-color-text-1);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
-.platDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
+.platName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===== 录制中:直播间封面(16:9) ===== */
+.coverFrame {
+  position: relative;
+  margin: -1px -17px 10px;
+  border-radius: 12px 12px 0 0;
+}
 .cover {
   position: relative;
-  margin: 0 0 10px;
+  margin: 0;
   aspect-ratio: 16 / 9;
-  border-radius: 8px;
+  border-radius: 12px 12px 0 0;
   overflow: hidden;
   background: var(--semi-color-fill-1);
 }
-.cover img {
+.cover > img {
   object-fit: cover;
   opacity: 0;
   transition: opacity 0.25s ease;
 }
-.cover[data-state='ok'] img {
+.cover[data-state='ok'] > img {
   opacity: 1;
 }
 .coverPlaceholder {
@@ -154,6 +143,70 @@
   justify-content: center;
   color: var(--semi-color-text-2);
   font-size: 12px;
+}
+.coverHeader {
+  position: absolute;
+  inset: 0 0 auto;
+  padding: 10px 12px 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fff;
+  border-radius: 12px 12px 0 0;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.2) 65%, transparent);
+  pointer-events: none;
+}
+.coverHeader .nameWrap { flex: 1; }
+.coverStatus {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--semi-color-bg-1);
+}
+.coverFooter {
+  position: absolute;
+  inset: auto 0 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 12px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+  pointer-events: none;
+}
+.coverFooter[data-chart='true'] { bottom: 44px; }
+.coverTitle {
+  flex: 1;
+  min-width: 0;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+.coverPlatform {
+  flex-shrink: 0;
+  max-width: 45%;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--semi-color-bg-1);
+}
+.coverPlatform .platChip { display: flex; }
+.selection {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.coverHeader .name {
+  color: inherit;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 /* 可预览时封面可点:中央播放标记,悬停加深 */
@@ -190,7 +243,7 @@
   background: rgba(0, 0, 0, 0.6);
 }
 
-/* ===== 名称 + 时长 ===== */
+/* ===== 名称 ===== */
 .nameRow {
   display: flex;
   align-items: center;
@@ -217,8 +270,9 @@
 }
 
 .name {
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
   color: var(--semi-color-text-0);
   white-space: nowrap;
   overflow: hidden;
@@ -226,12 +280,32 @@
   min-width: 0;
 }
 
-/* 直播中:右侧时长 + 写盘速率 */
+.remarkRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-bottom: 3px;
+}
+
+.remark {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--semi-color-text-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 直播中:底部左侧时长 + 写盘速率 */
 .liveStats {
   display: inline-flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 8px;
-  flex-shrink: 0;
+  min-width: 0;
 }
 
 /* 直播中:实时时长(绿色) */
@@ -257,14 +331,6 @@
   background: var(--semi-color-fill-0);
   min-width: 2.6em;
   text-align: center;
-}
-
-/* 直播中:预览按钮(图标) */
-.previewBtn {
-  height: 22px;
-  min-width: 22px;
-  padding: 0 6px !important;
-  align-self: center;
 }
 
 /* 直播中:最近 60 秒写盘速率 sparkline(无坐标轴,hover 显示数值);没有封面可叠时放名称行下 */
@@ -294,19 +360,7 @@
   flex-shrink: 0;
 }
 
-/* ===== 标题 / URL ===== */
-.title {
-  font-size: 12.5px;
-  line-height: 1.3;
-  color: var(--semi-color-text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-bottom: 3px;
-  /* 无标题时占位,保证所有卡片等高(标题基线对齐) */
-  min-height: 16px;
-}
-
+/* ===== URL ===== */
 .url {
   display: block;
   font-size: 11.5px;
@@ -315,7 +369,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   text-decoration: none;
-  margin-bottom: 10px;
 }
 .url:hover {
   color: var(--semi-color-primary);
@@ -330,19 +383,24 @@
   gap: 8px;
   font-size: 12px;
   color: var(--semi-color-text-2);
-  /* 推到底部:同一行所有卡片的上传状态对齐在同一水平线 */
-  margin-top: auto;
-  /* 无上传状态时占位,保证所有卡片等高 */
-  min-height: 20px;
+  margin-top: 8px;
 }
 
-/* 底部操作栏(仅直播管理页使用) */
+/* 底部左侧状态与右侧操作共用一行，不为空状态预留高度 */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--semi-color-border);
+}
 .actions {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
-  padding-top: 11px;
-  border-top: 1px solid var(--semi-color-border);
+  min-width: 0;
+  margin-left: auto;
 }
 .actions :global(.semi-button) {
   padding: 5px;

@@ -215,7 +215,6 @@ export default function Changelog() {
       <PageHeader
         icon={<IconBook size="large" />}
         title="更新日志"
-        description="biliup 版本更新记录"
       />
       <Content>
         <main className={styles.content}>

@@ -152,7 +152,6 @@ export default function NodeHa() {
     <>
       <TaskPlatformHeader
         active="nodes"
-        description="这台与控制面那台配成一主一备：两台录同样的直播间，只由一台投稿；在哪台上改都会同步"
       />
       <div className={dc.content}>
         {data && error ? (

@@ -22,7 +22,6 @@ export default function Status() {
       <>
         <TaskPlatformHeader
           active="status"
-          description="系统运行状态(调试视图)"
         />
         <div style={{ padding: '80px 0', textAlign: 'center' }}>
           <Spin size="large" />
@@ -37,7 +36,6 @@ export default function Status() {
     <>
       <TaskPlatformHeader
         active="status"
-        description="系统运行状态(调试视图)"
       />
       <div className={dc.content}>
         {/* 概览 */}

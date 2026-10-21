@@ -32,6 +32,7 @@ type TemplateModalProps = {
   children?: React.ReactNode
   initialPanel?: 'plugin' | 'mosaic'
   onOk: (e: any) => Promise<void>
+  onCancel?: () => void
 }
 
 const removeCircularReferences = (obj: any, seen = new WeakSet()): any => {
@@ -61,7 +62,7 @@ type PlatformPattern = keyof typeof SupportedPlatforms
 const matchPlatformPattern = (url?: string): PlatformPattern | undefined =>
   (Object.keys(SupportedPlatforms) as PlatformPattern[]).find(pattern => url?.match(new RegExp(pattern)))
 
-const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initialPanel = 'plugin', onOk }) => {
+const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initialPanel = 'plugin', onOk, visible: controlledVisible, onCancel }) => {
   const [activePanels, setActivePanels] = useState<string[]>([initialPanel])
 
   // 平台插件组件从模块级常量表里按键取出,渲染间始终是同一个引用,不会因为重渲染而重置内部状态
@@ -71,8 +72,13 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
     : null
 
   const api = useRef<FormApi>(undefined)
-
-  const { biliUsers } = useBiliUsers()
+  const [internalVisible, setInternalVisible] = useState(false)
+  const visible = controlledVisible ?? internalVisible
+  const setVisible = (next: boolean) => {
+    setInternalVisible(next)
+    if (!next) onCancel?.()
+  }
+  const { biliUsers } = useBiliUsers(visible)
   const list = biliUsers?.map(item => {
     return {
       value: item.value,
@@ -85,7 +91,6 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
     }
   })
 
-  const [visible, setVisible] = useState(false)
   const localMaterialPresetApplied = useRef(false)
   const showDialog = () => {
     setActivePanels([initialPanel])
@@ -310,7 +315,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
   return (
     <>
       {childrenWithProps}
-      <FormSheet
+      {visible && <FormSheet
         title={`${initialPanel === 'mosaic' ? '画面遮挡' : '配置覆写'}${entity?.remark ? `「${entity.remark}」` : ''}`}
         visible={visible}
         size="md"
@@ -367,7 +372,7 @@ const OverrideModal: React.FC<TemplateModalProps> = ({ children, entity, initial
             </Collapse>
           </Form.Section>
         </Form>
-      </FormSheet>
+      </FormSheet>}
     </>
   )
 }

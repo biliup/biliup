@@ -171,7 +171,6 @@ export default function LogViewer() {
       <PageHeader
         icon={<IconCustomerSupport size="large" />}
         title="实时日志"
-        description="主程序运行与下载上传日志,WebSocket 实时推送"
         actions={actions}
       />
       <div className={dc.content}>

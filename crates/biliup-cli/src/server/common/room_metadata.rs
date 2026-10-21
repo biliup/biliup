@@ -9,7 +9,7 @@ use futures::{StreamExt, stream};
 use regex::Regex;
 use reqwest::Client;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
@@ -30,6 +30,8 @@ struct RefreshState {
 
 static ATTEMPTS: LazyLock<Mutex<HashMap<i64, RefreshState>>> = LazyLock::new(Default::default);
 static CLIENT: LazyLock<Client> = LazyLock::new(image_client);
+// HTTP requests and background refreshes share the same upstream budget.
+static REFRESH_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(3);
 
 struct RefreshGuard(i64);
 impl Drop for RefreshGuard {
@@ -79,6 +81,7 @@ pub async fn refresh_room_cover(
         return cover_store().load(id).await;
     }
     let _guard = RefreshGuard(id);
+    let _slot = REFRESH_SLOTS.acquire().await.ok()?;
     let store = cover_store();
     if let Some(url) = live_cover {
         if let Ok(stored) = store.ensure(id, url, room_url).await {
@@ -119,8 +122,7 @@ pub async fn refresh_room_cover(
     store.load(id).await
 }
 
-/// Startup and new-room discovery share a bounded pass. This only visits public room metadata,
-/// never downloader check_stream / raw_stream_url. The manager is weakly held for shutdown.
+/// Keep recording covers fresh. Offline rooms refresh only when their image is requested.
 pub fn spawn_room_cover_refresh(
     managers: &Arc<DownloadManager>,
     pool: ConnectionPool,
@@ -149,12 +151,12 @@ pub fn spawn_room_cover_refresh(
                 })
                 .collect();
             drop(manager);
-            let ids: Vec<i64> = rooms.iter().map(|(id, _)| *id).collect();
+            let ids: HashSet<i64> = rooms.iter().map(|(id, _)| *id).collect();
             ATTEMPTS
                 .lock()
                 .unwrap()
                 .retain(|id, state| state.running || ids.contains(id));
-            stream::iter(rooms)
+            stream::iter(rooms.into_iter().filter(|(id, _)| active.contains_key(id)))
                 .for_each_concurrent(3, |(id, room_url)| {
                     let pool = pool.clone();
                     let cover = active.get(&id).cloned();

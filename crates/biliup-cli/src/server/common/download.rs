@@ -265,11 +265,12 @@ impl SegmentEventProcessor {
     }
 }
 
-/// 正在录制的直播间的封面与头像地址，供界面透出。
+/// 正在录制的直播间的主播名、封面与头像地址，供界面透出。
 ///
 /// 只放在内存里，随下载任务消亡；每次 `check_stream` 拿到新的流信息就刷新一遍。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LiveMedia {
+    pub streamer_name: Option<String>,
     pub cover_url: Option<String>,
     pub avatar_url: Option<String>,
 }
@@ -295,6 +296,7 @@ impl LiveMedia {
     pub fn from_stream(stream: &LiveStream) -> Self {
         let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
         Self {
+            streamer_name: non_empty(&stream.name),
             cover_url: non_empty(&stream.live_cover_url),
             avatar_url: stream.avatar_url.as_deref().and_then(non_empty),
         }
@@ -406,7 +408,7 @@ impl DownloadTask {
         &self.meter
     }
 
-    /// 当前直播间的封面与头像地址。
+    /// 当前直播间的平台主播名、封面与头像地址。
     pub fn live_media(&self) -> LiveMedia {
         self.media.read().unwrap().clone()
     }

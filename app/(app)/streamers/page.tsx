@@ -2,7 +2,8 @@
 import {
   Layout,
   Button,
-  ButtonGroup,
+  SplitButtonGroup,
+  Dropdown,
   Popconfirm,
   Spin,
   Empty,
@@ -11,6 +12,7 @@ import {
   Tag,
   Tooltip,
   Banner,
+  Pagination,
 } from '@douyinfe/semi-ui'
 import {
   IconPlusCircle,
@@ -18,12 +20,17 @@ import {
   IconDeleteStroked,
   IconWrench,
   IconVideoListStroked,
+  IconMore,
+  IconPause,
+  IconPlay,
 } from '@douyinfe/semi-icons'
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { useRouter } from 'next/navigation'
-import OverrideModal from '../../ui/OverrideModal'
+import dynamic from 'next/dynamic'
+import { boundedTasks } from '@/app/lib/bounded-tasks'
+import { FormDialog } from '@/app/ui/shell'
 import {
   LiveStreamerEntity,
   put,
@@ -32,7 +39,6 @@ import {
   proxy,
   StreamerInfo,
 } from '../../lib/api-streamer'
-import { PauseButton } from '@/app/ui/StreamerActions/PauseButton'
 import { platformName, streamerStatusTag } from '@/app/lib/status'
 import { hookStepListToForm, formListToHookStep } from '@/app/lib/postprocessor'
 import {
@@ -40,7 +46,6 @@ import {
   formatRate,
   liveImageUrl,
   STREAMERS_REFRESH_MS,
-  SLOW_REFRESH_MS,
 } from '@/app/lib/use-dashboard'
 import StreamerCard, { LiveAvatar } from '@/app/ui/StreamerCard'
 import { CardRateSwitch } from '@/app/ui/LiveRateChart'
@@ -51,31 +56,45 @@ import styles from './page.module.scss'
 
 const { Content } = Layout
 const { Text } = Typography
+const OverrideModal = dynamic(() => import('../../ui/OverrideModal'), { ssr: false })
 
 /**
  * 直播管理:卡片 / 列表双视图 + 搜索 + 平台筛选 + 批量操作。
  * 卡片与首页共用 StreamerCard;接口失败与空列表分开处理。
  */
 export default function StreamersPage() {
-  const { data: streamers, error, isLoading, mutate } = useSWR<LiveStreamerEntity[]>(
-    '/v1/streamers',
-    fetcher,
-    { refreshInterval: STREAMERS_REFRESH_MS }
-  )
-  const { data: infos } = useSWR<StreamerInfo[]>('/v1/streamer-info', fetcher, {
-    refreshInterval: SLOW_REFRESH_MS,
-  })
-
-  // url -> 最新一次录制的直播标题
-  const infoByUrl = useMemo(() => {
-    const map = new Map<string, StreamerInfo>()
-    for (const i of infos ?? []) {
-      if (!i.url) continue
-      const cur = map.get(i.url)
-      if (!cur || i.date > cur.date) map.set(i.url, i)
-    }
-    return map
-  }, [infos])
+  const [query, setQuery] = useState('')
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState('全部')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(24)
+  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
+  const [selectedIds, setSelected] = useState<Set<number>>(new Set())
+  const [busy, setBusy] = useState(false)
+  const [actionBusy, setActionBusy] = useState<number | null>(null)
+  const [openActionId, setOpenActionId] = useState<number | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<LiveStreamerEntity | null>(null)
+  const [overrideTarget, setOverrideTarget] = useState<{
+    item: LiveStreamerEntity; panel: 'plugin' | 'mosaic'
+  } | null>(null)
+  const toolbarRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const timer = setTimeout(() => { setSearch(query.trim()); setPage(1); setSelected(new Set()) }, 300)
+    return () => clearTimeout(timer)
+  }, [query])
+  const params = new URLSearchParams({ page: String(page), page_size: String(pageSize), search })
+  if (filter !== '全部') params.set('platform', filter)
+  const { data, error, isLoading, mutate } = useSWR<{
+    items: LiveStreamerEntity[]; infos: StreamerInfo[]; total: number
+    page: number; page_size: number; platforms: string[]
+  }>(`/v1/streamers/page?${params}`, fetcher, { refreshInterval: STREAMERS_REFRESH_MS })
+  const streamers = data?.items
+  const filtered = streamers ?? []
+  const platforms = ['全部', ...(data?.platforms ?? (filter === '全部' ? [] : [filter]))]
+  const infoByUrl = useMemo(() => new Map((data?.infos ?? []).map(info => [info.url, info])), [data?.infos])
+  // Deleting the last row may move the last page backwards. Reconcile before rendering it.
+  if (data && data.page !== page) setPage(data.page)
+  const selected = useMemo(() => new Set([...selectedIds].filter(id => streamers?.some(item => item.id === id))), [selectedIds, streamers])
 
   const { me, can } = useMe()
   const canEdit = can('streamer.edit')
@@ -106,8 +125,31 @@ export default function StreamersPage() {
   const { trigger: deleteStreamers } = useSWRMutation('/v1/streamers', requestDelete)
   const { trigger: updateStreamers } = useSWRMutation('/v1/streamers', put)
 
-  const onConfirm = async (id: number) => {
-    await deleteStreamers(id)
+  const deleteRoom = async () => {
+    if (!deleteTarget || actionBusy !== null) return
+    setActionBusy(deleteTarget.id)
+    try {
+      await deleteStreamers(deleteTarget.id)
+      setDeleteTarget(null)
+      await mutate()
+    } catch (error: any) {
+      Notification.error({ title: '删除失败', content: error?.message ?? String(error) })
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  const togglePause = async (item: LiveStreamerEntity) => {
+    if (actionBusy !== null) return
+    setActionBusy(item.id)
+    try {
+      await proxy(`/v1/streamers/${item.id}/pause`, { method: 'PUT' })
+      await mutate()
+    } catch (error: any) {
+      Notification.error({ title: '操作失败', content: error?.message ?? String(error) })
+    } finally {
+      setActionBusy(null)
+    }
   }
 
   const handleEntityPostprocessor = (values: any) => {
@@ -127,6 +169,7 @@ export default function StreamersPage() {
         values.postprocessor = formListToHookStep(values.postprocessor)
       }
       await updateStreamers(values)
+      await mutate()
     } catch (e: any) {
       Notification.error({
         title: '更新失败',
@@ -136,30 +179,6 @@ export default function StreamersPage() {
       throw e
     }
   }
-
-  // ---- 搜索 / 筛选 / 视图 ----
-  const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState('全部')
-  const [layout, setLayout] = useState<'grid' | 'list'>('grid')
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-
-  const platforms = useMemo(() => {
-    const set = new Set<string>()
-    for (const s of streamers ?? []) set.add(platformName(s.url))
-    return ['全部', ...Array.from(set).sort((a, b) => a.localeCompare(b, 'zh'))]
-  }, [streamers])
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (streamers ?? []).filter((s) => {
-      const okPlat = filter === '全部' || platformName(s.url) === filter
-      const okQ =
-        !q ||
-        (s.remark ?? '').toLowerCase().includes(q) ||
-        s.url.toLowerCase().includes(q)
-      return okPlat && okQ
-    })
-  }, [streamers, query, filter])
 
   // ---- 批量操作 ----
   const toggleSel = (id: number) => {
@@ -177,7 +196,7 @@ export default function StreamersPage() {
 
   const batchPause = async () => {
     const ids = Array.from(selected)
-    if (ids.length === 0) return
+    if (ids.length === 0 || busy || isLoading) return
     // 后端 PUT /pause 是 toggle:已暂停(Pause)的会被恢复为 Idle,必须过滤
     const targets = (streamers ?? []).filter((s) => selected.has(s.id) && s.status !== 'Pause')
     const skipped = ids.length - targets.length
@@ -185,9 +204,9 @@ export default function StreamersPage() {
       Notification.warning({ title: '所选直播间均已暂停,无需操作' })
       return
     }
-    const results = await Promise.allSettled(
-      targets.map((s) => proxy(`/v1/streamers/${s.id}/pause`, { method: 'PUT' }))
-    )
+    setBusy(true)
+    const results = await boundedTasks(targets, s => proxy(`/v1/streamers/${s.id}/pause`, { method: 'PUT' }))
+    setBusy(false)
     const failedIds: number[] = []
     results.forEach((r, i) => {
       if (r.status === 'rejected') failedIds.push(targets[i].id)
@@ -209,18 +228,11 @@ export default function StreamersPage() {
 
   const batchDelete = async () => {
     const ids = Array.from(selected)
-    if (ids.length === 0) return
-    const results = await Promise.all(
-      ids.map(async (id) => {
-        try {
-          await proxy(`/v1/streamers/${id}`, { method: 'DELETE' })
-          return { id, ok: true }
-        } catch {
-          return { id, ok: false }
-        }
-      })
-    )
-    const failedIds = results.filter((result) => !result.ok).map((result) => result.id)
+    if (ids.length === 0 || busy || isLoading) return
+    setBusy(true)
+    const results = await boundedTasks(ids, id => proxy(`/v1/streamers/${id}`, { method: 'DELETE' }))
+    setBusy(false)
+    const failedIds = ids.filter((_, index) => results[index].status === 'rejected')
     const successCount = results.length - failedIds.length
     setSelected(new Set(failedIds))
     await mutate().catch(() => undefined)
@@ -234,103 +246,68 @@ export default function StreamersPage() {
     }
   }
 
-  // 编辑 / 暂停 / 删除 / 画面遮挡 / 高级操作，网格卡片与列表行共用，只是外层容器不同
-  // 返回数组而不是 Fragment:ButtonGroup 会对每个直接子元素 cloneElement 注入 disabled 等 props,
-  // React 19 起会对带这些 props 的 Fragment 报 "Invalid prop supplied to React.Fragment"
-  // 按角色只渲染有权限的按钮（只读观察者一个都没有）
-  const actionButtons = (item: LiveStreamerEntity) => {
-    const locked = managedIds.has(item.id)
-    const lock = locked ? { disabled: true, title: managedHint } : {}
-    return [
-      locked && (
-        <Tooltip key="managed" content={managedHint}>
-          <Tag size="small" color="violet">
-            托管
-          </Tag>
-        </Tooltip>
-      ),
-      pair && pairedIds.has(item.id) && (
-        <Tooltip key="paired" content={pairHint}>
-          <Tag size="small" color="green">
-            {pairLabel(pair)}
-          </Tag>
-        </Tooltip>
-      ),
-      awaitingResume(item) && (
-        <Tooltip key="revoked" content={revokedHint(me?.fleet_revoked?.local)}>
-          <Tag size="small" color="orange">
-            待恢复
-          </Tag>
-        </Tooltip>
-      ),
-      canEdit && (
-        <Button key="edit" onClick={() => router.push(`/streamers/editor?id=${item.id}`)} theme="borderless" type="primary" icon={<IconEdit2Stroked />} aria-label="编辑" {...lock} />
-      ),
-      canControl && <PauseButton key="pause" streamer={item} {...lock} />,
-      canEdit && (
-        <Popconfirm
-          key="delete"
-          title="确定是否要删除？"
-          content="此操作将不可逆"
-          onConfirm={() => onConfirm(item.id)}
-          disabled={locked}
-        >
-          <Button theme="borderless" type="danger" icon={<IconDeleteStroked />} aria-label="删除" {...lock} />
-        </Popconfirm>
-      ),
-      canHooks && (
-        <OverrideModal
-          key="mosaic"
-          initialPanel="mosaic"
-          onOk={handleUpdate}
-          entity={handleEntityPostprocessor({ ...item })}
-        >
-          <Button
-            theme="borderless"
-            type="tertiary"
-            size="small"
-            title="配置录制分段的马赛克、模糊或纯色遮挡"
-            {...lock}
-          >
-            画面遮挡
-          </Button>
-        </OverrideModal>
-      ),
-      canHooks && (
-        <OverrideModal key="override" onOk={handleUpdate} entity={handleEntityPostprocessor({ ...item })}>
-          <Button
-            theme="borderless"
-            type="tertiary"
-            icon={<IconWrench />}
-            aria-label="配置覆写"
-            title="配置覆写（平台与下载设置）"
-            {...lock}
-          />
-        </OverrideModal>
-      ),
-    ].filter(Boolean)
-  }
+  // 常用编辑直接显示，其余操作通过点击菜单打开；同一时刻只挂载一个配置面板。
   const hasActions = canEdit || canControl || canHooks
-  const renderActions = (item: LiveStreamerEntity) =>
-    !hasActions ? null : managedIds.has(item.id) || pairedIds.has(item.id) || awaitingResume(item) ? (
-      // ButtonGroup 会给每个子元素注入按钮属性，托管 / 配对 / 待恢复行里多了一个标签，改用普通容器
-      <div className={styles.rowActions}>{actionButtons(item)}</div>
-    ) : (
-      <ButtonGroup theme="borderless" className={styles.cardActions}>
-        {actionButtons(item)}
-      </ButtonGroup>
+  const renderActions = (item: LiveStreamerEntity) => {
+    if (!hasActions) return null
+    const locked = managedIds.has(item.id)
+    const disabled = locked || busy || actionBusy !== null
+    const paused = item.status === 'Pause'
+    return (
+      <div className={styles.rowActions}>
+        {locked && <Tooltip content={managedHint}><Tag size="small" color="violet">托管</Tag></Tooltip>}
+        {pair && pairedIds.has(item.id) && (
+          <Tooltip content={pairHint}><Tag size="small" color="green">{pairLabel(pair)}</Tag></Tooltip>
+        )}
+        {awaitingResume(item) && (
+          <Tooltip content={revokedHint(me?.fleet_revoked?.local)}><Tag size="small" color="orange">待恢复</Tag></Tooltip>
+        )}
+        <SplitButtonGroup>
+          {canEdit ? (
+            <Button theme="light" icon={<IconEdit2Stroked />} disabled={disabled} title={locked ? managedHint : '编辑'} aria-label="编辑"
+              onClick={() => router.push(`/streamers/editor?id=${item.id}`)} />
+          ) : canControl ? (
+            <Button theme="light" icon={paused ? <IconPlay /> : <IconPause />} disabled={disabled}
+              onClick={() => togglePause(item)}>{paused ? '恢复监控' : '暂停监控'}</Button>
+          ) : (
+            <Button theme="light" icon={<IconWrench />} disabled={disabled}
+              onClick={() => setOverrideTarget({ item, panel: 'plugin' })}>配置覆写</Button>
+          )}
+          {(canEdit || canHooks) && <Dropdown trigger="click" position="bottomRight"
+            visible={openActionId === item.id}
+            onVisibleChange={visible => setOpenActionId(visible ? item.id : null)} render={
+            <Dropdown.Menu>
+              {canEdit && canControl && (
+                <Dropdown.Item icon={paused ? <IconPlay /> : <IconPause />} disabled={disabled}
+                  onClick={() => { setOpenActionId(null); void togglePause(item) }}>{paused ? '恢复监控' : '暂停监控'}</Dropdown.Item>
+              )}
+              {canHooks && (
+                <Dropdown.Item icon={<IconVideoListStroked />} disabled={disabled}
+                  onClick={() => { setOpenActionId(null); setOverrideTarget({ item, panel: 'mosaic' }) }}>画面遮挡</Dropdown.Item>
+              )}
+              {canHooks && (canEdit || canControl) && (
+                <Dropdown.Item icon={<IconWrench />} disabled={disabled}
+                  onClick={() => { setOpenActionId(null); setOverrideTarget({ item, panel: 'plugin' }) }}>配置覆写</Dropdown.Item>
+              )}
+              {canEdit && <Dropdown.Divider />}
+              {canEdit && (
+                <Dropdown.Item icon={<IconDeleteStroked />} type="danger" disabled={disabled}
+                  onClick={() => { setOpenActionId(null); setDeleteTarget(item) }}>删除</Dropdown.Item>
+              )}
+            </Dropdown.Menu>
+          }>
+            <Button theme="light" icon={<IconMore />} disabled={disabled} title="更多"
+              aria-label={`更多操作：${item.remark || item.url}`} />
+          </Dropdown>}
+        </SplitButtonGroup>
+      </div>
     )
-  const renderRowActions = (item: LiveStreamerEntity) => (
-    <div className={styles.rowActions}>{actionButtons(item)}</div>
-  )
+  }
 
   return (
     <>
       <PageHeader
         title="直播管理"
-        description={
-          canEdit ? '管理需要录制的直播间,支持新增、编辑与删除' : '查看正在监控的直播间与录制状态'
-        }
         icon={<IconVideoListStroked size="large" />}
         actions={
           canEdit && (
@@ -373,24 +350,9 @@ export default function StreamersPage() {
           />
         ) : null}
         <FleetRevokedBanner className={styles.fleetBanner} />
-        {isLoading ? (
-          <div className={styles.center}>
-            <Spin size="large" />
-          </div>
-        ) : error ? (
-          /* 修复:接口失败 ≠ 空列表,给出错误态而不是 Empty */
-          <div className={styles.center}>
-            <Empty
-              title="加载失败"
-              description="无法获取主播列表,请检查后端连接"
-              style={{ marginBottom: 12 }}
-            />
-            <Button onClick={() => mutate()}>重试</Button>
-          </div>
-        ) : (
-          <>
+        <>
             {/* 工具栏 */}
-            <div className={styles.toolbar}>
+            <div className={styles.toolbar} ref={toolbarRef}>
               <label className={styles.search}>
                 <svg
                   viewBox="0 0 24 24"
@@ -405,7 +367,9 @@ export default function StreamersPage() {
                 </svg>
                 <input
                   type="text"
-                  placeholder="搜索主播 / URL"
+                  placeholder="搜索全部主播 / URL"
+                  aria-label="搜索直播间"
+                  disabled={busy}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -415,7 +379,8 @@ export default function StreamersPage() {
                   <button
                     key={p}
                     className={`${styles.fchip} ${filter === p ? styles.fchipActive : ''}`}
-                    onClick={() => setFilter(p)}
+                    onClick={() => { setFilter(p); setPage(1); setSelected(new Set()) }}
+                    disabled={busy}
                   >
                     {p}
                   </button>
@@ -449,7 +414,7 @@ export default function StreamersPage() {
                 </span>
                 <span className={styles.batchSpacer} />
                 {canControl && (
-                  <Button size="small" onClick={batchPause}>
+                  <Button size="small" loading={busy} disabled={isLoading} onClick={batchPause}>
                     批量暂停
                   </Button>
                 )}
@@ -459,7 +424,7 @@ export default function StreamersPage() {
                   content="此操作不可逆,删除结果将逐项反馈"
                   onConfirm={batchDelete}
                 >
-                  <Button size="small" type="danger" theme="borderless">
+                  <Button size="small" disabled={busy || isLoading} type="danger" theme="borderless">
                     批量删除
                   </Button>
                 </Popconfirm>
@@ -470,12 +435,17 @@ export default function StreamersPage() {
               </div>
             )}
 
-            {filtered.length === 0 ? (
+            {isLoading ? <div className={styles.center}><Spin size="large" /></div> : error ? (
+              <div className={styles.center}>
+                <Empty title="加载失败" description="无法获取主播列表，请检查后端连接" />
+                <Button onClick={() => mutate()}>重试</Button>
+              </div>
+            ) : filtered.length === 0 ? (
               <div className={styles.center}>
                 <Empty
-                  title={streamers && streamers.length > 0 ? '没有匹配的直播间' : '还没有监控任何直播间'}
+                  title={!!search || filter !== '全部' ? '没有匹配的直播间' : '还没有监控任何直播间'}
                   description={
-                    streamers && streamers.length > 0
+                    !!search || filter !== '全部'
                       ? '调整搜索或筛选条件试试'
                       : canEdit
                         ? '点击右上角「新建」开始'
@@ -491,6 +461,9 @@ export default function StreamersPage() {
                     streamer={item}
                     info={infoByUrl.get(item.url)}
                     actions={renderActions(item)}
+                    selectable={canBatch && !managedIds.has(item.id) && !busy}
+                    selected={selected.has(item.id)}
+                    onToggleSelect={toggleSel}
                   />
                 ))}
               </div>
@@ -506,7 +479,8 @@ export default function StreamersPage() {
                             className={styles.chk}
                             checked={selectable.length > 0 && selectable.every((s) => selected.has(s.id))}
                             onChange={(e) => toggleAll(e.target.checked)}
-                            aria-label="全选"
+                            aria-label="全选当前页"
+                            disabled={busy}
                           />
                         </th>
                       )}
@@ -526,7 +500,7 @@ export default function StreamersPage() {
                         ? liveImageUrl(item.id, 'avatar', item.live_avatar_url)
                         : null
                       const rate = live ? formatRate(item.live_bytes_per_sec) : null
-                      const rowSelectable = canBatch && !managedIds.has(item.id)
+                      const rowSelectable = canBatch && !busy && !managedIds.has(item.id)
                       return (
                         <tr
                           key={item.id}
@@ -584,7 +558,7 @@ export default function StreamersPage() {
                             </Text>
                           </td>
                           {hasActions && (
-                            <td onClick={(e) => e.stopPropagation()}>{renderRowActions(item)}</td>
+                            <td onClick={(e) => e.stopPropagation()}>{renderActions(item)}</td>
                           )}
                         </tr>
                       )
@@ -593,9 +567,44 @@ export default function StreamersPage() {
                 </table>
               </div>
             )}
+            <div className={styles.pagination}>
+              <span aria-live="polite">{data ? `共 ${data.total} 个直播间` : '加载中…'}</span>
+              <Pagination
+                total={data?.total ?? 0}
+                currentPage={data?.page ?? page}
+                pageSize={pageSize}
+                pageSizeOpts={[12, 24, 48]}
+                showSizeChanger
+                disabled={busy || isLoading}
+                onPageChange={next => { setPage(next); setSelected(new Set()); toolbarRef.current?.scrollIntoView({ block: 'start' }) }}
+                onPageSizeChange={size => { setPageSize(size); setPage(1); setSelected(new Set()) }}
+              />
+            </div>
           </>
-        )}
       </Content>
+      {overrideTarget && (
+        <OverrideModal
+          key={`${overrideTarget.item.id}-${overrideTarget.panel}`}
+          visible
+          initialPanel={overrideTarget.panel}
+          entity={handleEntityPostprocessor({ ...overrideTarget.item })}
+          onOk={handleUpdate}
+          onCancel={() => setOverrideTarget(null)}
+        />
+      )}
+      <FormDialog
+        title="删除直播间"
+        visible={!!deleteTarget}
+        onOk={deleteRoom}
+        onCancel={() => { if (actionBusy === null) setDeleteTarget(null) }}
+        confirmLoading={actionBusy !== null}
+        closable={actionBusy === null}
+        size="sm"
+        okText="删除"
+        okType="danger"
+      >
+        确定删除「{deleteTarget?.remark || deleteTarget?.url}」？此操作不可逆。
+      </FormDialog>
     </>
   )
 }

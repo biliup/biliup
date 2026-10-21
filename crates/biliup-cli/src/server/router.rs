@@ -90,6 +90,8 @@ pub fn router(service_register: ServiceRegister) -> Router<()> {
             post(crate::server::api::session_groups::create_group),
         )
         // 主播管理相关路由
+        .route("/v1/streamers/page", get(crate::server::api::streamer_listing::page))
+        .route("/v1/overview", get(crate::server::api::streamer_listing::overview))
         .route(
             "/v1/streamers",
             get(get_streamers_endpoint) // 获取主播列表

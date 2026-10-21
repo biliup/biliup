@@ -4,7 +4,6 @@ import { Typography, Space, Spin } from '@douyinfe/semi-ui'
 import { IconExternalOpen } from '@douyinfe/semi-icons'
 import {
   useDashboard,
-  formatSize,
 } from '@/app/lib/use-dashboard'
 import { formatVersion } from '@/app/lib/status'
 import StreamerCard from '../ui/StreamerCard'
@@ -19,21 +18,22 @@ import styles from './page.module.scss'
 const { Text } = Typography
 
 /**
- * 控制台主页 —— Monitor 表面:2 秒内回答"几个在录、有没有问题"。
- * 主播与文件数据见 use-dashboard,系统状态(CPU / 内存 / 磁盘 / 网速)见 use-system-stats。
+ * 概览：系统资源、录制状态与最近事件。
+ * 概览汇总数据见 use-dashboard,系统状态(CPU / 内存 / 磁盘 / 网速)见 use-system-stats。
  */
 export default function Home() {
   const d = useDashboard()
 
   const streamers = d.streamers ?? []
   const live = streamers.filter((s) => s.status === 'Working')
-  const offline = streamers.filter((s) => s.status !== 'Working')
   const versionText = formatVersion(d.version)
 
   return (
     <div className={styles.page}>
+      <div className={styles.workspace} role="region" aria-label="概览内容" tabIndex={0}>
       {/* 顶栏:状态 + 文档 */}
       <div className={styles.head}>
+        <h1 className={styles.heading}>概览</h1>
         <Space>
           <a
             className={styles.docLink}
@@ -77,33 +77,11 @@ export default function Home() {
         <>
           <FleetRevokedBanner className={styles.revokedBanner} linkToStreamers />
           <FleetSummary />
-          {d.streamersFailed && (
-            <div className={styles.warnBox}>
-              <Text>
-                主播列表加载失败,监控数量与卡片暂不可用,请检查后端连接或稍后重试。
-              </Text>
-            </div>
-          )}
-          {d.infosFailed && (
-            <div className={styles.warnBox}>
-              <Text>直播信息(标题 / 录制时长)加载失败,相关字段可能缺失。</Text>
-            </div>
-          )}
-          {d.videosFailed && (
-            <div className={styles.warnBox}>
-              <Text>录制文件列表加载失败,文件总量暂不可用。</Text>
-            </div>
-          )}
-          {d.statusFailed && (
-            <div className={styles.warnBox}>
-              <Text>服务状态接口加载失败,版本号暂不可用。</Text>
-            </div>
-          )}
-
+          {d.stale && <div className={styles.warnBox}>更新失败，暂时显示上次数据。</div>}
           {/* 概览条:全部来自真实聚合(无虚构指标) */}
           <div className={styles.overview}>
             <span className={styles.ovItem}>
-              <b>{d.streamersFailed ? '—' : d.total}</b> 个监控
+              <b>{d.total}</b> 个监控
             </span>
             <span className={styles.ovItem}>
               <span className={`${styles.ovDot} ${styles.rec}`} />
@@ -115,21 +93,14 @@ export default function Home() {
             <span className={styles.ovItem}>
               <b>{d.uploading}</b> 上传中
             </span>
-            <span className={styles.ovItem}>
-              录制文件 <b>{formatSize(d.totalSize)}</b>
-            </span>
-            <span className={styles.ovItem}>
-              今日新增 <b>{formatSize(d.todaySize)}</b>
-            </span>
           </div>
 
           <SystemStatsPanel />
-
           {/* 进行中 */}
           <section className={styles.section}>
             <div className={styles.secHead}>
               <span className={styles.secLabel}>
-                进行中<span className={styles.secCount}>{live.length}</span>
+                进行中<span className={styles.secCount}>{d.recording}</span>
               </span>
               <span className={styles.secTools}>
                 {live.length > 0 ? <CardRateSwitch /> : null}
@@ -138,9 +109,7 @@ export default function Home() {
                 </Link>
               </span>
             </div>
-            {d.streamersFailed ? (
-              <Text type="tertiary">主播列表加载失败,无法显示卡片。</Text>
-            ) : live.length === 0 ? (
+            {live.length === 0 ? (
               <Text type="tertiary">当前没有正在录制的直播间。</Text>
             ) : (
               <div className={styles.grid}>
@@ -151,36 +120,17 @@ export default function Home() {
             )}
           </section>
 
-          {/* 未开播 */}
-          <section className={styles.section}>
-            <div className={styles.secHead}>
-              <span className={styles.secLabel}>
-                未开播<span className={styles.secCount}>{offline.length}</span>
-              </span>
-            </div>
-            {offline.length === 0 ? (
-              <Text type="tertiary">全部直播间均在录制中。</Text>
-            ) : (
-              <div className={styles.grid}>
-                {offline.map((s) => (
-                  <StreamerCard key={s.id} streamer={s} info={d.infoByUrl.get(s.url)} />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* 最近事件来自后端持久化活动记录，与其它概览数据独立加载 */}
-          <section className={styles.section}>
-            <div className={styles.secHead}>
-              <span className={styles.secLabel}>最近事件</span>
-              <span className={styles.secNote}>最新 12 条</span>
-            </div>
-            <div className={styles.timelineCard}>
-              <EventTimeline events={d.events} error={d.activityFailed} />
-            </div>
-          </section>
+          {d.recording > live.length && <Link href="/streamers" prefetch={false} className={styles.secLink}>查看全部 {d.recording} 路录制 →</Link>}
         </>
       )}
+      </div>
+      <aside className={styles.activity} aria-label="最近事件" tabIndex={0}>
+        <div className={styles.secHead}>
+          <span className={styles.secLabel}>最近事件</span>
+          <span className={styles.secNote}>最新 12 条</span>
+        </div>
+        <EventTimeline events={d.events} error={d.activityFailed} />
+      </aside>
     </div>
   )
 }

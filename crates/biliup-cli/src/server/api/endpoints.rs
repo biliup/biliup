@@ -67,16 +67,24 @@ pub async fn get_streamers_endpoint(
     State(config): State<Arc<RwLock<Config>>>,
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
-    let mut results = Vec::new();
     let workers = managers.get_rooms().await;
+    Ok(Json(streamer_responses(&caller, &pool, &config, live_streamers, &workers).await))
+}
+
+pub(super) async fn streamer_responses(
+    caller: &Caller,
+    pool: &ConnectionPool,
+    config: &Arc<RwLock<Config>>,
+    live_streamers: Vec<LiveStreamer>,
+    workers: &[Arc<Worker>],
+) -> Vec<LiveStreamerResponse> {
+    let mut results = Vec::with_capacity(live_streamers.len());
+    let workers: std::collections::HashMap<_, _> = workers.iter().map(|w| (w.id(), w)).collect();
     let show_hooks = caller.can_access(Field::StreamerHooks);
     let show_after_live =
         config.read().unwrap().auto_clip.is_some() && caller.can(Permission::ClipEdit);
     for mut x in live_streamers {
-        let option = workers
-            .clone()
-            .into_iter()
-            .find(|worker| worker.live_streamer.id == x.id);
+        let option = workers.get(&x.id).copied();
 
         let (status, live) = match option.as_ref() {
             Some(t) => {
@@ -100,7 +108,7 @@ pub async fn get_streamers_endpoint(
         // 在界面上都是「空闲」，用户无从判断配置有没有生效。
         // 时间类条件按当前时钟实时算，不依赖监控循环轮到这个房间，因此不会过期；
         // 依赖房间标题的结论来自最近一次探测。正在录制时不覆盖。
-        let status = match rejection_status(&x, option.as_deref()) {
+        let status = match rejection_status(&x, option.map(AsRef::as_ref)) {
             Some(reason) if status != "Working" => reason.to_string(),
             _ => status,
         };
@@ -108,13 +116,8 @@ pub async fn get_streamers_endpoint(
             Some((rate, media, preview)) => (rate, media, Some(preview)),
             None => (None, Default::default(), None),
         };
-        let live_cover_url = match live_media.cover_url {
-            Some(url) => Some(url),
-            None => crate::server::common::live_image::cover_store()
-                .load(x.id)
-                .await
-                .map(|cover| cover.url),
-        };
+        // Cached offline covers are read on demand by /cover, not during every list poll.
+        let live_cover_url = live_media.cover_url;
 
         let auto_clip_after_live = show_after_live.then(|| streamer_opted_in(&x));
         if !show_hooks {
@@ -131,6 +134,7 @@ pub async fn get_streamers_endpoint(
                 .map(|t| format!("{:?}", *t.uploader_status.read().unwrap()))
                 .unwrap_or_default(),
             live_bytes_per_sec,
+            live_streamer_name: live_media.streamer_name,
             live_cover_url,
             live_avatar_url: live_media.avatar_url,
             session_id,
@@ -139,8 +143,8 @@ pub async fn get_streamers_endpoint(
             auto_clip_after_live,
         });
     }
-    fill_marker_counts(&pool, &mut results).await;
-    Ok(Json(results))
+    fill_marker_counts(pool, &mut results).await;
+    results
 }
 
 /// 给录制中的房间填上本场的标记数；查询失败只记日志，这一轮不带标记数。
@@ -183,7 +187,6 @@ pub async fn post_streamers_endpoint(
     validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
         Ok(live_streamers) => {
-            refresh_cover_after_save(&service_register, &live_streamers);
             Ok(Json(live_streamers))
         }
         Err(AddStreamerError::UnsupportedUrl) => {
@@ -219,20 +222,10 @@ pub async fn put_streamers_endpoint(
     let mut streamer = update_streamer(&service_register, payload)
         .await
         .map_err(report_to_response)?;
-    refresh_cover_after_save(&service_register, &streamer);
     if !caller.can_access(Field::StreamerHooks) {
         strip_hooks(&mut streamer);
     }
     Ok(Json(streamer))
-}
-
-fn refresh_cover_after_save(services: &ServiceRegister, streamer: &LiveStreamer) {
-    let pool = services.pool.clone();
-    let id = streamer.id;
-    let url = streamer.url.clone();
-    tokio::spawn(async move {
-        crate::server::common::room_metadata::refresh_room_cover(&pool, id, &url, None).await;
-    });
 }
 
 fn validate_streamer_mosaic(

@@ -1,8 +1,34 @@
 .page {
-  padding: 24px 36px 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: stretch;
+  height: 100dvh;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
   width: 100%;
   box-sizing: border-box;
 }
+.workspace {
+  min-width: 0;
+  min-height: 0;
+  padding: 24px 28px 48px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.heading { margin: 0; font-size: 24px; font-weight: 650; }
+.activity {
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  padding: 28px 22px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--semi-color-border);
+  background: var(--semi-color-bg-1);
+}
+.activity .secHead { margin-bottom: 24px; }
 
 /* ===== 顶栏 ===== */
 .head {
@@ -122,6 +148,8 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
   margin: 0 0 12px;
 }
 .secLabel {
@@ -159,17 +187,9 @@
 /* ===== 卡片网格(卡片本体样式在 ui/streamer-card.module.scss) ===== */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(262px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 262px), 1fr));
   gap: 12px;
   align-items: start;
-}
-
-.timelineCard {
-  background: var(--semi-color-bg-1);
-  border: 1px solid var(--semi-color-fill-2);
-  border-radius: 12px;
-  padding: 18px 20px;
-  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
 }
 
 /* ===== 错误 / 警告 ===== */
@@ -190,27 +210,21 @@
   border: 1px solid rgba(var(--semi-orange-4), 0.32);
 }
 
-/* ===== 响应式 ===== */
-@media (max-width: 880px) {
-  .page {
-    padding: 20px 24px 36px;
-  }
+@media (max-width: 1000px) {
+  .page { grid-template-columns: minmax(0, 1fr) 260px; }
+  .workspace { padding: 24px 20px; }
+  .activity { padding: 28px 18px; }
 }
-/* 窄屏左上角固定着菜单按钮（left 12 + 36 宽），顶栏从它右边开始，「文档」不被盖住 */
+@media (max-width: 900px) {
+  .page { grid-template-columns: minmax(0, 1fr); height: auto; overflow: visible; flex: none; }
+  .workspace { overflow: visible; }
+  .activity { position: static; height: auto; border-left: 0; border-top: 1px solid var(--semi-color-border); }
+}
 @media (max-width: 640px) {
-  .head {
-    padding-left: 40px;
-  }
+  .head { padding-left: 40px; }
 }
 @media (max-width: 520px) {
-  .page {
-    padding: 16px 16px 28px;
-  }
-  .grid {
-    grid-template-columns: 1fr;
-  }
-  .overview {
-    gap: 14px;
-    padding: 12px 16px;
-  }
+  .workspace { padding: 16px 16px 28px; }
+  .grid { grid-template-columns: 1fr; }
+  .overview { gap: 14px; padding: 12px 16px; }
 }

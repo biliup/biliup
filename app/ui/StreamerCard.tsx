@@ -11,10 +11,11 @@ import {
   useNowSec,
   canPreview,
 } from '@/app/lib/use-dashboard'
-import { LivePreviewButton, useOpenLivePage } from './LivePreview'
+import { useOpenLivePage } from './LivePreview'
 import { MarkerCount } from './MarkerControls'
 import { LiveRateChart, SPARK_RATE_WINDOW_MS, useCardRateChart } from './LiveRateChart'
 import styles from './streamer-card.module.scss'
+import { useVisibleElement } from '@/app/lib/use-visible-element'
 
 export interface StreamerCardProps {
   streamer: LiveStreamerEntity
@@ -28,7 +29,7 @@ export interface StreamerCardProps {
   actions?: React.ReactNode
 }
 
-/** 平台品牌色:用于右上角平台 chip,打破卡片单调并提供平台识别 */
+/** 平台品牌色:用于封面右下角的平台标识,打破卡片单调并提供平台识别 */
 const PLAT_COLORS: Record<string, string> = {
   哔哩哔哩: '#fb7299',
   虎牙直播: '#ff6a00',
@@ -55,30 +56,39 @@ export function LiveCover({
   src,
   alt,
   onPreview,
+  platform,
+  title,
   overlay,
   onStateChange,
 }: {
   src: string
   alt: string
   onPreview?: (e: React.MouseEvent | React.KeyboardEvent) => void
+  platform?: React.ReactNode
+  title?: string
   /** 叠在封面底部的一层（码率 sparkline）；点击会冒泡到封面本身的 onClick */
   overlay?: React.ReactNode
   /** 加载结果回调：父组件据此决定是否叠加码率曲线 */
   onStateChange?: (state: 'ok' | 'error') => void
 }) {
+  const { ref, active } = useVisibleElement<HTMLElement>()
   const [retryAt, setRetryAt] = useState(0)
-  const requestSrc = retryAt ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryAt}` : src
+  const desiredSrc = retryAt ? `${src}${src.includes('?') ? '&' : '?'}retry=${retryAt}` : src
+  const [requestSrc, setRequestSrc] = useState('')
+  // Keep the last request while offscreen, including when the source changes during a poll.
+  if (active && requestSrc !== desiredSrc) setRequestSrc(desiredSrc)
   const [result, setResult] = useState<{ src: string; state: 'ok' | 'error' } | null>(null)
   const [lastGood, setLastGood] = useState<string | null>(null)
   const state = result?.src === requestSrc ? result.state : 'loading'
   useEffect(() => {
-    if (state === 'loading') return
+    if (!active || state === 'loading') return
     const timer = setTimeout(() => setRetryAt(Date.now()), state === 'error' ? 60_000 : 300_000)
     return () => clearTimeout(timer)
-  }, [state, requestSrc])
+  }, [active, state, requestSrc])
   const clickable = !!onPreview
   return (
     <figure
+      ref={ref}
       className={`${styles.cover} ${clickable ? styles.coverClickable : ''}`}
       data-state={state}
       onClick={clickable ? onPreview : undefined}
@@ -99,7 +109,7 @@ export function LiveCover({
       {lastGood && lastGood !== requestSrc ? (
         <Image src={lastGood} alt={alt} fill sizes="(max-width: 600px) 100vw, 400px" style={{ opacity: 1 }} />
       ) : null}
-      <Image
+      {requestSrc ? <Image
         key={requestSrc}
         src={requestSrc}
         alt={alt}
@@ -116,7 +126,7 @@ export function LiveCover({
           setResult({ src: requestSrc, state: 'error' })
           onStateChange?.(lastGood ? 'ok' : 'error')
         }}
-      />
+      /> : null}
       {!lastGood && state === 'error' ? <span className={styles.coverPlaceholder}>暂无可用封面</span> : null}
       {clickable ? (
         <span className={styles.coverPlay} aria-hidden="true">
@@ -126,6 +136,12 @@ export function LiveCover({
         </span>
       ) : null}
       {overlay ? <div className={styles.coverOverlay}>{overlay}</div> : null}
+      {title || platform ? (
+        <div className={styles.coverFooter} data-chart={!!overlay}>
+          {title ? <div className={styles.coverTitle} title={title}>{title}</div> : null}
+          {platform ? <div className={styles.coverPlatform}>{platform}</div> : null}
+        </div>
+      ) : null}
     </figure>
   )
 }
@@ -159,8 +175,8 @@ function LiveDuration({ since }: { since: number }) {
 
 /**
  * 全局统一的直播间卡片:
- * 状态徽章 + 平台色 chip + [录制中:封面 / 头像 / 写盘速率] + 名称 + 实时时长(直播中)/ 最近录制(未开播)
- * + 标题 + URL + 上传状态。主页与直播管理页共用。
+ * 封面（平台主播名 / 头像、直播标题、状态、平台）+ 录播备注 / 选择框 + URL + 上传状态。
+ * 时长、写盘速率 / 最近录制放在底部左侧，操作按钮放右侧。主页与直播管理页共用。
  */
 export default function StreamerCard({
   streamer,
@@ -170,10 +186,14 @@ export default function StreamerCard({
   onToggleSelect,
   actions,
 }: StreamerCardProps) {
+  const { ref, active } = useVisibleElement<HTMLElement>()
   const meta = streamerStatusMeta(streamer.status)
   const live = streamer.status === 'Working'
   const paused = streamer.status === 'Pause'
-  const name = streamer.remark || streamer.url
+  const uploadTag = uploadStatusTag(streamer.upload_status)
+  const remark = streamer.remark || streamer.url
+  // 历史场次 info.name 会被录播备注覆盖，不能用它或 remark 充当平台主播名。
+  const broadcasterName = streamer.live_streamer_name?.trim()
   // 封面和「预览」按钮都进直播预览页
   const openLivePage = useOpenLivePage()
   const previewable = canPreview(streamer)
@@ -190,13 +210,13 @@ export default function StreamerCard({
   const [coverFailed, setCoverFailed] = useState(false)
   const coverShown = !!coverSrc && !coverFailed
   const sparkline =
-    live && rateChartOn ? (
+    active && live && rateChartOn ? (
       <LiveRateChart
         id={streamer.id}
         windowMs={SPARK_RATE_WINDOW_MS}
         variant="sparkline"
         height={coverShown ? 34 : 28}
-        label={`${name} 写盘速率`}
+        label={`${remark} 写盘速率`}
         className={coverShown ? undefined : styles.spark}
         overlay={coverShown}
       />
@@ -204,6 +224,24 @@ export default function StreamerCard({
 
   const plat = platformName(streamer.url)
   const platColor = PLAT_COLORS[plat] ?? DEFAULT_PLAT_COLOR
+  const streamerName = (
+    <div className={styles.nameWrap}>
+      {avatarSrc ? <LiveAvatar key={avatarSrc} src={avatarSrc} /> : null}
+      {broadcasterName ? <div className={styles.name} title={broadcasterName}>{broadcasterName}</div> : null}
+    </div>
+  )
+
+  const statusTag = (
+    <span className={`${styles.badge} ${styles[meta.cls]}`}>
+      <span className={styles.bdot} />
+      {meta.label}
+    </span>
+  )
+  const platformTag = (
+    <span className={styles.platChip} style={{ backgroundColor: platTint(platColor), color: platColor }} title={streamer.url}>
+      <span className={styles.platName}>{plat}</span>
+    </span>
+  )
 
   const cardCls = [
     styles.card,
@@ -214,78 +252,45 @@ export default function StreamerCard({
     .join(' ')
 
   return (
-    <article className={cardCls} data-id={streamer.id}>
-      {/* 头部:状态徽章(左)+ 平台 chip(右) */}
-      <div className={styles.topRow}>
-        <span className={styles.left}>
-          {selectable ? (
+    <article ref={ref} className={cardCls} data-id={streamer.id}>
+      <div className={styles.coverFrame}>
+        {coverSrc ? (
+          <LiveCover
+            src={coverSrc}
+            alt={`${broadcasterName || remark} 的直播间封面`}
+            platform={platformTag}
+            title={info?.title}
+            onPreview={previewable ? (e) => openLivePage(streamer.id, e) : undefined}
+            overlay={coverShown ? sparkline : null}
+            onStateChange={(s) => setCoverFailed(s === 'error')}
+          />
+        ) : null}
+        <div className={coverSrc ? styles.coverHeader : styles.nameRow}>
+          {streamerName}
+          <span className={styles.coverStatus}>{statusTag}</span>
+          {!coverSrc ? platformTag : null}
+        </div>
+      </div>
+
+      {/* 录播备注与平台主播名独立；选择框放在备注后，点击不会触发直播预览。 */}
+      <div className={styles.remarkRow}>
+        <div className={styles.remark} title={remark}>{remark}</div>
+        {selectable ? (
+          <label className={styles.selection} title={`选择 ${remark}`}>
             <input
               type="checkbox"
               className={styles.chk}
               checked={!!selected}
               onChange={() => onToggleSelect?.(streamer.id)}
-              aria-label={`选择 ${name}`}
+              aria-label={`选择 ${remark}`}
             />
-          ) : null}
-          <span className={`${styles.badge} ${styles[meta.cls]}`}>
-            <span className={styles.bdot} />
-            {meta.label}
-          </span>
-          {live ? <MarkerCount count={streamer.marker_count} /> : null}
-        </span>
-        <span
-          className={styles.platChip}
-          style={{ backgroundColor: platTint(platColor), color: platColor }}
-          title={streamer.url}
-        >
-          <span className={styles.platDot} style={{ backgroundColor: platColor }} />
-          {plat}
-        </span>
-      </div>
-
-      {/* 录制中:直播间封面(可预览时点击即打开播放器) */}
-      {coverSrc ? (
-        <LiveCover
-          src={coverSrc}
-          alt={`${name} 的直播间封面`}
-          onPreview={previewable ? (e) => openLivePage(streamer.id, e) : undefined}
-          overlay={coverShown ? sparkline : null}
-          onStateChange={(s) => setCoverFailed(s === 'error')}
-        />
-      ) : null}
-
-      {/* 名称(录制中带头像)+ 实时时长与写盘速率 / 最近录制 */}
-      <div className={styles.nameRow}>
-        <div className={styles.nameWrap}>
-          {avatarSrc ? <LiveAvatar key={avatarSrc} src={avatarSrc} /> : null}
-          <div className={styles.name} title={name}>
-            {name}
-          </div>
-        </div>
-        {live ? (
-          <span className={styles.liveStats}>
-            {info?.date ? <LiveDuration since={info.date} /> : null}
-            <span
-              className={styles.rate}
-              title={rate ? '写盘速率(最近 10 秒平均)' : '写盘速率:尚无采样'}
-              aria-label={rate ? `写盘速率 ${rate}` : '写盘速率尚无采样'}
-            >
-              {rate ?? '—'}
-            </span>
-            <LivePreviewButton streamer={streamer} size="small" iconOnly className={styles.previewBtn} />
-          </span>
-        ) : lastRec ? (
-          <span className={styles.recInfo}>{lastRec}</span>
+          </label>
         ) : null}
       </div>
 
       {/* 开了码率图但没有封面可叠:sparkline 放这一行 */}
       {sparkline && !coverShown ? sparkline : null}
 
-      {/* 标题行:始终渲染(空字符串占位),保证所有卡片等高、标题基线对齐 */}
-      <div className={styles.title} title={info?.title || ''}>
-        {info?.title || ''}
-      </div>
       <a
         className={styles.url}
         href={streamer.url}
@@ -295,8 +300,27 @@ export default function StreamerCard({
       >
         {streamer.url}
       </a>
-      <div className={styles.meta}>{uploadStatusTag(streamer.upload_status)}</div>
-      {actions ? <div className={styles.actions}>{actions}</div> : null}
+      {uploadTag ? <div className={styles.meta}>{uploadTag}</div> : null}
+      {live || lastRec || actions ? (
+        <div className={styles.footer}>
+          {live ? (
+            <span className={styles.liveStats}>
+              {info?.date ? <LiveDuration since={info.date} /> : null}
+              <span
+                className={styles.rate}
+                title={rate ? '写盘速率(最近 10 秒平均)' : '写盘速率:尚无采样'}
+                aria-label={rate ? `写盘速率 ${rate}` : '写盘速率尚无采样'}
+              >
+                {rate ?? '—'}
+              </span>
+              <MarkerCount count={streamer.marker_count} />
+            </span>
+          ) : lastRec ? (
+            <span className={styles.recInfo}>{lastRec}</span>
+          ) : null}
+          {actions ? <div className={styles.actions}>{actions}</div> : null}
+        </div>
+      ) : null}
     </article>
   )
 }

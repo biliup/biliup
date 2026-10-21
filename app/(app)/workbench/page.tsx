@@ -47,7 +47,6 @@ function WorkbenchTabs() {
       <PageHeader
         icon={<IconScissors size="large" />}
         title="剪辑台"
-        description="按场次回看、打标记和剪切片，或按文件在线回放；「实时监视」同屏查看正在录制的直播间"
       />
       <div className={dc.content}>
         {/* keepDOM + lazyRender：场次和文件两个列表切走再切回，筛选、排序、分页、展开行都还在 */}

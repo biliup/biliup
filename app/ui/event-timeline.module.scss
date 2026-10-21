@@ -2,8 +2,14 @@
 
 .timeline {
   position: relative;
+  margin: 0;
   padding-left: 22px;
+  list-style: none;
+  min-width: 0;
 }
+.groups { display: grid; gap: 20px; min-width: 0; }
+.date { margin: 0 0 12px; font-size: 12px; font-weight: 600; color: var(--semi-color-text-1); }
+.meta { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; min-width: 0; }
 
 .timeline::before {
   content: '';
@@ -19,9 +25,9 @@
 .item {
   position: relative;
   padding: 5px 0 12px;
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
 }
 
 .item::before {
@@ -47,8 +53,6 @@
 .time {
   font-size: 12px;
   color: var(--semi-color-text-2);
-  min-width: 150px;
-  flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 
@@ -56,17 +60,15 @@
   font-size: 13px;
   color: var(--semi-color-text-1);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
 }
 
 .tag {
-  margin-left: auto;
   font-size: 11px;
   color: var(--semi-color-text-2);
-  white-space: nowrap;
-  flex-shrink: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .link {
@@ -77,12 +79,6 @@
 }
 
 .link:hover { text-decoration: underline; }
-
-@media (max-width: 680px) {
-  .item { align-items: flex-start; flex-wrap: wrap; gap: 5px 10px; }
-  .time { width: auto; min-width: 100%; }
-  .tag { margin-left: 0; }
-}
 
 .empty {
   padding: 28px 20px;
