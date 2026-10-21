@@ -5,8 +5,8 @@ use super::{
 use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -28,7 +28,7 @@ impl Default for Youtube {
 impl Youtube {
     pub fn new() -> Self {
         Self {
-            re: Regex::new(r"https?://(?:(?:(?:www|m)\.)?youtube\.com|youtu\.be)/").unwrap(),
+            re: Regex::new(r"^https?://(?:(?:(?:www|m)\.)?youtube\.com|youtu\.be)/").unwrap(),
         }
     }
 }
@@ -132,11 +132,13 @@ impl YoutubeLive {
             return Ok(LiveStatus::Offline);
         };
         let archive_ids = self.archive_ids().await;
-        let entry = match self.select_entry(&info, &archive_ids).await? {
+        let entry = match self
+            .select_entry(&info, &archive_ids, &|entry| self.resolve_entry(entry))
+            .await?
+        {
             EntryDecision::Select(entry) => entry,
             EntryDecision::Skip | EntryDecision::Stop => return Ok(LiveStatus::Offline),
         };
-        let entry = self.resolve_entry(entry).await?;
         let selection = self.selection(&entry);
         if selection.is_live && selection.stream_url.is_none() {
             return Ok(LiveStatus::Offline);
@@ -243,15 +245,12 @@ impl YoutubeLive {
     /// - `playlist_id=UUSHxxx`     仅 Shorts
     /// - `playlist_id=UULVxxx`     仅直播回放
     async fn fetch_rss_entries(&self) -> LiveResult<Option<Value>> {
-        let mut req = self
+        // RSS 是公开接口；cookie 文件仅交给 yt-dlp 按域名规则使用。
+        let req = self
             .client
             .get(&self.url)
             .header("User-Agent", YOUTUBE_UA)
             .timeout(std::time::Duration::from_secs(15));
-
-        if let Some(cookie_header) = self.load_cookie_header().await {
-            req = req.header("Cookie", cookie_header);
-        }
 
         let resp = match req.send().await {
             Ok(r) => r,
@@ -298,32 +297,20 @@ impl YoutubeLive {
         })))
     }
 
-    /// 读取 Netscape cookie 文件，构建 `Cookie: name=value; name2=value2` 请求头。
-    async fn load_cookie_header(&self) -> Option<String> {
-        let path = self.cookie_file.as_ref()?;
-        let content = fs::read_to_string(path).await.ok()?;
-        let pairs = parse_netscape_cookies(&content);
-        if pairs.is_empty() {
-            return None;
-        }
-        Some(
-            pairs
-                .iter()
-                .map(|(k, v)| format!("{k}={v}"))
-                .collect::<Vec<_>>()
-                .join("; "),
-        )
-    }
-
     // ---------- 条目筛选 ----------
 
     /// 递归扫描播放列表，返回首个命中的条目（对齐 Python loop_entries）。
     /// Stop 只终止当前列表的扫描，向上层表现为未命中。
-    fn select_entry<'a>(
+    fn select_entry<'a, F, Fut>(
         &'a self,
         value: &'a Value,
         archive_ids: &'a HashSet<String>,
-    ) -> Pin<Box<dyn Future<Output = LiveResult<EntryDecision>> + Send + 'a>> {
+        resolve: &'a F,
+    ) -> Pin<Box<dyn Future<Output = LiveResult<EntryDecision>> + Send + 'a>>
+    where
+        F: Fn(Value) -> Fut + Sync,
+        Fut: Future<Output = LiveResult<Option<Value>>> + Send + 'a,
+    {
         Box::pin(async move {
             let Some(object) = value.as_object() else {
                 return Ok(EntryDecision::Skip);
@@ -332,7 +319,7 @@ impl YoutubeLive {
             if object.get("_type").and_then(Value::as_str) == Some("playlist") {
                 let entries = object.get("entries").and_then(Value::as_array);
                 for entry in entries.into_iter().flatten() {
-                    match self.select_entry(entry, archive_ids).await? {
+                    match self.select_entry(entry, archive_ids, resolve).await? {
                         selected @ EntryDecision::Select(_) => return Ok(selected),
                         EntryDecision::Stop => return Ok(EntryDecision::Skip),
                         EntryDecision::Skip => {}
@@ -341,7 +328,23 @@ impl YoutubeLive {
                 return Ok(EntryDecision::Skip);
             }
 
-            self.evaluate_entry(value, object, archive_ids).await
+            match self.evaluate_entry(value, object, archive_ids).await? {
+                EntryDecision::Select(entry) => {
+                    let Some(entry) = resolve(entry).await? else {
+                        return Ok(EntryDecision::Skip);
+                    };
+                    // RSS / flat 条目补全后可能变成预告、直播或回放，需重新筛选。
+                    if entry
+                        .as_object()
+                        .is_some_and(|object| self.entry_allowed(object, archive_ids))
+                    {
+                        Ok(EntryDecision::Select(entry))
+                    } else {
+                        Ok(EntryDecision::Skip)
+                    }
+                }
+                decision => Ok(decision),
+            }
         })
     }
 
@@ -433,17 +436,17 @@ impl YoutubeLive {
         EntryDecision::Select(candidate)
     }
 
-    async fn resolve_entry(&self, entry: Value) -> LiveResult<Value> {
+    async fn resolve_entry(&self, entry: Value) -> LiveResult<Option<Value>> {
         if entry.get("_type").and_then(Value::as_str) != Some("url") {
-            return Ok(entry);
+            return Ok(Some(entry));
         }
 
         let Some(url) = string_field(&entry, &["webpage_url", "url"]) else {
-            return Ok(entry);
+            return Ok(None);
         };
 
         // 命中的 flat 条目单条完整提取，获得下载所需字段（对齐 youtube.py:292-293）
-        Ok(self.extract_info(&url, false).await?.unwrap_or(entry))
+        self.extract_info(&url, false).await
     }
 
     fn selection(&self, entry: &Value) -> YoutubeSelection {
@@ -540,7 +543,14 @@ fn is_youtube_live_url(url: &str) -> bool {
 
 /// 判断是否为 YouTube RSS 订阅链接。
 fn is_rss_url(url: &str) -> bool {
-    url.contains("youtube.com/feeds/videos.xml")
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https")
+        && url
+            .host_str()
+            .is_some_and(|host| host == "youtube.com" || host.ends_with(".youtube.com"))
+        && url.path() == "/feeds/videos.xml"
 }
 
 /// 根据 RSS URL 中的 playlist_id 前缀推断视频类型：
@@ -549,9 +559,9 @@ fn is_rss_url(url: &str) -> bool {
 /// - `channel_id` 或其他 → `None`（交由后续 yt-dlp 补全 live_status）
 fn infer_live_status_from_url(url: &str) -> Option<&'static str> {
     let parsed = url::Url::parse(url).ok()?;
-    let playlist_id = parsed.query_pairs().find_map(|(k, v)| {
-        (k == "playlist_id").then_some(v.into_owned())
-    })?;
+    let playlist_id = parsed
+        .query_pairs()
+        .find_map(|(k, v)| (k == "playlist_id").then_some(v.into_owned()))?;
     if playlist_id.starts_with("UULV") {
         Some("was_live")
     } else {
@@ -588,27 +598,11 @@ fn rss_entry_to_value(entry: &RssEntry, live_status: Option<&str>) -> Value {
     Value::Object(obj)
 }
 
-/// 解析 Netscape cookie 文件，返回 (name, value) 列表。
-/// 格式：以 Tab 分隔，字段为 domain / includeSubdomains / path / secure / expires / name / value。
-fn parse_netscape_cookies(content: &str) -> Vec<(String, String)> {
-    content
-        .lines()
-        .filter(|line| !line.trim().is_empty() && !line.trim_start().starts_with('#'))
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() >= 7 {
-                Some((parts[5].to_string(), parts[6].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
 /// 用 quick-xml 解析 YouTube RSS XML，提取视频条目列表。
 fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
+    reader.config_mut().expand_empty_elements = true;
 
     let mut entries: Vec<RssEntry> = Vec::new();
     let mut current: Option<RssEntry> = None;
@@ -631,8 +625,12 @@ fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
                         if let Some(entry) = current.as_mut() {
                             for attr in e.attributes().flatten() {
                                 if attr.key.local_name().as_ref() == b"href" {
-                                    entry.webpage_url =
-                                        String::from_utf8_lossy(&attr.value).to_string();
+                                    entry.webpage_url = attr
+                                        .unescape_value()
+                                        .map_err(|e| {
+                                            LiveError::custom(format!("RSS XML 解析错误: {e}"))
+                                        })?
+                                        .into_owned();
                                 }
                             }
                         }
@@ -645,8 +643,12 @@ fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
                             if let Some(entry) = current.as_mut() {
                                 for attr in e.attributes().flatten() {
                                     if attr.key.local_name().as_ref() == b"url" {
-                                        entry.thumbnail =
-                                            String::from_utf8_lossy(&attr.value).to_string();
+                                        entry.thumbnail = attr
+                                            .unescape_value()
+                                            .map_err(|e| {
+                                                LiveError::custom(format!("RSS XML 解析错误: {e}"))
+                                            })?
+                                            .into_owned();
                                     }
                                 }
                             }
@@ -726,6 +728,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    async fn keep_entry(entry: Value) -> LiveResult<Option<Value>> {
+        Ok(Some(entry))
+    }
+
     fn youtube_live(
         live_url: bool,
         enable_download_live: bool,
@@ -757,6 +763,9 @@ mod tests {
         assert!(plugin.matches("https://m.youtube.com/watch?v=test"));
         assert!(plugin.matches("https://youtu.be/test"));
         assert!(!plugin.matches("https://example.com/watch?v=test"));
+        assert!(
+            !plugin.matches("https://evil.example/?next=https://www.youtube.com/feeds/videos.xml")
+        );
     }
 
     #[test]
@@ -771,7 +780,17 @@ mod tests {
             "https://m.youtube.com/feeds/videos.xml?playlist_id=UUSHxxx"
         ));
         assert!(!is_rss_url("https://www.youtube.com/watch?v=test"));
-        assert!(!is_rss_url("https://www.youtube.com/results?search_query=test"));
+        assert!(!is_rss_url(
+            "https://www.youtube.com/results?search_query=test"
+        ));
+        for url in [
+            "https://evil.example/?next=https://www.youtube.com/feeds/videos.xml",
+            "https://notyoutube.com/feeds/videos.xml",
+            "https://youtube.com.evil.example/feeds/videos.xml",
+            "https://www.youtube.com/feeds/videos.xml/extra",
+        ] {
+            assert!(!is_rss_url(url), "{url}");
+        }
     }
 
     #[test]
@@ -795,9 +814,7 @@ mod tests {
             None
         );
         assert_eq!(
-            infer_live_status_from_url(
-                "https://www.youtube.com/feeds/videos.xml?channel_id=UCabc"
-            ),
+            infer_live_status_from_url("https://www.youtube.com/feeds/videos.xml?channel_id=UCabc"),
             None
         );
     }
@@ -813,12 +830,12 @@ mod tests {
     <yt:videoId>abc123</yt:videoId>
     <yt:channelId>UCtest</yt:channelId>
     <title>Test Video 1</title>
-    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123"/>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123&amp;feature=feed"/>
     <author><name>Test Channel</name></author>
     <published>2024-06-15T12:00:00+00:00</published>
     <media:group>
       <media:title>Test Video 1</media:title>
-      <media:thumbnail url="https://i.ytimg.com/vi/abc123/hqdefault.jpg" width="480" height="360"/>
+      <media:thumbnail url="https://i.ytimg.com/vi/abc123/maxresdefault.jpg" width="1280" height="720"/>
     </media:group>
   </entry>
   <entry>
@@ -838,8 +855,14 @@ mod tests {
 
         assert_eq!(entries[0].id, "abc123");
         assert_eq!(entries[0].title, "Test Video 1");
-        assert_eq!(entries[0].webpage_url, "https://www.youtube.com/watch?v=abc123");
-        assert_eq!(entries[0].thumbnail, "https://i.ytimg.com/vi/abc123/hqdefault.jpg");
+        assert_eq!(
+            entries[0].webpage_url,
+            "https://www.youtube.com/watch?v=abc123&feature=feed"
+        );
+        assert_eq!(
+            entries[0].thumbnail,
+            "https://i.ytimg.com/vi/abc123/maxresdefault.jpg"
+        );
         assert_eq!(entries[0].upload_date, "20240615");
 
         assert_eq!(entries[1].id, "def456");
@@ -877,19 +900,6 @@ mod tests {
         // live_status = None 序列化为 null
         let value_null = rss_entry_to_value(&entry, None);
         assert!(value_null.get("live_status").unwrap().is_null());
-    }
-
-    #[test]
-    fn parse_netscape_cookies_basic() {
-        let content = "# Netscape HTTP Cookie File
-# This is a generated file!
-.youtube.com	TRUE	/	FALSE	1735689600	SID	abc123
-.youtube.com	TRUE	/	FALSE	1735689600	HSID	def456
-";
-        let cookies = parse_netscape_cookies(content);
-        assert_eq!(cookies.len(), 2);
-        assert_eq!(cookies[0], ("SID".to_string(), "abc123".to_string()));
-        assert_eq!(cookies[1], ("HSID".to_string(), "def456".to_string()));
     }
 
     #[test]
@@ -980,7 +990,11 @@ mod tests {
             ]
         });
 
-        match live.select_entry(&info, &archive).await.unwrap() {
+        match live
+            .select_entry(&info, &archive, &keep_entry)
+            .await
+            .unwrap()
+        {
             EntryDecision::Select(entry) => {
                 assert_eq!(entry.get("id").and_then(Value::as_str), Some("vod"));
             }
@@ -1002,7 +1016,9 @@ mod tests {
 
         // 首个条目早于 after_date 即停止扫描当前列表，后续条目不再命中
         assert_eq!(
-            live.select_entry(&info, &HashSet::new()).await.unwrap(),
+            live.select_entry(&info, &HashSet::new(), &keep_entry)
+                .await
+                .unwrap(),
             EntryDecision::Skip
         );
     }
@@ -1036,11 +1052,97 @@ mod tests {
             "entries": json_entries,
         });
 
-        match live.select_entry(&playlist, &HashSet::new()).await.unwrap() {
+        match live
+            .select_entry(&playlist, &HashSet::new(), &keep_entry)
+            .await
+            .unwrap()
+        {
             EntryDecision::Select(entry) => {
                 assert_eq!(entry.get("id").and_then(Value::as_str), Some("v1"));
             }
             other => panic!("应命中 v1，实际为 {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn rss_selection_rechecks_resolved_status_and_continues() {
+        let playlist = json!({
+            "_type": "playlist",
+            "entries": [
+                rss_entry_to_value(&RssEntry { id: "first".into(), ..Default::default() }, None),
+                rss_entry_to_value(&RssEntry { id: "next".into(), ..Default::default() }, None),
+            ],
+        });
+        for enable_live in [false, true] {
+            for enable_playback in [false, true] {
+                let live = youtube_live(false, enable_live, enable_playback);
+                for (status, allowed) in [
+                    ("is_upcoming", false),
+                    ("is_live", enable_live),
+                    ("was_live", enable_playback),
+                    ("not_live", true),
+                ] {
+                    let resolve = |mut entry: Value| {
+                        assert!(entry["live_status"].is_null());
+                        entry["_type"] = json!("video");
+                        entry["live_status"] = if entry["id"] == "first" {
+                            json!(status)
+                        } else {
+                            json!("not_live")
+                        };
+                        std::future::ready(Ok(Some(entry)))
+                    };
+                    let EntryDecision::Select(entry) = live
+                        .select_entry(&playlist, &HashSet::new(), &resolve)
+                        .await
+                        .unwrap()
+                    else {
+                        panic!("应继续扫描并命中可下载条目");
+                    };
+                    assert_eq!(entry["id"], if allowed { "first" } else { "next" });
+                }
+            }
+        }
+
+        let live = youtube_live(false, true, true);
+        let resolve = |entry: Value| {
+            let resolved = (entry["id"] != "first").then_some(entry);
+            std::future::ready(Ok(resolved))
+        };
+        let EntryDecision::Select(entry) = live
+            .select_entry(&playlist, &HashSet::new(), &resolve)
+            .await
+            .unwrap()
+        else {
+            panic!("解析失败后应继续扫描下一条");
+        };
+        assert_eq!(entry["id"], "next");
+    }
+
+    #[tokio::test]
+    async fn rss_request_does_not_send_cookie_file() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                assert!(!headers.contains_key("cookie"));
+                "<feed><entry><videoId>test</videoId><title>Test</title></entry></feed>"
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cookie_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            cookie_file.path(),
+            ".youtube.com\tTRUE\t/\tFALSE\t9999999999\tSID\ttest-cookie\n",
+        )
+        .unwrap();
+        let mut live = youtube_live(false, true, true);
+        live.url = format!("http://{addr}/");
+        live.cookie_file = Some(cookie_file.path().to_path_buf());
+
+        let playlist = live.fetch_rss_entries().await.unwrap().unwrap();
+        assert_eq!(playlist["entries"][0]["id"], "test");
+        server.abort();
     }
 }
