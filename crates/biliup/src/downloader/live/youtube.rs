@@ -656,8 +656,8 @@ fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
                 }
             }
             Ok(Event::Text(e)) => {
-                if let Ok(bytes) = e.unescape() {
-                    text_buf.push_str(&String::from_utf8_lossy(&bytes));
+                if let Ok(text) = e.unescape() {
+                    text_buf.push_str(&text);
                 }
             }
             Ok(Event::End(e)) => {
