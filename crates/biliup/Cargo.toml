@@ -21,6 +21,7 @@ md-5 = "0.10.6"
 # FIXME: 等 rsa 0.10.0 发布后再更新
 rand = { workspace = true }
 url = { workspace = true }
+quick-xml = { workspace = true }
 thiserror = { workspace = true }
 
 cookie = "0.18.1"

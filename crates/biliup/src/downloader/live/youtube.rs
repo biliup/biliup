@@ -5,6 +5,8 @@ use super::{
 use crate::tools;
 use async_trait::async_trait;
 use chrono::Utc;
+use quick_xml::Reader;
+use quick_xml::events::Event;
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -26,7 +28,7 @@ impl Default for Youtube {
 impl Youtube {
     pub fn new() -> Self {
         Self {
-            re: Regex::new(r"https?://(?:(?:(?:www|m)\.)?youtube\.com|youtu\.be)/").unwrap(),
+            re: Regex::new(r"^https?://(?:(?:(?:www|m)\.)?youtube\.com|youtu\.be)/").unwrap(),
         }
     }
 }
@@ -49,6 +51,7 @@ impl LivePlugin for Youtube {
 struct YoutubeLive {
     url: String,
     name: String,
+    client: reqwest::Client,
     cookie_file: Option<std::path::PathBuf>,
     live_url: bool,
     enable_download_live: bool,
@@ -72,6 +75,17 @@ struct YoutubeSelection {
     is_live: bool,
 }
 
+/// 从 RSS XML 解析出的单条视频条目。
+#[derive(Default, Debug, Clone)]
+struct RssEntry {
+    id: String,
+    title: String,
+    webpage_url: String,
+    thumbnail: String,
+    /// `YYYYMMDD` 格式，解析失败时为空字符串。
+    upload_date: String,
+}
+
 /// 条目筛选结果，对齐 Python `loop_entries` 的 dict / None / 'stop' 三态。
 #[derive(Debug, PartialEq)]
 enum EntryDecision {
@@ -90,6 +104,7 @@ impl YoutubeLive {
         Self {
             url: request.url,
             name: request.name,
+            client: request.client,
             cookie_file: request.credentials.youtube_cookie,
             live_url,
             enable_download_live: options.enable_download_live,
@@ -105,17 +120,25 @@ impl YoutubeLive {
     }
 
     async fn check_stream(&self) -> LiveResult<LiveStatus> {
-        // 列表型 URL 先用 --flat-playlist 轻量枚举（对齐 Python extract_info(process=False)），
-        // 命中的条目再单条完整提取
-        let Some(info) = self.extract_info(&self.url, true).await? else {
+        // RSS 订阅链接走原生 XML 解析（对齐 Python youtube.py 的 _fetch_rss_video_ids），
+        // 其余 URL（普通视频 / 频道 / 播放列表 / 搜索结果）走 yt-dlp --flat-playlist 轻量枚举。
+        let info = if is_rss_url(&self.url) {
+            self.fetch_rss_entries().await?
+        } else {
+            self.extract_info(&self.url, true).await?
+        };
+
+        let Some(info) = info else {
             return Ok(LiveStatus::Offline);
         };
         let archive_ids = self.archive_ids().await;
-        let entry = match self.select_entry(&info, &archive_ids).await? {
+        let entry = match self
+            .select_entry(&info, &archive_ids, &|entry| self.resolve_entry(entry))
+            .await?
+        {
             EntryDecision::Select(entry) => entry,
             EntryDecision::Skip | EntryDecision::Stop => return Ok(LiveStatus::Offline),
         };
-        let entry = self.resolve_entry(entry).await?;
         let selection = self.selection(&entry);
         if selection.is_live && selection.stream_url.is_none() {
             return Ok(LiveStatus::Offline);
@@ -170,6 +193,8 @@ impl YoutubeLive {
         })
     }
 
+    // ---------- yt-dlp 提取 ----------
+
     async fn extract_info(&self, url: &str, flat: bool) -> LiveResult<Option<Value>> {
         let mut command = tools::command("yt-dlp");
         command
@@ -211,13 +236,81 @@ impl YoutubeLive {
             .collect()
     }
 
+    // ---------- RSS 原生解析 ----------
+
+    /// 请求 YouTube RSS XML 并解析为 yt-dlp 兼容的播放列表 Value。
+    /// 兼容四类 RSS：
+    /// - `channel_id=UCxxx`        全内容频道
+    /// - `playlist_id=UULFxxx`     纯长视频
+    /// - `playlist_id=UUSHxxx`     仅 Shorts
+    /// - `playlist_id=UULVxxx`     仅直播回放
+    async fn fetch_rss_entries(&self) -> LiveResult<Option<Value>> {
+        // RSS 是公开接口；cookie 文件仅交给 yt-dlp 按域名规则使用。
+        let req = self
+            .client
+            .get(&self.url)
+            .header("User-Agent", YOUTUBE_UA)
+            .timeout(std::time::Duration::from_secs(15));
+
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(%e, url = %self.url, "YouTube RSS 请求失败");
+                return Ok(None);
+            }
+        };
+        if !resp.status().is_success() {
+            tracing::warn!(status = %resp.status(), url = %self.url, "YouTube RSS HTTP 错误");
+            return Ok(None);
+        }
+
+        let xml = match resp.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(%e, "YouTube RSS 响应读取失败");
+                return Ok(None);
+            }
+        };
+
+        let entries = match parse_rss_xml(&xml) {
+            Ok(e) => e,
+            Err(e) => {
+                tracing::warn!(%e, "YouTube RSS XML 解析失败");
+                return Ok(None);
+            }
+        };
+
+        if entries.is_empty() {
+            tracing::debug!(url = %self.url, "YouTube RSS 无视频条目");
+            return Ok(None);
+        }
+
+        let live_status = infer_live_status_from_url(&self.url);
+        let json_entries: Vec<Value> = entries
+            .iter()
+            .map(|e| rss_entry_to_value(e, live_status))
+            .collect();
+
+        Ok(Some(serde_json::json!({
+            "_type": "playlist",
+            "entries": json_entries,
+        })))
+    }
+
+    // ---------- 条目筛选 ----------
+
     /// 递归扫描播放列表，返回首个命中的条目（对齐 Python loop_entries）。
     /// Stop 只终止当前列表的扫描，向上层表现为未命中。
-    fn select_entry<'a>(
+    fn select_entry<'a, F, Fut>(
         &'a self,
         value: &'a Value,
         archive_ids: &'a HashSet<String>,
-    ) -> Pin<Box<dyn Future<Output = LiveResult<EntryDecision>> + Send + 'a>> {
+        resolve: &'a F,
+    ) -> Pin<Box<dyn Future<Output = LiveResult<EntryDecision>> + Send + 'a>>
+    where
+        F: Fn(Value) -> Fut + Sync,
+        Fut: Future<Output = LiveResult<Option<Value>>> + Send + 'a,
+    {
         Box::pin(async move {
             let Some(object) = value.as_object() else {
                 return Ok(EntryDecision::Skip);
@@ -226,7 +319,7 @@ impl YoutubeLive {
             if object.get("_type").and_then(Value::as_str) == Some("playlist") {
                 let entries = object.get("entries").and_then(Value::as_array);
                 for entry in entries.into_iter().flatten() {
-                    match self.select_entry(entry, archive_ids).await? {
+                    match self.select_entry(entry, archive_ids, resolve).await? {
                         selected @ EntryDecision::Select(_) => return Ok(selected),
                         EntryDecision::Stop => return Ok(EntryDecision::Skip),
                         EntryDecision::Skip => {}
@@ -235,7 +328,23 @@ impl YoutubeLive {
                 return Ok(EntryDecision::Skip);
             }
 
-            self.evaluate_entry(value, object, archive_ids).await
+            match self.evaluate_entry(value, object, archive_ids).await? {
+                EntryDecision::Select(entry) => {
+                    let Some(entry) = resolve(entry).await? else {
+                        return Ok(EntryDecision::Skip);
+                    };
+                    // RSS / flat 条目补全后可能变成预告、直播或回放，需重新筛选。
+                    if entry
+                        .as_object()
+                        .is_some_and(|object| self.entry_allowed(object, archive_ids))
+                    {
+                        Ok(EntryDecision::Select(entry))
+                    } else {
+                        Ok(EntryDecision::Skip)
+                    }
+                }
+                decision => Ok(decision),
+            }
         })
     }
 
@@ -327,17 +436,17 @@ impl YoutubeLive {
         EntryDecision::Select(candidate)
     }
 
-    async fn resolve_entry(&self, entry: Value) -> LiveResult<Value> {
+    async fn resolve_entry(&self, entry: Value) -> LiveResult<Option<Value>> {
         if entry.get("_type").and_then(Value::as_str) != Some("url") {
-            return Ok(entry);
+            return Ok(Some(entry));
         }
 
         let Some(url) = string_field(&entry, &["webpage_url", "url"]) else {
-            return Ok(entry);
+            return Ok(None);
         };
 
         // 命中的 flat 条目单条完整提取，获得下载所需字段（对齐 youtube.py:292-293）
-        Ok(self.extract_info(&url, false).await?.unwrap_or(entry))
+        self.extract_info(&url, false).await
     }
 
     fn selection(&self, entry: &Value) -> YoutubeSelection {
@@ -402,6 +511,11 @@ impl YoutubeLive {
     }
 }
 
+// ========== 纯函数工具 ==========
+
+const YOUTUBE_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) \
+    AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
 fn parse_ytdlp_stdout(stdout: &[u8]) -> LiveResult<Option<Value>> {
     let stdout = String::from_utf8_lossy(stdout);
     let stdout = stdout.trim();
@@ -427,10 +541,196 @@ fn is_youtube_live_url(url: &str) -> bool {
     url.trim_end_matches('/').ends_with("/live")
 }
 
+/// 判断是否为 YouTube RSS 订阅链接。
+fn is_rss_url(url: &str) -> bool {
+    let Ok(url) = url::Url::parse(url) else {
+        return false;
+    };
+    matches!(url.scheme(), "http" | "https")
+        && url
+            .host_str()
+            .is_some_and(|host| host == "youtube.com" || host.ends_with(".youtube.com"))
+        && url.path() == "/feeds/videos.xml"
+}
+
+/// 根据 RSS URL 中的 playlist_id 前缀推断视频类型：
+/// - `UULV` → 直播回放（`was_live`）
+/// - `UULF` / `UUSH` → 普通视频（`None`）
+/// - `channel_id` 或其他 → `None`（交由后续 yt-dlp 补全 live_status）
+fn infer_live_status_from_url(url: &str) -> Option<&'static str> {
+    let parsed = url::Url::parse(url).ok()?;
+    let playlist_id = parsed
+        .query_pairs()
+        .find_map(|(k, v)| (k == "playlist_id").then_some(v.into_owned()))?;
+    if playlist_id.starts_with("UULV") {
+        Some("was_live")
+    } else {
+        None
+    }
+}
+
+/// 将 RSS 条目转为 yt-dlp 兼容的 JSON Value。
+/// `_type: "url"` 使 resolve_entry 对命中条目做完整 yt-dlp 提取以获取流地址。
+fn rss_entry_to_value(entry: &RssEntry, live_status: Option<&str>) -> Value {
+    let mut obj = Map::new();
+    obj.insert("id".to_string(), Value::String(entry.id.clone()));
+    obj.insert("title".to_string(), Value::String(entry.title.clone()));
+    obj.insert(
+        "webpage_url".to_string(),
+        Value::String(entry.webpage_url.clone()),
+    );
+    obj.insert("url".to_string(), Value::String(entry.webpage_url.clone()));
+    obj.insert(
+        "thumbnail".to_string(),
+        Value::String(entry.thumbnail.clone()),
+    );
+    if !entry.upload_date.is_empty() {
+        obj.insert(
+            "upload_date".to_string(),
+            Value::String(entry.upload_date.clone()),
+        );
+    }
+    match live_status {
+        Some(s) => obj.insert("live_status".to_string(), Value::String(s.to_string())),
+        None => obj.insert("live_status".to_string(), Value::Null),
+    };
+    obj.insert("_type".to_string(), Value::String("url".to_string()));
+    Value::Object(obj)
+}
+
+/// 用 quick-xml 解析 YouTube RSS XML，提取视频条目列表。
+fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    reader.config_mut().expand_empty_elements = true;
+
+    let mut entries: Vec<RssEntry> = Vec::new();
+    let mut current: Option<RssEntry> = None;
+    let mut text_buf = String::new();
+    let mut in_media_group = false;
+
+    let mut buf = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => {
+                let local = e.name().local_name();
+                match local.as_ref() {
+                    b"entry" => {
+                        current = Some(RssEntry::default());
+                    }
+                    b"videoId" | b"title" | b"published" => {
+                        text_buf.clear();
+                    }
+                    b"link" => {
+                        if let Some(entry) = current.as_mut() {
+                            for attr in e.attributes().flatten() {
+                                if attr.key.local_name().as_ref() == b"href" {
+                                    entry.webpage_url = attr
+                                        .unescape_value()
+                                        .map_err(|e| {
+                                            LiveError::custom(format!("RSS XML 解析错误: {e}"))
+                                        })?
+                                        .into_owned();
+                                }
+                            }
+                        }
+                    }
+                    b"group" => {
+                        in_media_group = true;
+                    }
+                    b"thumbnail" => {
+                        if in_media_group {
+                            if let Some(entry) = current.as_mut() {
+                                for attr in e.attributes().flatten() {
+                                    if attr.key.local_name().as_ref() == b"url" {
+                                        entry.thumbnail = attr
+                                            .unescape_value()
+                                            .map_err(|e| {
+                                                LiveError::custom(format!("RSS XML 解析错误: {e}"))
+                                            })?
+                                            .into_owned();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Text(e)) => {
+                if let Ok(text) = e.unescape() {
+                    text_buf.push_str(&text);
+                }
+            }
+            Ok(Event::End(e)) => {
+                let local = e.name().local_name();
+                match local.as_ref() {
+                    b"entry" => {
+                        if let Some(mut entry) = current.take() {
+                            if !entry.id.is_empty() {
+                                if entry.webpage_url.is_empty() {
+                                    entry.webpage_url =
+                                        format!("https://www.youtube.com/watch?v={}", entry.id);
+                                }
+                                if entry.thumbnail.is_empty() {
+                                    entry.thumbnail = format!(
+                                        "https://i.ytimg.com/vi/{}/hqdefault.jpg",
+                                        entry.id
+                                    );
+                                }
+                                entries.push(entry);
+                            }
+                        }
+                    }
+                    b"videoId" => {
+                        if let Some(entry) = current.as_mut() {
+                            entry.id = text_buf.trim().to_string();
+                        }
+                        text_buf.clear();
+                    }
+                    b"title" => {
+                        if let Some(entry) = current.as_mut() {
+                            entry.title = text_buf.trim().to_string();
+                        }
+                        text_buf.clear();
+                    }
+                    b"published" => {
+                        if let Some(entry) = current.as_mut() {
+                            // 2024-01-01T00:00:00+00:00 → 20240101
+                            entry.upload_date = text_buf
+                                .trim()
+                                .get(..10)
+                                .map(|s| s.replace('-', ""))
+                                .unwrap_or_default();
+                        }
+                        text_buf.clear();
+                    }
+                    b"group" => {
+                        in_media_group = false;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(LiveError::custom(format!("RSS XML 解析错误: {e}")));
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(entries)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    async fn keep_entry(entry: Value) -> LiveResult<Option<Value>> {
+        Ok(Some(entry))
+    }
 
     fn youtube_live(
         live_url: bool,
@@ -440,6 +740,7 @@ mod tests {
         YoutubeLive {
             url: "https://www.youtube.com/@test".to_string(),
             name: "test".to_string(),
+            client: reqwest::Client::new(),
             cookie_file: None,
             live_url,
             enable_download_live,
@@ -462,6 +763,143 @@ mod tests {
         assert!(plugin.matches("https://m.youtube.com/watch?v=test"));
         assert!(plugin.matches("https://youtu.be/test"));
         assert!(!plugin.matches("https://example.com/watch?v=test"));
+        assert!(
+            !plugin.matches("https://evil.example/?next=https://www.youtube.com/feeds/videos.xml")
+        );
+    }
+
+    #[test]
+    fn rss_url_detection() {
+        assert!(is_rss_url(
+            "https://www.youtube.com/feeds/videos.xml?channel_id=UCxxx"
+        ));
+        assert!(is_rss_url(
+            "https://www.youtube.com/feeds/videos.xml?playlist_id=UULFxxx"
+        ));
+        assert!(is_rss_url(
+            "https://m.youtube.com/feeds/videos.xml?playlist_id=UUSHxxx"
+        ));
+        assert!(!is_rss_url("https://www.youtube.com/watch?v=test"));
+        assert!(!is_rss_url(
+            "https://www.youtube.com/results?search_query=test"
+        ));
+        for url in [
+            "https://evil.example/?next=https://www.youtube.com/feeds/videos.xml",
+            "https://notyoutube.com/feeds/videos.xml",
+            "https://youtube.com.evil.example/feeds/videos.xml",
+            "https://www.youtube.com/feeds/videos.xml/extra",
+        ] {
+            assert!(!is_rss_url(url), "{url}");
+        }
+    }
+
+    #[test]
+    fn infer_live_status_from_playlist_id() {
+        assert_eq!(
+            infer_live_status_from_url(
+                "https://www.youtube.com/feeds/videos.xml?playlist_id=UULVabc"
+            ),
+            Some("was_live")
+        );
+        assert_eq!(
+            infer_live_status_from_url(
+                "https://www.youtube.com/feeds/videos.xml?playlist_id=UULFabc"
+            ),
+            None
+        );
+        assert_eq!(
+            infer_live_status_from_url(
+                "https://www.youtube.com/feeds/videos.xml?playlist_id=UUSHabc"
+            ),
+            None
+        );
+        assert_eq!(
+            infer_live_status_from_url("https://www.youtube.com/feeds/videos.xml?channel_id=UCabc"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_rss_xml_extracts_entries() {
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns:yt="http://www.youtube.com/xml/schemas/2015"
+      xmlns:media="http://search.yahoo.com/mrss/"
+      xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>yt:video:abc123</id>
+    <yt:videoId>abc123</yt:videoId>
+    <yt:channelId>UCtest</yt:channelId>
+    <title>Test Video 1</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=abc123&amp;feature=feed"/>
+    <author><name>Test Channel</name></author>
+    <published>2024-06-15T12:00:00+00:00</published>
+    <media:group>
+      <media:title>Test Video 1</media:title>
+      <media:thumbnail url="https://i.ytimg.com/vi/abc123/maxresdefault.jpg" width="1280" height="720"/>
+    </media:group>
+  </entry>
+  <entry>
+    <id>yt:video:def456</id>
+    <yt:videoId>def456</yt:videoId>
+    <title>中文标题 Video 2</title>
+    <link rel="alternate" href="https://www.youtube.com/watch?v=def456"/>
+    <published>2024-07-20T08:30:00+00:00</published>
+    <media:group>
+      <media:thumbnail url="https://i.ytimg.com/vi/def456/hqdefault.jpg"/>
+    </media:group>
+  </entry>
+</feed>"#;
+
+        let entries = parse_rss_xml(xml).unwrap();
+        assert_eq!(entries.len(), 2);
+
+        assert_eq!(entries[0].id, "abc123");
+        assert_eq!(entries[0].title, "Test Video 1");
+        assert_eq!(
+            entries[0].webpage_url,
+            "https://www.youtube.com/watch?v=abc123&feature=feed"
+        );
+        assert_eq!(
+            entries[0].thumbnail,
+            "https://i.ytimg.com/vi/abc123/maxresdefault.jpg"
+        );
+        assert_eq!(entries[0].upload_date, "20240615");
+
+        assert_eq!(entries[1].id, "def456");
+        assert_eq!(entries[1].title, "中文标题 Video 2");
+        assert_eq!(entries[1].upload_date, "20240720");
+    }
+
+    #[test]
+    fn rss_entry_converts_to_ytdlp_value() {
+        let entry = RssEntry {
+            id: "abc123".to_string(),
+            title: "Test".to_string(),
+            webpage_url: "https://www.youtube.com/watch?v=abc123".to_string(),
+            thumbnail: "https://i.ytimg.com/vi/abc123/hqdefault.jpg".to_string(),
+            upload_date: "20240615".to_string(),
+        };
+
+        let value = rss_entry_to_value(&entry, Some("was_live"));
+        assert_eq!(value.get("id").and_then(Value::as_str), Some("abc123"));
+        assert_eq!(value.get("title").and_then(Value::as_str), Some("Test"));
+        assert_eq!(
+            value.get("webpage_url").and_then(Value::as_str),
+            Some("https://www.youtube.com/watch?v=abc123")
+        );
+        assert_eq!(
+            value.get("upload_date").and_then(Value::as_str),
+            Some("20240615")
+        );
+        assert_eq!(
+            value.get("live_status").and_then(Value::as_str),
+            Some("was_live")
+        );
+        assert_eq!(value.get("_type").and_then(Value::as_str), Some("url"));
+
+        // live_status = None 序列化为 null
+        let value_null = rss_entry_to_value(&entry, None);
+        assert!(value_null.get("live_status").unwrap().is_null());
     }
 
     #[test]
@@ -552,7 +990,11 @@ mod tests {
             ]
         });
 
-        match live.select_entry(&info, &archive).await.unwrap() {
+        match live
+            .select_entry(&info, &archive, &keep_entry)
+            .await
+            .unwrap()
+        {
             EntryDecision::Select(entry) => {
                 assert_eq!(entry.get("id").and_then(Value::as_str), Some("vod"));
             }
@@ -574,8 +1016,133 @@ mod tests {
 
         // 首个条目早于 after_date 即停止扫描当前列表，后续条目不再命中
         assert_eq!(
-            live.select_entry(&info, &HashSet::new()).await.unwrap(),
+            live.select_entry(&info, &HashSet::new(), &keep_entry)
+                .await
+                .unwrap(),
             EntryDecision::Skip
         );
+    }
+
+    #[tokio::test]
+    async fn rss_playlist_feeds_into_select_entry() {
+        // 验证 RSS 解析出的 playlist Value 能被 select_entry 正确遍历
+        let live = youtube_live(false, true, true);
+        let rss_entries = vec![
+            RssEntry {
+                id: "v1".to_string(),
+                title: "Video 1".to_string(),
+                webpage_url: "https://www.youtube.com/watch?v=v1".to_string(),
+                thumbnail: "https://i.ytimg.com/vi/v1/hqdefault.jpg".to_string(),
+                upload_date: "20240601".to_string(),
+            },
+            RssEntry {
+                id: "v2".to_string(),
+                title: "Video 2".to_string(),
+                webpage_url: "https://www.youtube.com/watch?v=v2".to_string(),
+                thumbnail: "https://i.ytimg.com/vi/v2/hqdefault.jpg".to_string(),
+                upload_date: "20240602".to_string(),
+            },
+        ];
+        let json_entries: Vec<Value> = rss_entries
+            .iter()
+            .map(|e| rss_entry_to_value(e, None))
+            .collect();
+        let playlist = json!({
+            "_type": "playlist",
+            "entries": json_entries,
+        });
+
+        match live
+            .select_entry(&playlist, &HashSet::new(), &keep_entry)
+            .await
+            .unwrap()
+        {
+            EntryDecision::Select(entry) => {
+                assert_eq!(entry.get("id").and_then(Value::as_str), Some("v1"));
+            }
+            other => panic!("应命中 v1，实际为 {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn rss_selection_rechecks_resolved_status_and_continues() {
+        let playlist = json!({
+            "_type": "playlist",
+            "entries": [
+                rss_entry_to_value(&RssEntry { id: "first".into(), ..Default::default() }, None),
+                rss_entry_to_value(&RssEntry { id: "next".into(), ..Default::default() }, None),
+            ],
+        });
+        for enable_live in [false, true] {
+            for enable_playback in [false, true] {
+                let live = youtube_live(false, enable_live, enable_playback);
+                for (status, allowed) in [
+                    ("is_upcoming", false),
+                    ("is_live", enable_live),
+                    ("was_live", enable_playback),
+                    ("not_live", true),
+                ] {
+                    let resolve = |mut entry: Value| {
+                        assert!(entry["live_status"].is_null());
+                        entry["_type"] = json!("video");
+                        entry["live_status"] = if entry["id"] == "first" {
+                            json!(status)
+                        } else {
+                            json!("not_live")
+                        };
+                        std::future::ready(Ok(Some(entry)))
+                    };
+                    let EntryDecision::Select(entry) = live
+                        .select_entry(&playlist, &HashSet::new(), &resolve)
+                        .await
+                        .unwrap()
+                    else {
+                        panic!("应继续扫描并命中可下载条目");
+                    };
+                    assert_eq!(entry["id"], if allowed { "first" } else { "next" });
+                }
+            }
+        }
+
+        let live = youtube_live(false, true, true);
+        let resolve = |entry: Value| {
+            let resolved = (entry["id"] != "first").then_some(entry);
+            std::future::ready(Ok(resolved))
+        };
+        let EntryDecision::Select(entry) = live
+            .select_entry(&playlist, &HashSet::new(), &resolve)
+            .await
+            .unwrap()
+        else {
+            panic!("解析失败后应继续扫描下一条");
+        };
+        assert_eq!(entry["id"], "next");
+    }
+
+    #[tokio::test]
+    async fn rss_request_does_not_send_cookie_file() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = axum::Router::new().route(
+            "/",
+            axum::routing::get(|headers: axum::http::HeaderMap| async move {
+                assert!(!headers.contains_key("cookie"));
+                "<feed><entry><videoId>test</videoId><title>Test</title></entry></feed>"
+            }),
+        );
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let cookie_file = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            cookie_file.path(),
+            ".youtube.com\tTRUE\t/\tFALSE\t9999999999\tSID\ttest-cookie\n",
+        )
+        .unwrap();
+        let mut live = youtube_live(false, true, true);
+        live.url = format!("http://{addr}/");
+        live.cookie_file = Some(cookie_file.path().to_path_buf());
+
+        let playlist = live.fetch_rss_entries().await.unwrap().unwrap();
+        assert_eq!(playlist["entries"][0]["id"], "test");
+        server.abort();
     }
 }

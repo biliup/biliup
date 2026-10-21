@@ -7,7 +7,7 @@ license = "(MIT OR Apache-2.0) AND MIT"
 
 [dependencies]
 serde = { workspace = true }
-quick-xml = "0.37"
+quick-xml = { workspace = true }
 tempfile = "3.14"
 
 [dev-dependencies]
