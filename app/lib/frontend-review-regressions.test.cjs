@@ -75,3 +75,14 @@ test('postprocessor conversion rejects form actions with no server HookStep cont
   assert.deepEqual(JSON.parse(JSON.stringify(formToHookStep({ cmd: 'webhook', value: 'https://example.invalid/hook' }))), { webhook: 'https://example.invalid/hook' })
   assert.throws(() => formListToHookStep([{ cmd: 'run', value: 'echo ok' }, { cmd: 'unknown', value: 'x' }]), /不支持的后处理操作/)
 })
+
+test('fleet hook check matches RoomSpec::has_hooks for ffmpeg args', () => {
+  const { roomHasHooks } = loadTypeScript('use-fleet.ts', { './api-streamer': { API_BASE: '', handleResponse: () => {} } })
+  const room = { url: 'u', remark: 'r' }
+  assert.equal(roomHasHooks(room), false)
+  assert.equal(roomHasHooks({ ...room, postprocessor: ['rm', { mv: 'backup/' }] }), false)
+  assert.equal(roomHasHooks({ ...room, opt_args: [] }), false)
+  assert.equal(roomHasHooks({ ...room, opt_args: null }), false)
+  assert.equal(roomHasHooks({ ...room, opt_args: ['-ss', '00:00:16'] }), true)
+  assert.equal(roomHasHooks({ ...room, postprocessor: [{ run: 'echo' }] }), true)
+})

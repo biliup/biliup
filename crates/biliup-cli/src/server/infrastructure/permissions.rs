@@ -81,7 +81,8 @@ pub enum Permission {
     RecordingControl,
     #[serde(rename = "streamer.edit")]
     StreamerEdit,
-    /// 主播与全局配置里的 `*processor` 钩子和 `override`：钩子走 `sh -c`，等于服务器 shell
+    /// 主播与全局配置里的 `*processor` 钩子、`override` 和主播的 ffmpeg 参数（`opt_args`）：
+    /// 钩子走 `sh -c`，等于服务器 shell；ffmpeg 参数能让 ffmpeg 写任意文件
     #[serde(rename = "streamer.hooks")]
     StreamerHooks,
     #[serde(rename = "upload.submit")]

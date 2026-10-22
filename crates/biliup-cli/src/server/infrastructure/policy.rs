@@ -85,7 +85,8 @@ impl RouteRequirement {
 /// 路由之内按字段区分的数据：有权限的人原样读写，没有的人读到的是脱敏版、写不进去。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
-    /// 主播与全局配置里的 `*processor` 钩子和 `override`：钩子走 `sh -c`，等于服务器 shell
+    /// 主播与全局配置里的 `*processor` 钩子、`override` 和主播的 ffmpeg 参数（`opt_args`）：
+    /// 钩子走 `sh -c`，等于服务器 shell；ffmpeg 参数能让 ffmpeg 写任意文件
     StreamerHooks,
     /// 全局配置里白名单之外的字段（凭据、路径形式的凭据、钩子），见 `redact::config`
     ConfigSecrets,

@@ -237,6 +237,7 @@ impl FfmpegDownloader {
             .stderr(Stdio::piped())
             .kill_on_drop(true);
 
+        info!(cmd = %redact_process_debug(&cmd), "Starting ffmpeg download");
         let child = cmd.spawn().change_context(AppError::Unknown)?;
         callback(SegmentEvent::Start {
             next_file_path: PathBuf::from(&part_file),
@@ -541,6 +542,28 @@ mod tests {
             let progress_at = args.iter().position(|a| a == "-progress").unwrap();
             let input_at = args.iter().position(|a| a == "-i").unwrap();
             assert!(progress_at < input_at);
+        }
+    }
+
+    #[test]
+    fn extra_args_are_the_last_output_options_in_both_modes() {
+        // 排在 -c copy 和格式参数之后、调用方追加的输出文件名之前，作用于录制的输出文件
+        let extra = vec!["-metadata".to_string(), "comment=opt-args".to_string()];
+        for (mode, args) in [
+            (
+                DownloaderType::FfmpegExternal,
+                FfmpegDownloader::new(extra.clone(), DownloaderType::FfmpegExternal)
+                    .build_ffmpeg_args_external_segment(&config(None, None)),
+            ),
+            (
+                DownloaderType::FfmpegInternal,
+                FfmpegDownloader::new(extra.clone(), DownloaderType::FfmpegInternal)
+                    .build_ffmpeg_args_internal_segment(&config(None, None)),
+            ),
+        ] {
+            assert!(args.ends_with(&extra), "{mode:?}: {args:?}");
+            let copy_at = args.iter().position(|a| a == "-c").unwrap();
+            assert!(copy_at < args.len() - extra.len(), "{mode:?}: {args:?}");
         }
     }
 

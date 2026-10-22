@@ -92,6 +92,7 @@ pub const STREAMER_HOOK_KEYS: &[&str] = &[
     "segment_processor",
     "downloaded_processor",
     "postprocessor",
+    "opt_args",
 ];
 
 /// 自动切片的 API key 对所有人都只给掩码（包括有 `config.edit` 的人），保存时收到掩码保留原值，
@@ -235,10 +236,12 @@ mod tests {
             "remark": "a",
             "override": {"downloader": "ffmpeg"},
             "postprocessor": [{"run": "rclone copy"}],
+            "opt_args": ["-ss", "00:00:16"],
         });
         streamer_hooks(&mut streamer);
         assert_eq!(streamer["override"], Value::Null);
         assert_eq!(streamer["postprocessor"], Value::Null);
+        assert_eq!(streamer["opt_args"], Value::Null);
         assert_eq!(streamer["remark"], "a");
     }
 }

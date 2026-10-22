@@ -163,13 +163,15 @@ async fn fill_marker_counts(pool: &ConnectionPool, results: &mut [LiveStreamerRe
     }
 }
 
-/// 钩子走 `sh -c`、`override` 能覆盖任意全局配置，两者合起来等于服务器 shell，见 [`Field::StreamerHooks`]。
+/// 钩子走 `sh -c`、`override` 能覆盖任意全局配置、ffmpeg 参数能让 ffmpeg 写任意文件，
+/// 合起来等于服务器 shell，见 [`Field::StreamerHooks`]。
 fn strip_hooks(streamer: &mut LiveStreamer) {
     streamer.override_cfg = None;
     streamer.preprocessor = None;
     streamer.segment_processor = None;
     streamer.downloaded_processor = None;
     streamer.postprocessor = None;
+    streamer.opt_args = None;
 }
 
 pub async fn post_streamers_endpoint(
@@ -183,6 +185,7 @@ pub async fn post_streamers_endpoint(
         payload.segment_processor = None;
         payload.downloaded_processor = None;
         payload.postprocessor = None;
+        payload.opt_args = None;
     }
     validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
@@ -217,6 +220,7 @@ pub async fn put_streamers_endpoint(
         payload.segment_processor = current.segment_processor;
         payload.downloaded_processor = current.downloaded_processor;
         payload.postprocessor = current.postprocessor;
+        payload.opt_args = current.opt_args;
     }
     validate_streamer_mosaic(&payload.override_cfg)?;
     let mut streamer = update_streamer(&service_register, payload)
@@ -856,6 +860,138 @@ mod template_field_tests {
             assert_eq!(edit.cover_path.as_deref(), Some("/srv/new.jpg"));
             assert_eq!(edit.user_cookie.as_deref(), Some("/tmp/any.json"));
         }
+    }
+}
+
+#[cfg(test)]
+mod streamer_hook_tests {
+    use super::{get_streamers_endpoint, post_streamers_endpoint, put_streamers_endpoint};
+    use crate::server::api::access::Caller;
+    use crate::server::config::Config;
+    use crate::server::core::download_manager::DownloadManager;
+    use crate::server::infrastructure::connection_pool::ConnectionManager;
+    use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+    use crate::server::infrastructure::permissions::Role;
+    use crate::server::infrastructure::policy::Subject;
+    use crate::server::infrastructure::service_register::ServiceRegister;
+    use axum::Json;
+    use axum::extract::State;
+    use biliup::downloader::live::{LivePlugin, LiveRequest, LiveResult, LiveStatus};
+    use ormlite::Model;
+    use serde_json::json;
+    use std::sync::{Arc, RwLock};
+    use tracing_subscriber::{EnvFilter, reload};
+
+    /// 只认 `https://stuck.example/` 的平台；检测一直不返回，不会向任何真实平台发请求
+    struct StuckPlatform;
+
+    #[async_trait::async_trait]
+    impl LivePlugin for StuckPlatform {
+        fn name(&self) -> &'static str {
+            "stuck"
+        }
+
+        fn matches(&self, url: &str) -> bool {
+            url.starts_with("https://stuck.example/")
+        }
+
+        async fn check_stream(&self, _request: LiveRequest) -> LiveResult<LiveStatus> {
+            std::future::pending().await
+        }
+    }
+
+    fn operator() -> Caller {
+        let mut caller = Caller::unrestricted();
+        caller.subject = Subject::user(2, Role::Operator);
+        caller
+    }
+
+    #[tokio::test]
+    async fn operators_neither_see_nor_change_ffmpeg_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
+            .await
+            .unwrap();
+        let managers = DownloadManager::new(1, 1, pool.clone());
+        managers.add_plugin(Arc::new(StuckPlatform)).await;
+        let (_layer, log_handle) = reload::Layer::new(EnvFilter::new("info"));
+        let config = Arc::new(RwLock::new(Config::default()));
+        let services = ServiceRegister::new(pool.clone(), config, managers, log_handle).await;
+        let stored = |id: i64| {
+            let pool = pool.clone();
+            async move {
+                LiveStreamer::select()
+                    .where_("id = ?")
+                    .bind(id)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+                    .opt_args
+            }
+        };
+
+        // 新建：没有钩子权限的人带上的 ffmpeg 参数不落库
+        let body = json!({
+            "url": "https://stuck.example/1",
+            "remark": "r",
+            "opt_args": ["-f", "ffmetadata", "/tmp/x"],
+        });
+        let Json(created) = post_streamers_endpoint(
+            operator(),
+            State(services.clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(stored(created.id).await, None);
+
+        let admin_args = json!(["-metadata", "comment=admin"]);
+        let mut edit = created.clone();
+        edit.opt_args = Some(admin_args.clone());
+        let Json(saved) = put_streamers_endpoint(
+            Caller::unrestricted(),
+            State(services.clone()),
+            State(pool.clone()),
+            Json(edit),
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved.opt_args, Some(admin_args.clone()));
+        assert_eq!(stored(created.id).await, Some(admin_args.clone()));
+
+        // 列表里看不到
+        let list = |caller: Caller| {
+            let services = services.clone();
+            async move {
+                let Json(list) = get_streamers_endpoint(
+                    caller,
+                    State(services.pool),
+                    State(services.managers),
+                    State(services.config),
+                )
+                .await
+                .unwrap();
+                list[0].inner.opt_args.clone()
+            }
+        };
+        assert_eq!(list(operator()).await, None);
+        assert_eq!(list(Caller::unrestricted()).await, Some(admin_args.clone()));
+
+        // 整体覆盖保存：请求体里的 ffmpeg 参数不算数，以库里原值为准，回包里也不带
+        let mut edit = created.clone();
+        edit.remark = "改了备注".into();
+        edit.opt_args = Some(json!(["-f", "ffmetadata", "/tmp/x"]));
+        let Json(saved) = put_streamers_endpoint(
+            operator(),
+            State(services.clone()),
+            State(pool.clone()),
+            Json(edit),
+        )
+        .await
+        .unwrap();
+        assert_eq!(saved.remark, "改了备注");
+        assert_eq!(saved.opt_args, None);
+        assert_eq!(stored(created.id).await, Some(admin_args));
     }
 }
 

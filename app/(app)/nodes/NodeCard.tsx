@@ -174,7 +174,7 @@ export default function NodeCard({
         ) : null}
         {node.allow_hooks ? (
           <Tooltip
-            content={`${node.local ? '启用时勾选了「允许钩子」' : '加入时带了 --allow-hooks'}：处理器里带 run 命令（能执行任意命令）的房间可以派到这台机器；rm、mv 等文件操作不受这个限制`}
+            content={`${node.local ? '启用时勾选了「允许钩子」' : '加入时带了 --allow-hooks'}：处理器里带 run 命令（能执行任意命令）或设了 ffmpeg 参数（能写任意文件）的房间可以派到这台机器；rm、mv 等文件操作不受这个限制`}
           >
             <Tag size="small" color="red">
               允许钩子
