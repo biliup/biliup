@@ -45,7 +45,7 @@ function LocalNodeDialog({ onClose, onEnabled }: { onClose: () => void; onEnable
         允许钩子
       </Checkbox>
       <Text type="tertiary" size="small" className={styles.localHint}>
-        与 <code>biliup node join --allow-hooks</code> 相同：处理器里带 run 命令（能执行任意命令）的房间才能派到这台机器
+        与 <code>biliup node join --allow-hooks</code> 相同：处理器里带 run 命令（能执行任意命令）或设了 ffmpeg 参数（能写任意文件）的房间才能派到这台机器
       </Text>
     </FormDialog>
   )

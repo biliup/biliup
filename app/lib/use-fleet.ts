@@ -384,10 +384,11 @@ export function deleteTemplate(id: number) {
   return send<null>('DELETE', `${FLEET_TEMPLATES_KEY}/${id}`)
 }
 
-/** 与后端 `RoomSpec::has_hooks` 一致：处理器里有 `run` 步骤（rm、mv、remux 等文件操作和 override 都不算） */
+/** 与后端 `RoomSpec::has_hooks` 一致：处理器里有 `run` 步骤，或设了 ffmpeg 参数（rm、mv、remux 等文件操作和 override 都不算） */
 export function roomHasHooks(room: RoomSpec): boolean {
   const steps = [room.preprocessor, room.segment_processor, room.downloaded_processor, room.postprocessor]
   return steps.some((list) => (list ?? []).some((step) => typeof step === 'object' && step !== null && 'run' in step))
+    || (Array.isArray(room.opt_args) && room.opt_args.some((arg) => typeof arg === 'string'))
 }
 
 /** 节点的协议版本是否太旧、收不了房间（离线时不知道版本，不算） */
@@ -412,8 +413,8 @@ export function placementIssue(
   if (nodeOutdated(node)) return `${outdatedReason(node)}，请先升级 biliup`
   if (roomHasHooks(room) && !node.allow_hooks) {
     return node.local
-      ? '启用时没有勾选「允许钩子」，不能放带 run 命令的房间'
-      : '没带 --allow-hooks，不能放带 run 命令的房间'
+      ? '启用时没有勾选「允许钩子」，不能放带 run 命令或 ffmpeg 参数的房间'
+      : '没带 --allow-hooks，不能放带 run 命令或 ffmpeg 参数的房间'
   }
   if (template?.account_mid && !node.accounts.some((a) => a.mid === template.account_mid)) {
     return `没有登记模板要用的 B 站账号 ${template.account_mid}`

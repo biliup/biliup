@@ -48,10 +48,8 @@ pub(super) const SETTLE_MS: i64 = 3_000;
 /// 发出之后这么久还没两台落地（连接断了）就放开开录
 pub(super) const HOLD_MS: i64 = 60_000;
 
-const HOOKS_NODE: &str =
-    "带 run 命令（能执行任意命令）的主播不能从节点加入配对：在这台上去掉 run 步骤之后再加";
-const HOOKS_LOCAL: &str =
-    "「本机」节点启用时没有勾选「允许钩子」，带 run 命令（能执行任意命令）的主播不能加入配对";
+const HOOKS_NODE: &str = "带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的主播不能从节点加入配对：在这台上去掉 run 步骤和 ffmpeg 参数之后再加";
+const HOOKS_LOCAL: &str = "「本机」节点启用时没有勾选「允许钩子」，带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的主播不能加入配对";
 const MISSING: &str = "这台机器上没有这个本地行，或它已经在配对里";
 
 /// `pair-outbox.json` 里要加入配对的本地行（都是这台机器上的本地 id）

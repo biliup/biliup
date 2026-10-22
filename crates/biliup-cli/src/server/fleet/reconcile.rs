@@ -627,9 +627,9 @@ impl Reconciler {
             }
             if room.spec.has_hooks() && !self.allow_hooks {
                 let error = if self.local {
-                    "启用「本机」节点时没有勾选「允许钩子」，不接收带 run 命令（能执行任意命令）的房间"
+                    "启用「本机」节点时没有勾选「允许钩子」，不接收带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的房间"
                 } else {
-                    "这台节点加入时没有带 --allow-hooks，不接收带 run 命令（能执行任意命令）的房间"
+                    "这台节点加入时没有带 --allow-hooks，不接收带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的房间"
                 };
                 errors.insert(room.id, error.into());
                 continue;
@@ -1344,6 +1344,56 @@ mod tests {
             "{reason}"
         );
         assert!(!reason.contains("--allow-hooks"), "{reason}");
+        assert!(f.streamers().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn rooms_with_ffmpeg_args_need_allow_hooks() {
+        // ffmpeg 参数能让节点上的 ffmpeg 往任意路径写文件，与 run 命令一样要节点自己同意
+        let f = Fixture::new().await;
+        let mut hooked = room(1, "https://stuck.example/1", None);
+        hooked.spec.opt_args = Some(json!(["-f", "ffmetadata", "/tmp/elsewhere"]));
+        let mut reconciler = f.reconciler(false).await;
+        let ack = reconciler
+            .apply(desired(1, vec![hooked.clone()], vec![]))
+            .await;
+        assert_eq!(ack.failed.len(), 1);
+        let reason = &ack.failed[0].error;
+        assert!(reason.contains("--allow-hooks"), "{reason}");
+        assert!(reason.contains("ffmpeg 参数"), "{reason}");
+        assert!(f.streamers().await.is_empty());
+        drop(reconciler);
+
+        let mut reconciler = f.reconciler(true).await;
+        let ack = reconciler.apply(desired(2, vec![hooked], vec![])).await;
+        assert!(ack.failed.is_empty(), "{:?}", ack.failed);
+        assert_eq!(
+            f.streamers().await[0].opt_args,
+            Some(json!(["-f", "ffmetadata", "/tmp/elsewhere"]))
+        );
+    }
+
+    #[tokio::test]
+    async fn rooms_already_here_with_ffmpeg_args_are_released_without_allow_hooks() {
+        // 以前 ffmpeg 参数不算钩子，不允许钩子的节点也收下过这类房间（这里先用允许钩子的节点收下）；
+        // 现在同一份期望状态会被拒收：节点删掉托管的主播、停止录制，并上报原因
+        let f = Fixture::new().await;
+        let mut hooked = room(1, "https://stuck.example/1", None);
+        hooked.spec.opt_args = Some(json!(["-ss", "00:00:16"]));
+        let mut reconciler = f.reconciler(true).await;
+        let ack = reconciler
+            .apply(desired(1, vec![hooked.clone()], vec![]))
+            .await;
+        assert!(ack.failed.is_empty(), "{:?}", ack.failed);
+        assert_eq!(f.streamers().await.len(), 1);
+        drop(reconciler);
+
+        let mut reconciler = f.reconciler(false).await;
+        let ack = reconciler.apply(desired(1, vec![hooked], vec![])).await;
+        assert!(ack.held.is_empty());
+        assert_eq!(ack.failed.len(), 1);
+        let reason = &ack.failed[0].error;
+        assert!(reason.contains("ffmpeg 参数"), "{reason}");
         assert!(f.streamers().await.is_empty());
     }
 

@@ -168,6 +168,7 @@ pub fn strip_hooks(spec: &mut RoomSpec) {
     spec.segment_processor = None;
     spec.downloaded_processor = None;
     spec.postprocessor = None;
+    spec.opt_args = None;
 }
 
 pub fn check_room_spec(spec: &RoomSpec) -> Result<()> {
@@ -243,12 +244,12 @@ impl Controller {
         if spec.has_hooks() && !node.allow_hooks {
             return Err(DispatchError::Invalid(if self.is_local(node.id) {
                 format!(
-                    "节点「{}」启用时没有勾选「允许钩子」，不能分派带 run 命令（能执行任意命令）的房间",
+                    "节点「{}」启用时没有勾选「允许钩子」，不能分派带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的房间",
                     node.name
                 )
             } else {
                 format!(
-                    "节点「{}」加入时没有带 --allow-hooks，不能分派带 run 命令（能执行任意命令）的房间",
+                    "节点「{}」加入时没有带 --allow-hooks，不能分派带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件）的房间",
                     node.name
                 )
             }));
@@ -418,6 +419,7 @@ impl Controller {
             spec.segment_processor = current.spec.segment_processor.clone();
             spec.downloaded_processor = current.spec.downloaded_processor.clone();
             spec.postprocessor = current.spec.postprocessor.clone();
+            spec.opt_args = current.spec.opt_args.clone();
         }
         check_room_spec(&spec)?;
         let required_labels = request

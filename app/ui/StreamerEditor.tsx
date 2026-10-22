@@ -189,7 +189,7 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
                 )}
               </ArrayField>
 
-              <ArrayField field="opt_args">
+              {hooks ? <ArrayField field="opt_args">
                 {({ add, arrayFields }) => (
                   <Form.Section text="ffmpeg参数">
                     <div className="semi-form-field-extra">
@@ -219,6 +219,9 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
                   </Form.Section>
                 )}
               </ArrayField>
+                : <Form.Section text="ffmpeg参数">
+                  <p className={styles.help}>ffmpeg 参数仅超级管理员可配置，保存时保持原样。</p>
+                </Form.Section>}
       </div>
       <div hidden={selected !== 'upload'}>
         <Form.Select showClear field="upload_streamers_id" label={{ text: '投稿模板', optional: true }}

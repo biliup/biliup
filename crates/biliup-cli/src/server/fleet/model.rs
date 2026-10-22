@@ -6,6 +6,7 @@
 
 use crate::server::config::ConfigPatch;
 use crate::server::infrastructure::models::hook_step::HookStep;
+use crate::server::infrastructure::models::live_streamer::ffmpeg_args;
 use biliup::downloader::live::DouyuCookieInput;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -94,11 +95,11 @@ impl RoomSpec {
         self
     }
 
-    /// 是否带钩子：任何一个处理器里有 `run` 步骤。
+    /// 是否带钩子：任何一个处理器里有 `run` 步骤，或设了 ffmpeg 参数（`opt_args`）。
     ///
-    /// `run` 走 `sh -c`，下发它等于控制面能在节点上执行任意命令，所以只派给加入时带了
-    /// `--allow-hooks` 的节点（D12）。`rm`、`mv`、`remux` 是内置的文件操作，`override` 只改录制设置，
-    /// 都执行不了任意命令，不算钩子。
+    /// `run` 走 `sh -c`，下发它等于控制面能在节点上执行任意命令；ffmpeg 参数原样追加在 ffmpeg 的输出参数里，
+    /// 能让 ffmpeg 往任意路径多写一份输出。所以都只派给加入时带了 `--allow-hooks` 的节点（D12）。
+    /// `rm`、`mv`、`remux` 是内置的文件操作，`override` 只改录制设置，都执行不了任意命令，不算钩子。
     pub fn has_hooks(&self) -> bool {
         [
             &self.preprocessor,
@@ -113,7 +114,7 @@ impl RoomSpec {
                     .iter()
                     .any(|step| matches!(step, HookStep::Run { .. }))
             })
-        })
+        }) || !ffmpeg_args(self.opt_args.as_ref()).is_empty()
     }
 }
 
@@ -304,6 +305,21 @@ mod tests {
             room(serde_json::json!({ "url": "u", "remark": "r", "preprocessor": [{ "run": "echo" }] }))
                 .has_hooks()
         );
+    }
+
+    #[test]
+    fn ffmpeg_args_are_hooks() {
+        // 追加在 ffmpeg 输出参数里，能让 ffmpeg 往任意路径写文件
+        assert!(
+            room(serde_json::json!({ "url": "u", "remark": "r", "opt_args": ["-ss", "00:00:16"] }))
+                .has_hooks()
+        );
+        for empty in [serde_json::json!([]), serde_json::json!(null)] {
+            assert!(
+                !room(serde_json::json!({ "url": "u", "remark": "r", "opt_args": empty }))
+                    .has_hooks()
+            );
+        }
     }
 
     #[test]

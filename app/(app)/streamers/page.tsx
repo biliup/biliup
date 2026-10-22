@@ -114,7 +114,7 @@ export default function StreamersPage() {
   const pair = fleet?.pair
   const pairedIds = useMemo(() => new Set(pair?.streamers ?? []), [pair])
   const pairHint = pair
-    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来。run 命令与边录边传（sync-downloader）不随配对同步，请到控制面的「任务平台 › 节点管理 › 房间」设置，这里改了会被退回`
+    ? `在两台之间同步：这里的修改会同步到${pairPeer(pair)} ${fleet?.controller}，那边的修改也会同步过来。run 命令、ffmpeg 参数与边录边传（sync-downloader）不随配对同步，请到控制面的「任务平台 › 节点管理 › 房间」设置，这里改了会被退回`
     : undefined
   // 被控制面移除后转为本机自管并暂停、等确认恢复的直播间；手动恢复后标记立即消失
   const revokedIds = useMemo(() => new Set(me?.fleet_revoked?.streamers ?? []), [me?.fleet_revoked])

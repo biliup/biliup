@@ -468,7 +468,7 @@ pub struct LocalRow {
     /// 主播用的本地模板 id
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<i64>,
-    /// 主播带 run 命令的钩子
+    /// 主播带钩子（run 命令或 ffmpeg 参数），见 `RoomSpec::has_hooks`
     #[serde(default)]
     pub hooks: bool,
     /// 主播覆写里的下载器（控制面按自己的配置判断是不是边录边传）

@@ -249,7 +249,7 @@ pub enum NodeAction {
     Join {
         /// 以 bfleet 开头的加入票据
         ticket: String,
-        /// 允许控制面下发的房间使用钩子（各 *processor，等于允许在本机执行命令）
+        /// 允许控制面下发的房间使用钩子（各 *processor 与 ffmpeg 参数，等于允许在本机执行命令）
         #[arg(long)]
         allow_hooks: bool,
     },

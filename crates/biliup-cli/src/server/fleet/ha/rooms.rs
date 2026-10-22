@@ -585,11 +585,12 @@ fn hooks(spec: &RoomSpec) -> Value {
         spec.preprocessor,
         spec.segment_processor,
         spec.downloaded_processor,
-        spec.postprocessor
+        spec.postprocessor,
+        spec.opt_args
     ])
 }
 
-pub(super) const HOOKS: &str = "节点上改的房间带 run 命令（能执行任意命令），配对同步不接受；钩子请到控制面的「节点 › 房间」修改";
+pub(super) const HOOKS: &str = "节点上改的房间带 run 命令（能执行任意命令）或 ffmpeg 参数（能写任意文件），配对同步不接受；钩子请到控制面的「节点 › 房间」修改";
 pub(super) const SYNC_DOWNLOADER: &str = "边录边传（sync-downloader）的房间不纳入一主一备，两台同时录会出两份稿件；请到控制面的「节点 › 房间」设置";
 pub(super) const URL_TAKEN: &str = "这个直播间地址已经在控制面的房间列表里了";
 
