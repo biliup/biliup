@@ -244,28 +244,42 @@ async fn prepare_upload_audio(path: &Path) -> AppResult<()> {
     Ok(())
 }
 
-async fn update_processed_path(ctx: &Context, from: &Path, to: &Path) -> AppResult<()> {
+async fn update_processed_path(
+    ctx: &Context,
+    from: &Path,
+    to: &Path,
+    replaced: &[PathBuf],
+    danmaku: Option<&Path>,
+) -> AppResult<()> {
     use crate::server::workbench::{index, segment_path};
+    let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE.write().await;
     let from = segment_path(from).to_string_lossy().into_owned();
     let to_path = segment_path(to);
     let to = to_path.to_string_lossy().into_owned();
     let bytes = std::fs::metadata(&to_path).ok().map(|m| m.len() as i64);
-    sqlx::query("UPDATE segments SET path = ?, bytes = ?, index_path = NULL WHERE session_id = ? AND path = ?")
-        .bind(&to).bind(bytes).bind(ctx.id()).bind(&from).execute(ctx.pool()).await
+    let mut tx = ctx.pool().begin().await.change_context(AppError::Unknown)?;
+    crate::server::workbench::retention::record_processed_sources(&mut tx, &to_path, replaced)
+        .await
+        .change_context(AppError::Unknown)?;
+    sqlx::query("UPDATE segments SET path = ?, bytes = ?, index_path = NULL, danmaku_path = COALESCE(danmaku_path, ?) WHERE session_id = ? AND path = ?")
+        .bind(&to).bind(bytes)
+        .bind(danmaku.map(|path| segment_path(path).to_string_lossy().into_owned()))
+        .bind(ctx.id()).bind(&from).execute(&mut *tx).await
         .change_context(AppError::Unknown)?;
     sqlx::query("UPDATE filelist SET file = ? WHERE session_id = ? AND file = ?")
         .bind(&to)
         .bind(ctx.id())
         .bind(&from)
-        .execute(ctx.pool())
+        .execute(&mut *tx)
         .await
         .change_context(AppError::Unknown)?;
     // Protected segments are inserted here synchronously, after publication.
     // An async inspector insert could finish after this update and resurrect a
     // stale raw path in the file list.
     sqlx::query("INSERT INTO filelist (file, session_id) SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM filelist WHERE file = ? AND session_id = ?)")
-        .bind(&to).bind(ctx.id()).bind(&to).bind(ctx.id()).execute(ctx.pool()).await
+        .bind(&to).bind(ctx.id()).bind(&to).bind(ctx.id()).execute(&mut *tx).await
         .change_context(AppError::Unknown)?;
+    tx.commit().await.change_context(AppError::Unknown)?;
     // Transcoding changes byte offsets. Rebuild only after the recorder's
     // shared ready barrier settled; indexes from the original are removed.
     let refreshed = tokio::task::spawn_blocking(move || index::refresh(&to_path, true)).await;
@@ -384,12 +398,14 @@ where
         } else {
             None
         };
-        if let Err(error) =
-            process_video_paths_with_source(&mut paths, &steps, source.as_ref()).await
+        let replaced = match process_video_paths_with_source(&mut paths, &steps, source.as_ref()).await
         {
-            error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
-            continue;
-        }
+            Ok(replaced) => replaced,
+            Err(error) => {
+                error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
+                continue;
+            }
+        };
         if let Some(path) = paths.first() {
             event.prev_file_path = path.clone();
         }
@@ -403,7 +419,11 @@ where
             continue;
         }
         if original != event.prev_file_path {
-            if let Err(error) = update_processed_path(ctx, &original, &event.prev_file_path).await {
+            if let Err(error) = update_processed_path(
+                ctx, &original, &event.prev_file_path, &replaced,
+                event.danmaku_file_path.as_deref(),
+            ).await
+            {
                 error!(%error, "更新处理后的录像路径失败，本段停止投稿");
                 continue;
             }
@@ -1101,6 +1121,8 @@ pub async fn upload(
 mod tests {
     use super::*;
 
+    mod cleanup;
+
     fn observed_test_context(
         observations: Arc<crate::server::common::upload_observation::UploadObservations>,
     ) -> Context {
@@ -1292,7 +1314,7 @@ mod tests {
         let ctx = test_context(config);
         // The fixture needs only the persistence tables used by the processing
         // pipeline, avoiding a network/real uploader dependency in this test.
-        sqlx::raw_sql("CREATE TABLE segments (id INTEGER PRIMARY KEY, session_id INTEGER, path TEXT, bytes INTEGER, index_path TEXT, start_ms INTEGER NOT NULL DEFAULT 0, end_ms INTEGER DEFAULT 200, recorded_at_ms INTEGER); CREATE TABLE filelist (id INTEGER PRIMARY KEY, file TEXT, session_id INTEGER)")
+        sqlx::raw_sql("CREATE TABLE segments (id INTEGER PRIMARY KEY, session_id INTEGER, path TEXT, bytes INTEGER, index_path TEXT, danmaku_path TEXT, start_ms INTEGER NOT NULL DEFAULT 0, end_ms INTEGER DEFAULT 200, recorded_at_ms INTEGER); CREATE TABLE filelist (id INTEGER PRIMARY KEY, file TEXT, session_id INTEGER)")
             .execute(ctx.pool()).await.unwrap();
         sqlx::query("INSERT INTO segments (session_id, path) VALUES (1, ?)")
             .bind(raw.to_string_lossy().as_ref())

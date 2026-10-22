@@ -25,7 +25,7 @@ pub enum HookStep {
     /// 解决 B 站对 .ts 直传时常见的 "时间戳跳变" 转码失败。
     /// 用 ffmpeg `-c copy -fflags +genpts+igndts -bsf:a aac_adtstoasc -movflags +faststart`，
     /// 重新生成 PTS。仅当输入扩展名为 .ts/.m2ts 时生效；其它格式跳过。
-    /// 路径列表会被原地替换为新生成的 .mp4，原文件保留（postprocessor 中再 "rm"）。
+    /// 路径列表会被原地替换为新生成的 .mp4，原文件登记为成品的来源，随后由后处理 rm 一起清理。
     Remux { remux: String },
     /// Native masking and danmaku burn-in, sharing the manual export engine.
     Render {
@@ -73,7 +73,9 @@ impl HookStep {
                     .await?;
             }
             HookStep::Webhook { .. } => {
-                bail!(AppError::Custom("webhook 只支持上传结束后的结果回调".into()));
+                bail!(AppError::Custom(
+                    "webhook 只支持上传结束后的结果回调".into()
+                ));
             }
             HookStep::Render { .. } => {
                 bail!(AppError::Custom(
@@ -487,22 +489,33 @@ pub async fn process_video_paths(
     video_paths: &mut Vec<PathBuf>,
     processors: &[HookStep],
 ) -> AppResult<()> {
-    process_video_paths_with_source(video_paths, processors, None).await
+    process_video_paths_with_source(video_paths, processors, None)
+        .await
+        .map(|_| ())
 }
 
+/// Return the replaced inputs separately from the paths passed to upload and
+/// user hooks. The caller persists them as cleanup dependencies of the output.
 pub async fn process_video_paths_with_source(
     video_paths: &mut Vec<PathBuf>,
     processors: &[HookStep],
     source: Option<&crate::server::common::processing::model::RenderSource>,
-) -> AppResult<()> {
+) -> AppResult<Vec<PathBuf>> {
     info!("Starting video processing (path-mutating)...");
+    let mut replaced = Vec::new();
     for processor in processors {
+        let before = video_paths.clone();
         processor
             .execute_paths_with_source(video_paths, source)
             .await?;
+        for path in before {
+            if !video_paths.contains(&path) && !replaced.contains(&path) {
+                replaced.push(path);
+            }
+        }
     }
     info!("Video processing completed");
-    Ok(())
+    Ok(replaced)
 }
 
 #[cfg(test)]

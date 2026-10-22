@@ -32,6 +32,84 @@ const HOUR_MS: i64 = 3_600_000;
 /// retention changes. Pins cannot protect files selected by an earlier query.
 pub(crate) static MEDIA_LIFECYCLE: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// Persist native processing inputs in the same transaction as the segment's
+/// new path. Flatten earlier processing results so retries and multi-step
+/// chains keep their original inputs without changing user hook arguments.
+pub(crate) async fn record_processed_sources(
+    conn: &mut SqliteConnection,
+    output: &Path,
+    sources: &[PathBuf],
+) -> sqlx::Result<()> {
+    let output = path_string(output);
+    for source in sources {
+        // Masking has its own immediate disposal of quarantined raw footage.
+        if crate::server::common::processing::masking::is_unmasked(source) {
+            continue;
+        }
+        let source = path_string(source);
+        if source == output {
+            continue;
+        }
+        sqlx::query(
+            "INSERT OR IGNORE INTO processed_video_sources(output_path, source_path)
+             SELECT ?1, source_path FROM processed_video_sources
+             WHERE output_path = ?2 AND source_path != ?1",
+        )
+        .bind(&output)
+        .bind(&source)
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query(
+            "INSERT OR IGNORE INTO processed_video_sources(output_path, source_path) VALUES (?, ?)",
+        )
+        .bind(&output)
+        .bind(&source)
+        .execute(&mut *conn)
+        .await?;
+        sqlx::query("DELETE FROM processed_video_sources WHERE output_path = ?")
+            .bind(&source)
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Called only after the output passes retention/reference checks. Missing
+/// inputs are harmless (e.g. an interrupted previous cleanup); other failures
+/// preserve the ownership records so cleanup can be retried.
+async fn remove_processed_sources(pool: &ConnectionPool, output: &Path) -> io::Result<()> {
+    let output = path_string(output);
+    let sources: Vec<String> = sqlx::query_scalar(
+        "SELECT source_path FROM processed_video_sources WHERE output_path = ? ORDER BY source_path",
+    )
+    .bind(&output)
+    .fetch_all(pool)
+    .await
+    .map_err(io::Error::other)?;
+    for source in sources {
+        let shared: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM processed_video_sources WHERE source_path = ? AND output_path != ?)",
+        )
+        .bind(&source).bind(&output).fetch_one(pool).await.map_err(io::Error::other)?;
+        if shared {
+            continue;
+        }
+        info!(path = %source, "清理分段处理的原片或中间文件");
+        match tokio::fs::remove_file(&source).await {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        remove_index(Path::new(&source));
+    }
+    sqlx::query("DELETE FROM processed_video_sources WHERE output_path = ?")
+        .bind(&output)
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
+    Ok(())
+}
+
 /// 删除点要用到的上下文：数据库，以及删之前还要保留多久。
 #[derive(Debug, Clone)]
 pub struct Retention {
@@ -148,7 +226,20 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
             kept_danmaku.extend(danmaku);
             continue;
         }
-        delete_video(path).await?;
+        if let Err(error) = async {
+            remove_processed_sources(&retention.pool, path).await?;
+            delete_video(path).await
+        }
+        .await
+        {
+            // A locked source must not leave a successful upload permanently
+            // uncollected. Retry the whole group through the normal sweeper.
+            let danmaku = danmaku_in_batch(path, segment.danmaku_path.as_deref(), paths);
+            defer(&retention.pool, segment.id, 0, now, danmaku.as_deref())
+                .await
+                .map_err(io::Error::other)?;
+            return Err(error);
+        }
         if let Err(e) = set_deleted(&retention.pool, segment.id).await {
             warn!(path = %path.display(), error = %e, "分段已删除，但更新分段状态失败");
         }
@@ -162,6 +253,7 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
             outcome[i] = Some(Disposal::Deferred);
             continue;
         }
+        remove_processed_sources(&retention.pool, path).await?;
         delete_video(path).await?;
         outcome[i] = Some(Disposal::Untracked);
     }
@@ -261,19 +353,31 @@ async fn update_moved(
     to: &Path,
     index: Option<&PathBuf>,
 ) -> sqlx::Result<()> {
+    let mut tx = pool.begin().await?;
     sqlx::query(
         "UPDATE segments SET path = ?, index_path = ? WHERE path = ? AND state != 'deleted'",
     )
     .bind(path_string(to))
     .bind(index.map(|p| path_string(p)))
     .bind(path_string(from))
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
     sqlx::query("UPDATE segments SET danmaku_path = ? WHERE danmaku_path = ?")
         .bind(path_string(to))
         .bind(path_string(from))
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    sqlx::query("UPDATE processed_video_sources SET output_path = ? WHERE output_path = ?")
+        .bind(path_string(to))
+        .bind(path_string(from))
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE processed_video_sources SET source_path = ? WHERE source_path = ?")
+        .bind(path_string(to))
+        .bind(path_string(from))
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -385,8 +489,9 @@ struct Doomed {
 
 /// 删一个分段的文件：视频、关键帧索引、弹幕。视频本来就不在了也算删掉；其它错误（Windows 上
 /// 文件正被读取等）返回错误，留到下一轮。
-fn delete_segment_files(segment: &Doomed) -> io::Result<()> {
+async fn delete_segment_files(pool: &ConnectionPool, segment: &Doomed) -> io::Result<()> {
     let video = Path::new(&segment.path);
+    remove_processed_sources(pool, video).await?;
     match std::fs::remove_file(video) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -429,7 +534,7 @@ pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usiz
         if index::live::is_live(Path::new(&segment.path)) {
             continue;
         }
-        match delete_segment_files(segment) {
+        match delete_segment_files(pool, segment).await {
             Ok(()) => {
                 set_deleted(pool, segment.id).await?;
                 info!(path = segment.path, "保留期已过且没有引用，已删除分段");
@@ -513,7 +618,7 @@ where
             index_path: candidate.index_path.clone(),
             danmaku_path: candidate.danmaku_path.clone(),
         };
-        match delete_segment_files(&doomed) {
+        match delete_segment_files(pool, &doomed).await {
             Ok(()) => {
                 set_deleted(pool, candidate.id).await?;
                 warn!(

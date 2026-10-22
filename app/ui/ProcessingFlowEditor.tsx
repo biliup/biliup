@@ -25,7 +25,7 @@ export const isInnerNode = (node: FlowNode) => node === 'download' || node === '
 const COMMANDS: Record<string, { label: string; placeholder?: string; description: string }> = {
   run: { label: 'run（运行）', placeholder: 'echo hello!', description: '使用当前运行用户在 shell 执行命令，例如 echo hello!。' },
   mv: { label: 'mv（移动到）', placeholder: 'backup/', description: '移动文件到指定目录，例如 backup/。' },
-  rm: { label: 'rm（删除文件）', description: '删除文件，为默认操作。' },
+  rm: { label: 'rm（删除文件）', description: '删除本段视频、弹幕，以及压制或转封装留下的原片和中间文件；有保留期或剪辑引用时延后清理。' },
   remux: { label: 'remux（转封装）', placeholder: 'mp4', description: '将视频转封装为 MP4，保留原文件。' },
   render: { label: 'render（画面与弹幕）', description: '将弹幕烧录、遮挡等操作应用到视频。' },
   webhook: { label: 'webhook', placeholder: 'https://example.com/webhook', description: '上传结束后 POST 直播与投稿信息（stream_info）及异常（caught_error）。返回 success 后才执行文件后处理；回调失败则保留文件。' },

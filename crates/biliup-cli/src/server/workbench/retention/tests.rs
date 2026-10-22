@@ -11,6 +11,8 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use tempfile::TempDir;
 
+mod processed_sources;
+
 const HOUR: i64 = HOUR_MS;
 
 async fn setup() -> (TempDir, ConnectionPool) {
