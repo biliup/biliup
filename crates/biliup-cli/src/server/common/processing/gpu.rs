@@ -638,35 +638,43 @@ async fn intel_gpu_top_sample(
     let Some(mut stderr) = child.stderr.take() else {
         return Err("GPU 监测工具错误输出不可用".into());
     };
-    let stderr = tokio::spawn(async move { read_capped(&mut stderr).await });
     let result = timeout(limit, async {
-        let mut bytes = Vec::new();
-        let mut chunk = [0u8; 4096];
-        loop {
-            let read = stdout
-                .read(&mut chunk)
-                .await
-                .map_err(|e| format!("读取 GPU 监测输出失败：{e}"))?;
-            if read == 0 {
-                break;
-            }
-            bytes.extend_from_slice(&chunk[..read]);
-            if bytes.len() > MAX_COMMAND_BYTES {
-                return Err("GPU 监测工具输出超过 64 KiB 限制".into());
-            }
-            if let [_, .., last] = intel_gpu_top_samples(&bytes)[..] {
-                return serde_json::from_slice(last)
-                    .map_err(|e| format!("intel_gpu_top returned invalid JSON: {e}"));
-            }
+        let (sample, err) = tokio::try_join!(
+            async {
+                let mut bytes = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let read = stdout
+                        .read(&mut chunk)
+                        .await
+                        .map_err(|e| format!("读取 GPU 监测输出失败：{e}"))?;
+                    if read == 0 {
+                        return Ok(None);
+                    }
+                    bytes.extend_from_slice(&chunk[..read]);
+                    if bytes.len() > MAX_COMMAND_BYTES {
+                        return Err("GPU 监测工具输出超过 64 KiB 限制".into());
+                    }
+                    if let [_, .., last] = intel_gpu_top_samples(&bytes)[..] {
+                        let sample = serde_json::from_slice(last)
+                            .map_err(|e| format!("intel_gpu_top returned invalid JSON: {e}"))?;
+                        // Stop sampling so stderr reaches EOF, but drain it before
+                        // returning success to retain its size and I/O checks.
+                        let _ = child.kill().await;
+                        return Ok(Some(sample));
+                    }
+                }
+            },
+            read_capped(&mut stderr)
+        )?;
+        if let Some(sample) = sample {
+            return Ok(sample);
         }
         // stdout closed before a second sample, e.g. the PMU could not be opened.
         let status = child
             .wait()
             .await
             .map_err(|e| format!("等待 GPU 监测工具结束失败：{e}"))?;
-        let err = stderr
-            .await
-            .map_err(|e| format!("读取 GPU 监测输出失败：{e}"))??;
         Err(if status.success() {
             "intel_gpu_top 未输出完整的采样".into()
         } else {
