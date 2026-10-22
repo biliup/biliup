@@ -72,6 +72,28 @@ fn parses_intel_array_choosing_last_sample_and_exact_video_engine() {
 }
 
 #[test]
+fn splits_intel_gpu_top_stream_with_or_without_array_framing() {
+    let first = r#"{"period": {"duration": 0.01}, "engines": {"Video": {"busy": 0.0}}}"#;
+    let second = r#"{"engines": {"Video": {"busy": 37.5}}, "clients": {"7": {"name": "ffmpeg \"}{\"", "pid": "7"}}}"#;
+    for stream in [
+        // IGT 1.27 and older: bare objects, no array brackets.
+        format!("\n{first},\n{second}"),
+        // IGT 1.28 and newer: the `]` is only printed when the tool exits.
+        format!("[\n{first},\n{second}"),
+        format!("[\n{first},\n{second}\n]\n"),
+        // A third sample cut off mid-write.
+        format!("[\n{first},\n{second},\n{{\n\t\"period\": {{"),
+    ] {
+        let samples = intel_gpu_top_samples(stream.as_bytes());
+        assert_eq!(samples.len(), 2, "{stream}");
+        let last: serde_json::Value = serde_json::from_slice(samples[1]).unwrap();
+        assert_eq!(parse_intel_metrics(&last).video, Some(37.5));
+    }
+    let partial = format!("[\n{first},\n{{\"engines\": {{\"Video\": ");
+    assert_eq!(intel_gpu_top_samples(partial.as_bytes()).len(), 1);
+}
+
+#[test]
 fn intel_engine_fixture_keeps_video_instances_separate_and_ignores_similar_names() {
     let metrics = parse_intel_metrics(&serde_json::json!({"engines": {
         "Video/0": {"busy": 12.5},
@@ -312,6 +334,99 @@ async fn oversized_stderr_is_rejected_before_waiting_for_stdout_eof() {
         "rejection took {:?}",
         started.elapsed()
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn intel_gpu_top_before_igt_2_3_is_stopped_after_two_samples() {
+    use std::os::unix::fs::PermissionsExt;
+    // Like IGT 2.0 in Debian 13, the Docker image base: getopt rejects `-n`,
+    // and samples stream inside a `[` that stays open until the tool is killed.
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("intel_gpu_top");
+    std::fs::write(
+        &fake,
+        r#"#!/bin/sh
+for arg; do
+    if [ "$arg" = -n ]; then
+        echo "intel_gpu_top: invalid option -- 'n'" >&2
+        echo 'Invalid option n!' >&2
+        exit 1
+    fi
+done
+echo $$ > "${0%/*}/pid"
+printf '[\n{"engines": {"Video": {"busy": 0.0}}},\n{"engines": {"Video": {"busy": 37.5}}}'
+exec sleep 5
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let started = Instant::now();
+    let metrics = intel_gpu_top_at(&fake, Some("/dev/dri/renderD128"))
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "sampling took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(metrics.video, Some(37.5));
+    let pid = std::fs::read_to_string(dir.path().join("pid")).unwrap();
+    let running = std::process::Command::new("kill")
+        .args(["-0", pid.trim()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!running, "intel_gpu_top must be killed and reaped");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn intel_gpu_top_sample_failures_stay_bounded() {
+    let sh = |script: &str| {
+        let mut command = Command::new("sh");
+        command.args(["-c", script]);
+        command
+    };
+    // Only the start-up sample arrives before the tool stalls.
+    let error = intel_gpu_top_sample(
+        sh(r#"printf '[\n{"engines": {}}'; exec sleep 5"#),
+        Duration::from_millis(100),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("超时"), "{error}");
+
+    let error = intel_gpu_top_sample(
+        sh("echo 'Failed to initialize PMU! (Permission denied)' >&2; exit 1"),
+        Duration::from_secs(2),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        error,
+        "GPU 监测工具失败：Failed to initialize PMU! (Permission denied)"
+    );
+
+    let error = intel_gpu_top_sample(
+        sh(r#"printf '[\n{"engines": {}}\n]\n'"#),
+        Duration::from_secs(2),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("未输出完整的采样"), "{error}");
+
+    let started = Instant::now();
+    let error = intel_gpu_top_sample(
+        sh(r#"printf '{"engines": "'; yes x | head -c 65537; exec sleep 5"#),
+        Duration::from_secs(2),
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("超过 64 KiB"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[tokio::test]
