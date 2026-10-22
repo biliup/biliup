@@ -602,15 +602,125 @@ struct IntelMetrics {
 }
 
 async fn intel_gpu_top(render_node: Option<&str>) -> Result<IntelMetrics, String> {
-    let mut cmd = crate::tools::command("intel_gpu_top");
-    cmd.args(["-J", "-s", "250", "-n", "2", "-o", "-"]);
+    intel_gpu_top_at(Path::new("intel_gpu_top"), render_node).await
+}
+
+async fn intel_gpu_top_at(
+    program: &Path,
+    render_node: Option<&str>,
+) -> Result<IntelMetrics, String> {
+    let mut cmd = crate::tools::command(program);
+    // `-n` only exists since IGT 2.3; Debian 12/13 and Ubuntu 24.04 ship older
+    // releases that reject it. Without it the tool samples until it is stopped.
+    cmd.args(["-J", "-s", "250", "-o", "-"]);
     if let Some(node) = render_node {
         cmd.args(["-d", &format!("drm:{node}")]);
     }
-    let bytes = bounded_command_output(cmd, COMMAND_TIMEOUT).await?;
-    let value: serde_json::Value = serde_json::from_slice(&bytes)
-        .map_err(|e| format!("intel_gpu_top returned invalid JSON: {e}"))?;
+    let value = intel_gpu_top_sample(cmd, COMMAND_TIMEOUT).await?;
     Ok(parse_intel_metrics(&value))
+}
+
+/// Read samples until two are complete, then stop the tool. The first sample
+/// only covers start-up, so the last complete one is returned.
+async fn intel_gpu_top_sample(
+    mut cmd: Command,
+    limit: Duration,
+) -> Result<serde_json::Value, String> {
+    cmd.stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("GPU 监测工具不可用：{e}"))?;
+    let Some(mut stdout) = child.stdout.take() else {
+        return Err("GPU 监测工具没有输出".into());
+    };
+    let Some(mut stderr) = child.stderr.take() else {
+        return Err("GPU 监测工具错误输出不可用".into());
+    };
+    let result = timeout(limit, async {
+        let (sample, err) = tokio::try_join!(
+            async {
+                let mut bytes = Vec::new();
+                let mut chunk = [0u8; 4096];
+                loop {
+                    let read = stdout
+                        .read(&mut chunk)
+                        .await
+                        .map_err(|e| format!("读取 GPU 监测输出失败：{e}"))?;
+                    if read == 0 {
+                        return Ok(None);
+                    }
+                    bytes.extend_from_slice(&chunk[..read]);
+                    if bytes.len() > MAX_COMMAND_BYTES {
+                        return Err("GPU 监测工具输出超过 64 KiB 限制".into());
+                    }
+                    if let [_, .., last] = intel_gpu_top_samples(&bytes)[..] {
+                        let sample = serde_json::from_slice(last)
+                            .map_err(|e| format!("intel_gpu_top returned invalid JSON: {e}"))?;
+                        // Stop sampling so stderr reaches EOF, but drain it before
+                        // returning success to retain its size and I/O checks.
+                        let _ = child.kill().await;
+                        return Ok(Some(sample));
+                    }
+                }
+            },
+            read_capped(&mut stderr)
+        )?;
+        if let Some(sample) = sample {
+            return Ok(sample);
+        }
+        // stdout closed before a second sample, e.g. the PMU could not be opened.
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("等待 GPU 监测工具结束失败：{e}"))?;
+        Err(if status.success() {
+            "intel_gpu_top 未输出完整的采样".into()
+        } else {
+            exit_error(status, &err)
+        })
+    })
+    .await;
+    let _ = child.kill().await;
+    result.unwrap_or_else(|_| Err("GPU 监测工具超时".into()))
+}
+
+/// Complete top-level objects in `intel_gpu_top -J` output. IGT 1.28+ only
+/// closes its `[` array when it exits and older releases print bare
+/// comma-separated objects, so the stream is not a valid JSON document.
+fn intel_gpu_top_samples(bytes: &[u8]) -> Vec<&[u8]> {
+    let mut samples = Vec::new();
+    let (mut depth, mut start) = (0usize, 0);
+    let (mut in_string, mut escaped) = (false, false);
+    for (index, &byte) in bytes.iter().enumerate() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => {
+                if depth == 0 {
+                    start = index;
+                }
+                depth += 1;
+            }
+            b'}' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    samples.push(&bytes[start..=index]);
+                }
+            }
+            _ => {}
+        }
+    }
+    samples
 }
 
 async fn bounded_command_output(mut cmd: Command, limit: Duration) -> Result<Vec<u8>, String> {
@@ -633,16 +743,7 @@ async fn bounded_command_output(mut cmd: Command, limit: Duration) -> Result<Vec
             .await
             .map_err(|e| format!("等待 GPU 监测工具结束失败：{e}"))?;
         if !status.success() {
-            let detail = String::from_utf8_lossy(&err)
-                .trim()
-                .chars()
-                .take(500)
-                .collect::<String>();
-            return Err(if detail.is_empty() {
-                format!("GPU 监测工具退出状态：{status}")
-            } else {
-                format!("GPU 监测工具失败：{detail}")
-            });
+            return Err(exit_error(status, &err));
         }
         Ok(out)
     })
@@ -659,6 +760,19 @@ async fn bounded_command_output(mut cmd: Command, limit: Duration) -> Result<Vec
             let _ = child.wait().await;
             Err("GPU 监测工具超时".into())
         }
+    }
+}
+
+fn exit_error(status: std::process::ExitStatus, stderr: &[u8]) -> String {
+    let detail = String::from_utf8_lossy(stderr)
+        .trim()
+        .chars()
+        .take(500)
+        .collect::<String>();
+    if detail.is_empty() {
+        format!("GPU 监测工具退出状态：{status}")
+    } else {
+        format!("GPU 监测工具失败：{detail}")
     }
 }
 

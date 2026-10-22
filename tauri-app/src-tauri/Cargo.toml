@@ -1,6 +1,6 @@
 [package]
 name = "biliup-desktop"
-version = "1.3.3"
+version = "1.3.4"
 description = "biliup desktop app"
 edition = "2021"
 
