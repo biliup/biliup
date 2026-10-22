@@ -79,3 +79,37 @@ pub struct InsertLiveStreamer {
     pub opt_args: Option<Value>,
     pub excluded_keywords: Option<Value>,
 }
+
+/// 房间「ffmpeg参数」（`opt_args`）里要追加到 ffmpeg 输出参数的部分。
+///
+/// 库里存的是 JSON，界面和配置文件写进来的都是字符串数组；只取其中的字符串，
+/// 其它形状（`null`、对象、数字……）当作没填。
+pub fn ffmpeg_args(opt_args: Option<&Value>) -> Vec<String> {
+    opt_args
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn ffmpeg_args_keep_the_strings_of_a_string_array() {
+        let args = |value: Value| ffmpeg_args(Some(&value));
+        assert_eq!(args(json!(["-ss", "00:00:16"])), ["-ss", "00:00:16"]);
+        assert_eq!(
+            args(json!(["-ss", null, 16, "00:00:16"])),
+            ["-ss", "00:00:16"]
+        );
+        for empty in [json!([]), json!(null), json!("-ss"), json!({ "-ss": "16" })] {
+            assert!(args(empty.clone()).is_empty(), "{empty}");
+        }
+        assert!(ffmpeg_args(None).is_empty());
+    }
+}

@@ -193,7 +193,8 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
                 {({ add, arrayFields }) => (
                   <Form.Section text="ffmpeg参数">
                     <div className="semi-form-field-extra">
-                      如：&quot;-ss&quot;、&quot;00:00:16&quot;，每个参数需单独一行
+                      如：&quot;-ss&quot;、&quot;00:00:16&quot;，每个参数需单独一行<br />
+                      追加在 ffmpeg 的输出参数里（输出文件名之前），只在用 ffmpeg 录制时生效
                     </div>
                     <Button icon={<IconPlusCircle />} onClick={() => add()} theme="light">
                       添加行

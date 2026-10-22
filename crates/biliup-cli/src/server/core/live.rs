@@ -423,4 +423,57 @@ mod tests {
         let runtime = downloader_runtime(None, &stream(DownloaderHint::Ffmpeg), None);
         assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
     }
+
+    #[test]
+    fn room_ffmpeg_args_reach_every_ffmpeg_runtime() {
+        // #1559：房间的「ffmpeg参数」（opt_args）要追加到 ffmpeg 命令行里，
+        // 显式选 ffmpeg、插件默认 ffmpeg、要求 MP4 时改用 ffmpeg 都一样
+        let args = vec!["-metadata".to_string(), "comment=opt-args".to_string()];
+        for (config_type, hint, format) in [
+            (
+                Some(DownloaderType::Ffmpeg),
+                DownloaderHint::StreamGears,
+                None,
+            ),
+            (
+                Some(DownloaderType::FfmpegExternal),
+                DownloaderHint::StreamGears,
+                None,
+            ),
+            (
+                Some(DownloaderType::FfmpegInternal),
+                DownloaderHint::StreamGears,
+                None,
+            ),
+            (None, DownloaderHint::Ffmpeg, None),
+            (None, DownloaderHint::StreamGears, Some("mp4")),
+        ] {
+            let runtime = downloader_runtime(config_type, &stream(hint), format)
+                .with_ffmpeg_args(args.clone());
+            let DownloaderRuntime::Ffmpeg(ffmpeg) = runtime else {
+                panic!("{config_type:?} 应构造 ffmpeg 下载器");
+            };
+            assert_eq!(ffmpeg.extra_args, args, "{config_type:?} {format:?}");
+        }
+    }
+
+    #[test]
+    fn room_ffmpeg_args_do_not_change_other_downloaders() {
+        let args = vec!["-ss".to_string(), "00:00:16".to_string()];
+        let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears), None)
+            .with_ffmpeg_args(args.clone());
+        assert!(matches!(runtime, DownloaderRuntime::Mesio(_)));
+        // Twitch 指定 ffmpeg 实际走 streamlink，没有 ffmpeg 命令行可加
+        let mut twitch = stream(DownloaderHint::Ffmpeg);
+        twitch.runtime_options = Some(RuntimeOptions::Streamlink(StreamlinkOptions {
+            url: None,
+            platform: StreamlinkPlatform::Twitch {
+                disable_ads: true,
+                auth_token: None,
+            },
+        }));
+        let runtime =
+            downloader_runtime(Some(DownloaderType::Ffmpeg), &twitch, None).with_ffmpeg_args(args);
+        assert!(matches!(runtime, DownloaderRuntime::StreamLink(_)));
+    }
 }

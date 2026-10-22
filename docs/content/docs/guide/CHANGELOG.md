@@ -38,6 +38,7 @@ top = false
 - 🔧斗鱼 CDN 切换时录制不再中断：时间戳归 0（`Non-monotonous DTS ... previous: 4877, current: 0`）按音频、视频轨道分别平移接上，不再因音视频交错把时间轴越拉越长；切换瞬间的空 tag / 残缺 tag 跳过，重发的 FLV 文件头跳过，连接在 tag 中间断开按正常断流结束。一个有效 tag 都还没读到时仍按原样报错。
 - 🔧HLS 清单出现媒体序号跳号时自动切段，避免同一文件内时间戳跳变。
 - 🔧抖音弹幕 PushFrame、gzip、Response 解码失败改为显式错误；损坏的聊天消息跳过并告警，重复解码错误限频告警。
+- ⚠️主播的「ffmpeg参数」（`opt_args`）重新生效：用 ffmpeg 录制时和 1.0.7 一样作为输出参数传给 ffmpeg（加在输出文件名之前）；其它下载插件不使用，只在日志里提示。以前填过、一直没起作用的参数升级后会开始生效，请检查。
 
 ## 1.2.1
 **Full Changelog**:[v1.2.0...v1.2.1](https://github.com/biliup/biliup/compare/v1.2.0...v1.2.1)

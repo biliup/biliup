@@ -15,6 +15,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::server::fleet::ha::UnitOutput;
 use crate::server::infrastructure::context::{Context, Stage};
 use crate::server::infrastructure::models::hook_step::process;
+use crate::server::infrastructure::models::live_streamer::ffmpeg_args;
 use crate::server::workbench::index;
 use crate::server::workbench::recorder::{
     ClosedSegment, RecorderHandle, SessionRecorder, SessionTarget,
@@ -937,6 +938,16 @@ fn retry_delay(retry_count: u32, base_delay: Duration, max_delay: Duration) -> D
     }
 }
 
+/// 按房间配置构造这一场录制用的下载器：下载插件、录制格式，以及只对 ffmpeg 生效的「ffmpeg参数」。
+fn room_downloader_runtime(ctx: &Context) -> DownloaderRuntime {
+    downloader_runtime(
+        ctx.config().downloader,
+        ctx.live_stream(),
+        ctx.live_streamer().format.as_deref(),
+    )
+    .with_ffmpeg_args(ffmpeg_args(ctx.live_streamer().opt_args.as_ref()))
+}
+
 /// 启动完整下载流程。
 ///
 /// 只能由 `Monitor` 在取得下载池槽位后调用；调用方必须把槽位移动到同一个任务中，
@@ -950,11 +961,7 @@ pub async fn start_download_workflow(
     resumed_session: bool,
 ) {
     let task = Arc::new(DownloadTask::new(
-        downloader_runtime(
-            ctx.config().downloader,
-            ctx.live_stream(),
-            ctx.live_streamer().format.as_deref(),
-        ),
+        room_downloader_runtime(&ctx),
         ctx.live_stream(),
     ));
     if !ctx.worker().start_download(task.clone(), &monitor_changes) {
@@ -1155,6 +1162,68 @@ mod tests {
             .map(|segment| segment.prev_file_path)
             .collect();
         assert_eq!(queued, recorded, "每个录好的分段都要交给投稿流程");
+    }
+
+    /// #1559：开始录制时按房间构造的 ffmpeg 下载器要带上房间的「ffmpeg参数」（opt_args）
+    #[tokio::test]
+    async fn recording_with_ffmpeg_uses_the_rooms_ffmpeg_args() {
+        use crate::server::config::Config;
+        use crate::server::core::downloader::DownloaderType;
+        use crate::server::infrastructure::connection_pool::ConnectionManager;
+        use crate::server::infrastructure::context::Worker;
+        use crate::server::infrastructure::models::live_streamer::LiveStreamer;
+        use biliup::downloader::live::DownloaderHint;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("data.sqlite3");
+        let pool = ConnectionManager::new_pool(db.to_str().unwrap())
+            .await
+            .unwrap();
+        let mut config = Config::default();
+        config.downloader = Some(DownloaderType::Ffmpeg);
+        let streamer = LiveStreamer {
+            id: 1,
+            url: "https://args.example/1".to_string(),
+            remark: "args".to_string(),
+            filename_prefix: None,
+            time_range: None,
+            upload_streamers_id: None,
+            format: None,
+            override_cfg: None,
+            preprocessor: None,
+            segment_processor: None,
+            downloaded_processor: None,
+            postprocessor: None,
+            opt_args: Some(serde_json::json!(["-metadata", "comment=opt-args"])),
+            excluded_keywords: None,
+        };
+        let worker = Arc::new(Worker::new(
+            streamer,
+            None,
+            Arc::new(std::sync::RwLock::new(config)),
+            Default::default(),
+        ));
+        let stream = LiveStream {
+            name: "args".into(),
+            url: "https://args.example/1".into(),
+            title: "t".into(),
+            date: chrono::Utc::now(),
+            live_cover_url: String::new(),
+            avatar_url: None,
+            raw_stream_url: "http://127.0.0.1:9/x.flv".into(),
+            platform: "args".into(),
+            stream_headers: Default::default(),
+            suffix: "flv".into(),
+            danmaku: None,
+            downloader_hint: DownloaderHint::StreamGears,
+            runtime_options: None,
+        };
+        let ctx = Context::new(1, worker, pool, stream);
+
+        let DownloaderRuntime::Ffmpeg(ffmpeg) = room_downloader_runtime(&ctx) else {
+            panic!("下载插件选了 ffmpeg，应构造 ffmpeg 下载器");
+        };
+        assert_eq!(ffmpeg.extra_args, ["-metadata", "comment=opt-args"]);
     }
 
     /// 跑真实的 `DownloadTask::execute`：mesio 拉一个本地必然 404 的直链（首连即失败、不落盘），
