@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="x-ua-compatible" content="ie=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-regular.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-700.woff2"  type="font/woff2" crossorigin>
+
+
+<link rel="stylesheet" href="/biliup/main.css">
+
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+  
+  
+    
+  
+  
+  
+  
+    
+  
+  
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>斗鱼登录、Cookie 续期与画质设置 | Biliup</title>
+<meta name="description" content="配置斗鱼网页版登录凭据和自动续期，检查房间登录来源与实际录制画质">
+<link rel="canonical" href="/biliup/docs/tutorials/douyu-cookie-guide/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="/biliup/doks.png">
+  
+  <meta name="twitter:title" content="斗鱼登录、Cookie 续期与画质设置">
+  <meta name="twitter:description" content="配置斗鱼网页版登录凭据和自动续期，检查房间登录来源与实际录制画质">
+  <meta name="twitter:site" content="@aaranxu">
+  <meta name="twitter:creator" content="@aaranxu">
+  
+  <meta property="og:title" content="斗鱼登录、Cookie 续期与画质设置">
+  <meta property="og:description" content="配置斗鱼网页版登录凭据和自动续期，检查房间登录来源与实际录制画质">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="/biliup/docs/tutorials/douyu-cookie-guide/">
+
+  
+    <meta property="og:image" content="/biliup/doks.png">
+  
+
+  <meta property="og:updated_time" content="2026-10-09T00:00:00+00:00">
+  <meta property="og:site_name" content="斗鱼登录、Cookie 续期与画质设置">
+
+  
+
+  
+
+  
+  <meta property="article:publisher" content="https://www.facebook.com/ichunyun">
+  <meta property="article:author" content="https://www.facebook.com/ichunyun">
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "/biliup:///biliup/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Docs",
+            "item": "/biliup:///biliup/docs/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Tutorials",
+            "item": "/biliup:///biliup/docs/tutorials/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Douyu Cookie Guide",
+            "item": "/biliup:///biliup/docs/tutorials/douyu-cookie-guide/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+
+
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="/biliup/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/biliup/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/biliup/favicon-16x16.png">
+  
+    <link rel="manifest" href="/biliup/site.webmanifest" crossorigin>
+  
+
+
+  
+
+</head>
+
+  
+
+<body class="docs single">
+  
+  
+  
+  
+<div class="header-bar fixed-top"></div>
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+	<div class="container">
+		<input class="menu-btn order-0" type="checkbox" id="menu-btn">
+		<label class="menu-icon d-md-none" for="menu-btn"><span class="navicon"></span></label>
+		<a class="navbar-brand order-1 order-md-0 me-auto" href="/biliup">Biliup</a>
+		<button id="mode" class="btn btn-link order-2 order-md-4" type="button" aria-label="Toggle mode">
+			<span class="toggle-dark"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span>
+			<span class="toggle-light"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-sun"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span>
+		</button>
+		<ul class="navbar-nav fork-me order-3 order-md-5">
+			
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://biliup.github.io/"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-twitter"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path></svg><span class="ms-2 visually-hidden">Twitter</span></a>
+					</li>
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://github.com/biliup/biliup"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-github"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg><span class="ms-2 visually-hidden">GitHub</span></a>
+					</li>
+				
+			
+		</ul>
+		<div class="collapse navbar-collapse order-4 order-md-1">
+			<ul class="navbar-nav main-nav me-auto order-5 order-md-2">
+				
+					
+				
+				
+				
+					
+						<li class="nav-item docs active">
+							<a class="nav-link" href="/biliup/docs/getting-started/introduction/">Docs</a>
+						</li>
+					
+						<li class="nav-item">
+							<a class="nav-link" href="/biliup/blog/">Blog</a>
+						</li>
+					
+				
+			</ul>
+			<div class="break order-6 d-md-none"></div>
+			
+				<form class="navbar-form flex-grow-1 order-7 order-md-3">
+					<input id="userinput" class="form-control is-search" type="search" placeholder="Search docs..."
+						aria-label="Search docs..." autocomplete="off">
+					<div id="suggestions" class="shadow bg-white rounded"></div>
+				</form>
+			
+		</div>
+	</div>
+</header>
+
+
+
+  
+<div class="wrap container" role="document">
+  <div class="content">
+    <div class="row flex-xl-nowrap">
+	  
+<div class="col-lg-5 col-xl-4 docs-sidebar">
+	<nav class="docs-links" aria-label="Main navigation">
+			
+			
+			
+			
+					
+					
+					
+							<h3>Getting Started</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/introduction/">Introduction</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/changelog/">更新日志</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>使用指南</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/introduction/">说明</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/quick-start/">Quick Start</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Contributing</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/how-to-contribute/">How to Contribute</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Help</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/help/faq/">FAQ</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>教程</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link active" href="/biliup/docs/tutorials/douyu-cookie-guide/">斗鱼登录、Cookie 续期与画质设置</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/recording-and-masking/">录制分段、画面遮挡与本地合并</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/post-recording-render/">录后弹幕合成</a></li>
+							
+					</ul>
+					
+					
+			
+	</nav>
+</div>
+
+	  
+  
+  <nav class="docs-toc d-none d-xl-block col-xl-3" aria-label="Secondary navigation">
+  	<div class="page-links">
+  			<h3>On this page</h3>
+  			<nav id="TableOfContents">
+  					<ul>
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#huo-qu-bing-bao-cun-deng-lu-ping-ju">获取并保存登录凭据</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#web-cookie">Web Cookie</a></li>
+  											
+  											<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#chang-qi-ping-ju-yu-zi-dong-xu-qi">长期凭据与自动续期</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#cha-kan-deng-lu-zhuang-tai-he-shou-dong-xu-qi">查看登录状态和手动续期</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#zi-dong-diao-du-chi-jiu-hua-yu-zhong-qi">自动调度、持久化与重启</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#fang-jian-ji-cheng-yu-du-li-zhang-hao">房间继承与独立账号</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#he-dui-shi-ji-lu-zhi-hua-zhi">核对实际录制画质</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#avc-yu-hevc">AVC 与 HEVC</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#kai-fa-zhe-yan-zheng">开发者验证</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#ping-ju-bao-guan-yu-duo-jie-dian-bu-shu">凭据保管与多节点部署</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/douyu-cookie-guide/#shi-xian-can-kao">实现参考</a></li>
+  							
+  							
+  					</ul>
+  			</nav>
+  	</div>
+  </nav>
+  
+
+      <main class="docs-content col-lg-11 col-xl-9">
+        <h1>斗鱼登录、Cookie 续期与画质设置</h1>
+        <p class="lead">配置斗鱼 Web Cookie 与 passport 长期凭据，让 biliup 自动续期登录，并核对房间使用的账号和实际录制画质。</p>
+        <p>biliup 使用斗鱼网页版的签名和播放接口取流。将 <code>douyu_rate</code> 设为 <code>0</code> 表示请求最高画质，实际档位由平台返回；部分房间会将匿名请求降到较低档位。配置有效的网页版登录 Cookie 后，可获取账号有权观看的画质。</p>
+<p>“原画”是平台的档位名称，不能统一等同于 1080P、60fps 或固定码率。不同房间的分辨率、帧率和档位编号可能不同。Cookie 也不能保证连接永不中断。</p>
+<h2 id="huo-qu-bing-bao-cun-deng-lu-ping-ju">获取并保存登录凭据</h2>
+<p>在本机 GUI 的 <strong>空间配置 → 平台设置 → 斗鱼</strong> 中管理登录。只有 Web Cookie 时可以登录取流；同时提供 <code>passport.douyu.com</code> 的长期凭据 <code>LTP0</code> 和配套 <code>dy_did</code>，才能自动更新 <code>acf_auth</code> 等登录 Cookie。三个部分必须来自<strong>同一账号、同一次浏览器登录</strong>。</p>
+<h3 id="web-cookie">Web Cookie</h3>
+<ol>
+<li>在浏览器打开 <a href="https://www.douyu.com/">斗鱼</a> 并登录。</li>
+<li>打开开发者工具的 <strong>Network（网络）</strong> 面板，刷新直播间。</li>
+<li>选择发送到 <code>www.douyu.com</code> 的请求，在 <strong>Request Headers（请求头）</strong> 中复制 <code>Cookie</code> 的值。</li>
+<li>将内容粘贴到 biliup 的 <strong>登录 Cookie（douyu_cookie）</strong>，保存配置。</li>
+<li>点击 <strong>测试 Cookie</strong> 检查账号登录状态。</li>
+</ol>
+<p>示例格式（下面的值仅为占位）：</p>
+<pre style="background-color:#2e3440;color:#d8dee9;"><code><span>acf_uid=123456; acf_auth=your_auth_value; acf_did=your_device_id; ...
+</span></code></pre>
+<p>也支持 <a href="https://chromewebstore.google.com/detail/editthiscookie-v3/ojfebgpkimhlhcblbalbfjblapadhbol?pli=1">EditThisCookie (V3)</a> 等浏览器插件导出的 JSON 数组，可直接粘贴：</p>
+<pre data-lang="json" style="background-color:#2e3440;color:#d8dee9;" class="language-json "><code class="language-json" data-lang="json"><span>[
+</span><span>  { </span><span style="color:#a3be8c;">&quot;domain&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;.douyu.com&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;name&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;acf_uid&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;value&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;123456&quot; </span><span>}</span><span style="color:#eceff4;">,
+</span><span>  { </span><span style="color:#a3be8c;">&quot;domain&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;.douyu.com&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;name&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;acf_auth&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;value&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;your_auth_value&quot; </span><span>}</span><span style="color:#eceff4;">,
+</span><span>  { </span><span style="color:#a3be8c;">&quot;domain&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;.douyu.com&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;name&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;acf_did&quot;</span><span style="color:#eceff4;">, </span><span style="color:#a3be8c;">&quot;value&quot;</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&quot;your_device_id&quot; </span><span>}
+</span><span>]
+</span></code></pre>
+<p>请粘贴 JSON <strong>内容</strong>，这个字段不是文件路径。程序识别 <code>.douyu.com</code>、<code>douyu.com</code> 和 <code>www.douyu.com</code> 的 Web Cookie；导出中的 <code>passport.douyu.com</code> 条目用于提取续期凭据，其他网站的条目会被忽略。普通 Web API 请求不会携带 <code>LTP0</code>。</p>
+<p><code>acf_uid</code> 和 <code>acf_auth</code> 需要非空。复制完整来源，不要手动解码 <code>%xx</code> 或修改值中的 <code>=</code>。格式错误、冲突的同名字段和非法请求头字符会被拒绝；不要合并不同账号的导出。</p>
+<h3 id="chang-qi-ping-ju-yu-zi-dong-xu-qi">长期凭据与自动续期</h3>
+<p>在同一次登录的浏览器会话中打开斗鱼 passport 登录页面，通过开发者工具的 <strong>Application（应用）→ Storage（存储）→ Cookies</strong> 查看 <code>passport.douyu.com</code> 以及 <code>.douyu.com</code> 作用域，取得 <code>LTP0</code> 和配套 <code>dy_did</code>。不要将另一台设备、另一个账号或另一次登录的设备号与 <code>LTP0</code> 拼在一起。</p>
+<p>可以选择一种导入方式：</p>
+<ul>
+<li>将包含 Web Cookie 与 passport 凭据的完整浏览器 JSON 数组粘贴到 <strong>登录 Cookie</strong>，保留原有 <code>domain</code> 字段。程序会按作用域分离凭据；导出已包含 <code>LTP0</code> 和配套 <code>dy_did</code> 时，两个单独字段可以留空。</li>
+<li>在 <strong>登录 Cookie</strong> 中保存 Web Cookie，并把 passport 的值分别填入 <strong>长期续期凭据 LTP0</strong> 和 <strong>续期设备标识 dy_did</strong>。</li>
+</ul>
+<p>不要只复制 passport Cookie 代替 Web Cookie；passport 的长期票据与网页的 <code>acf_auth</code> 用途不同。浏览器中没有 <code>LTP0</code> 时，重新完成登录并检查；已有 Web Cookie 仍可用于登录取流，但无法自动续期。</p>
+<table><thead><tr><th>GUI 字段 / 配置键</th><th>用途</th></tr></thead><tbody>
+<tr><td>登录 Cookie / <code>douyu_cookie</code></td><td>Web 请求头字符串或浏览器 Cookie JSON 数组</td></tr>
+<tr><td>长期续期凭据 LTP0 / <code>douyu_ltp0</code></td><td>passport 长期票据；完整 JSON 已包含时可留空</td></tr>
+<tr><td>续期设备标识 dy_did / <code>douyu_refresh_device_id</code></td><td>与该票据配套的设备标识；完整 JSON 已包含时可留空</td></tr>
+<tr><td>自动续期登录 Cookie / <code>douyu_auto_refresh</code></td><td>默认开启，保存有效凭据对后自动调度</td></tr>
+<tr><td>设备 ID / <code>douyu_deviceId</code></td><td>取流设备 ID，与续期设备字段分开；通常可留空</td></tr>
+</tbody></table>
+<p>网页版取流设备 ID 留空时，优先使用 Web Cookie 中的 <code>dy_did</code>，其次是 <code>acf_did</code>，再使用默认值；App 回退使用 <code>acf_did</code> 或默认值。不要为了续期把 passport 设备号填到取流设备字段。</p>
+<p><img src="/images/douyu-tutorial/passport-cookie-export.webp" alt="浏览器中 Web Cookie 与 passport 长期凭据的作用域" />
+<img src="/images/douyu-tutorial/passport-cookie-export_2.webp" alt="浏览器中 Web Cookie 与 passport 长期凭据的作用域" /></p>
+<h2 id="cha-kan-deng-lu-zhuang-tai-he-shou-dong-xu-qi">查看登录状态和手动续期</h2>
+<p>保存配置后，<strong>本机已保存的斗鱼登录状态</strong> 面板显示登录状态、账号、续期状态、上次校验、上次成功续期，以及下次续期或重试时间。时间按浏览器时区显示。</p>
+<p><strong>测试 Cookie</strong> 校验当前输入框的内容，既不保存修改，也不触发续期。它调用需要登录的 <code>https://www.douyu.com/wgapi/livenc/liveweb/follow/top3</code> 接口，并检查预期 JSON 登录结果。HTTP 200、HTML 页面或公开房间信息接口成功都不足以证明已登录。</p>
+<p><strong>手动续期</strong> 使用已经保存的配置。凭据或续期开关有未保存修改时，先保存再点击；自动续期关闭时仍可手动续期。同一来源最短 60 秒操作一次，正在续期和重复点击不会再启动一份交换。需要 <code>config.edit</code> 权限才能查看状态和操作这些按钮。</p>
+<table><thead><tr><th>状态</th><th>处理方式</th></tr></thead><tbody>
+<tr><td>等待下次续期</td><td>已安排自动续期；可以查看下次时间</td></tr>
+<tr><td>正在续期</td><td>等待状态更新，不要重复发起交换</td></tr>
+<tr><td>缺少续期凭据</td><td>补充同一次登录的 <code>LTP0</code> 与 <code>dy_did</code>，再保存</td></tr>
+<tr><td>续期失败，等待重试</td><td>临时失败已安排退避；检查网络，避免连续点击</td></tr>
+<tr><td>续期凭据已失效 / 登录已失效</td><td>重新登录斗鱼，导出同一会话的 Web Cookie 与长期凭据，再保存</td></tr>
+<tr><td>自动续期已关闭</td><td>按需开启；已有 Cookie 仍会做登录校验</td></tr>
+</tbody></table>
+<p><img src="/images/douyu-tutorial/douyu-login-settings.webp" alt="本机斗鱼登录与自动续期配置" /></p>
+<h3 id="zi-dong-diao-du-chi-jiu-hua-yu-zhong-qi">自动调度、持久化与重启</h3>
+<ul>
+<li>程序每分钟检查到期状态，成功后下一次续期为 <strong>3 天后</strong>。</li>
+<li>临时网络、接口或协议错误从 <strong>5 分钟</strong>开始指数退避，最多 <strong>6 小时</strong>，保留已有 Cookie。明确凭据失效或账号不匹配时退避 <strong>24 小时</strong>，并提示重新登录；已确认失效的 Cookie 不再用于取流。</li>
+<li>最新 Cookie、轮换后的长期凭据、状态和下次时间保存在本机 SQLite 的 <code>douyu_cookie_keeper</code> 表。重启恢复已有日程和结果，并安排登录校验。</li>
+<li>来源级互斥和同一数据库的 <strong>5 分钟租约</strong>防止重复交换；交换最多 240 秒。异常退出后陈旧租约到期即可恢复。</li>
+</ul>
+<p>输入框继续保留你导入的<strong>来源凭据</strong>；续期后的最新凭据由程序单独保存。来源值不变时，后续 Web API 请求会取得最新 Cookie，无需重启。已有 CDN 视频连接不会因为续期强制重连。</p>
+<p>修改来源 Cookie、<code>LTP0</code> 或续期设备号会建立新的来源绑定，旧账号的续期结果不会套用到新配置。交换成功但写盘失败时，程序保留内存结果并重试保存；落库前重启仍可能丢失该结果，应检查状态中的重试提示。</p>
+<h2 id="fang-jian-ji-cheng-yu-du-li-zhang-hao">房间继承与独立账号</h2>
+<p>进入 <strong>直播管理 → 对应房间 → 配置覆写 → 斗鱼</strong>，选择该房间的登录来源：</p>
+<ul>
+<li><strong>继承空间配置</strong>：使用本机全局 Cookie 和续期结果，无需重复填写；房间 Cookie 输入框留空并不表示没有登录。</li>
+<li><strong>此房间独立 Cookie</strong>：使用这里填写的 Cookie。独立来源不借用全局账号的长期凭据；要自动续期，需要提供这个来源自己的完整凭据导出。选择独立但未填 Cookie，保存后仍继承全局配置。</li>
+<li><strong>此房间匿名取流</strong>：明确不使用全局登录信息，原画可能受平台限制。</li>
+</ul>
+<p>房间面板展示<strong>已保存配置实际使用的登录状态</strong>，包含全局继承结果。房间表单上的“测试 Cookie”只校验当前独立输入，不代表另一个来源的状态。修改后保存，再查看状态面板确认使用的账号。</p>
+<h2 id="he-dui-shi-ji-lu-zhi-hua-zhi">核对实际录制画质</h2>
+<p>登录状态有效，表示斗鱼接受了该账号的登录凭据；这并不保证每个直播间都提供原画或 HEVC。取流日志会报告请求档位和平台实际返回的档位，发生降档时会提示。遇到不符合预期的画质，请同时检查：</p>
+<ul>
+<li>Cookie 验证是否通过，同一账号在网页上是否能选择目标画质。</li>
+<li><code>douyu_rate</code> 是否为目标档位。<code>0</code> 请求原画；常见编号还包括 <code>8</code>（蓝光 8M）、<code>4</code>（蓝光 4M）、<code>3</code>（超清）、<code>2</code>（高清），以具体房间为准。</li>
+<li>实际文件的分辨率、帧率和编码。不能仅凭 URL 的 <code>1024h.flv</code> 等后缀或请求参数判断。</li>
+<li>房间是否正在循环播放。biliup 目前将 <code>videoLoop=1</code> 的房间视为非实时直播并跳过录制。</li>
+</ul>
+<p>新网页版接口出错时，biliup 可回退到 App 播放接口。网页版 Cookie 不等于 App 登录 token，回退取流的画质可能受限，日志会说明回退原因。</p>
+<p>浏览器完整导出中的部分无关字段可能导致网页播放接口返回 403。当前实现为播放接口单独构造 Cookie Header，只携带需要的 <code>acf_*</code> 和 Web <code>dy_did</code>；完整来源仍用于保存和续期。因此无需手动删除导出中的其他字段。若仍看到 403 或 App 回退，结合日志、登录状态和媒体检查定位问题。</p>
+<p>检查已经关闭的录制分段：</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#88c0d0;">ffprobe</span><span> -v error -select_streams v:0 </span><span style="color:#81a1c1;">\
+</span><span>  -show_entries stream=codec_name,width,height,avg_frame_rate </span><span style="color:#81a1c1;">\
+</span><span>  -of default=noprint_wrappers=1 </span><span style="color:#a3be8c;">&#39;录制分段.flv&#39;
+</span></code></pre>
+<p>例如 <code>width=3840</code>、<code>height=2160</code>、<code>avg_frame_rate=60/1</code> 才能确认该文件为 4K60。不同房间提供的媒体参数不同，这个例子不代表平台固定提供该档位。</p>
+<p>录制分段、自定义时长、在直播截帧上圈选遮挡和快速合并文件，见<a href="/biliup/docs/tutorials/recording-and-masking/">录制分段、画面遮挡与录像合并</a>。</p>
+<h2 id="avc-yu-hevc">AVC 与 HEVC</h2>
+<p>默认编码为 AVC（H.264）。选择 HEVC（H.265）时，biliup 请求平台提供 HEVC，并使用返回的对应播放地址；房间未提供 HEVC 地址时会回退到 AVC 并提示。</p>
+<p>HEVC 与 AV1 录制用 <strong>mesio</strong> 或 <strong>stream-gears</strong> 都可以：stream-gears 的内置 FLV 解析器认传统 codec id 12（HEVC）/ 13（AV1）与 Enhanced FLV 的 <code>hvc1</code> / <code>av01</code>，遇到真正不支持的编码（如 Enhanced FLV 的 <code>vp09</code>）会报错停止，而不是生成只有音频的文件。用 <strong>FFmpeg</strong> 需要支持实际 FLV 格式的新版：不同房间和 CDN 可能使用传统 codec id 12 或 Enhanced FLV，旧版 FFmpeg 不一定兼容。</p>
+<h2 id="kai-fa-zhe-yan-zheng">开发者验证</h2>
+<p>协议、Cookie 和接口回退的离线回归测试不需要真实账号或网络：</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#88c0d0;">cargo</span><span> test --locked -p biliup downloader::live::douyu
+</span></code></pre>
+<p>仓库提供 <code>douyu_probe</code> 示例程序，调用实际插件取流，最多采样 8 MiB，再用本机的 <code>ffprobe</code> 检查编码、分辨率、帧率，并用 <code>ffmpeg</code> 解码两秒视频。请选当前正在直播的房间；循环播放或未开播会明确显示 <code>offline</code>，这不算成功验证了取流。</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#616e88;"># 匿名 AVC
+</span><span style="color:#88c0d0;">cargo</span><span> run --locked -p biliup --example douyu_probe</span><span style="color:#81a1c1;"> --</span><span> --room 288016 --codec AVC
+</span><span>
+</span><span style="color:#616e88;"># 使用本地 Cookie 文件验证 HEVC；文件可包含请求头字符串或浏览器 JSON 数组
+</span><span style="color:#88c0d0;">cargo</span><span> run --locked -p biliup --example douyu_probe</span><span style="color:#81a1c1;"> --</span><span> --room 288016 --codec HEVC --cookie-file /path/to/douyu-cookie.json
+</span></code></pre>
+<p>探测输出包含实际媒体信息，不输出 Cookie、签名或完整播放 URL。不要将含凭据的文件提交到仓库。</p>
+<p>线上探测在本机手动运行，受房间状态、地域、账号和 CDN 可达性影响。GitHub Actions 只执行不需要斗鱼账号的离线回归测试。</p>
+<h2 id="ping-ju-bao-guan-yu-duo-jie-dian-bu-shu">凭据保管与多节点部署</h2>
+<p>完整 Cookie、<code>LTP0</code> 和设备号都按登录凭据保管，不要放入截图、工单、日志、仓库或分享的配置。截图应遮住所有凭据值和账号 ID；图名和说明也不要包含真实账号信息。泄露后应退出相关登录会话并重新取得凭据。</p>
+<p>凭据保存在本机 SQLite，<strong>没有加密为保险库</strong>。Unix 上数据库和 WAL/SHM 文件以 <code>0600</code> 权限打开，配置导出、备份和部署目录仍需自行保护。账号管理遵循项目现有权限及 <code>--auth</code> 模式。</p>
+<p>Fleet / HA 不下发本机长期凭据，房间配置传输时也会剥离内嵌 passport 凭据。每个节点在本机管理自己的 <code>LTP0</code> 与 <code>dy_did</code>；不同数据库之间没有续期互斥，不要把同一张长期票据复制到多个节点同时续期。应分别登录取得各节点使用的凭据。远程 Fleet 配置页不会操作控制面的本机账号。</p>
+<p>状态和手动续期接口只返回安全状态，不返回 Cookie、票据、设备号或来源哈希。交换会核对账号一致性，并限制到经过检查的 HTTPS passport 接口和斗鱼一次性登录桥；协议变化或无法确认响应时会失败并退避。</p>
+<h2 id="shi-xian-can-kao">实现参考</h2>
+<p>续期流程使用 <code>LTP0 + dy_did → safeAuth → 主站登录桥 → 新 acf_* Cookie → 登录校验</code>。实现核对了以下参考源码；斗鱼接口仍可能改变，长期票据也可能被平台撤销：</p>
+<ul>
+<li><a href="https://github.com/bililive-go/bililive-go/blob/c5a96e2818ca25d6046ea48812d5e193ecc394fc/src/live/douyu/refresh.go">bililive-go：refresh.go</a></li>
+<li><a href="https://github.com/bililive-go/bililive-go/blob/c5a96e2818ca25d6046ea48812d5e193ecc394fc/src/servers/douyu_keeper.go">bililive-go：douyu_keeper.go</a></li>
+<li><a href="https://github.com/tophtab/douyu-keep-just-works/blob/e1290ed111768d068f02c07ed616f42e4562c3a4/src/core/douyu-passport.ts">douyu-keep-just-works：douyu-passport.ts</a></li>
+</ul>
+<p>自动续期的本地回归入口：</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#88c0d0;">cargo</span><span> test --locked -p biliup --lib douyu
+</span><span style="color:#88c0d0;">cargo</span><span> test --locked -p biliup-cli --lib douyu_keeper
+</span><span style="color:#88c0d0;">node</span><span> --test app/lib/douyu-auth.test.cjs
+</span></code></pre>
+
+        
+        
+<div class="docs-navigation d-flex justify-content-between">
+  
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+          
+        
+      
+        
+        
+          
+            
+              
+              <a href="&#x2F;biliup&#x2F;docs&#x2F;help&#x2F;faq&#x2F;">
+                <div class="card my-1">
+                  <div class="card-body py-2">
+                    &larr; FAQ
+                  </div>
+                </div>
+              </a>
+            
+            
+            
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+    
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+  
+</div>
+
+      </main>
+    </div>
+  </div>
+</div>
+
+
+  
+    
+<footer class="footer text-muted">
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-8 order-last order-lg-first">
+				<ul class="list-inline">
+					
+						<li class="list-inline-item">Powered by <a href="https://www.netlify.com/">Netlify</a>, <a href="https://www.getzola.org/">Zola</a>, and <a href="https://github.com/aaranxu/adidoks">AdiDoks</a></li>
+					
+				</ul>
+			</div>
+			<div class="col-lg-8 order-first order-lg-last text-lg-end">
+				<ul class="list-inline">
+					
+						
+							<li class="list-inline-item"><a href="/biliup/privacy-policy/">Privacy</a></li>
+						
+							<li class="list-inline-item"><a href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+						
+					
+				</ul>
+			</div>
+		</div>
+	</div>
+</footer>
+
+  
+
+  
+<script type="text/javascript" src="/biliup/js/main.js" defer></script>
+
+  <script type="text/javascript" src="/biliup/plugins/elasticlunr.min.js" defer></script>
+  <script type="text/javascript" src="/biliup/search_index.en.js" defer></script>
+  <script type="text/javascript" src="/biliup/js/search.js" defer></script>
+
+  
+</body>
+</html>

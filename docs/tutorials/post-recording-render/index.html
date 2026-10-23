@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="x-ua-compatible" content="ie=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-regular.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-700.woff2"  type="font/woff2" crossorigin>
+
+
+<link rel="stylesheet" href="/biliup/main.css">
+
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+  
+  
+    
+  
+  
+  
+  
+    
+  
+  
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>录后弹幕合成 | Biliup</title>
+<meta name="description" content="保留纯净录像和弹幕 XML，在回看工作台可视化编辑遮挡并一次合成弹幕版视频">
+<link rel="canonical" href="/biliup/docs/tutorials/post-recording-render/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="/biliup/doks.png">
+  
+  <meta name="twitter:title" content="录后弹幕合成">
+  <meta name="twitter:description" content="保留纯净录像和弹幕 XML，在回看工作台可视化编辑遮挡并一次合成弹幕版视频">
+  <meta name="twitter:site" content="@aaranxu">
+  <meta name="twitter:creator" content="@aaranxu">
+  
+  <meta property="og:title" content="录后弹幕合成">
+  <meta property="og:description" content="保留纯净录像和弹幕 XML，在回看工作台可视化编辑遮挡并一次合成弹幕版视频">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="/biliup/docs/tutorials/post-recording-render/">
+
+  
+    <meta property="og:image" content="/biliup/doks.png">
+  
+
+  <meta property="og:updated_time" content="2026-10-23T00:00:00+08:00">
+  <meta property="og:site_name" content="录后弹幕合成">
+
+  
+
+  
+
+  
+  <meta property="article:publisher" content="https://www.facebook.com/ichunyun">
+  <meta property="article:author" content="https://www.facebook.com/ichunyun">
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "/biliup:///biliup/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Docs",
+            "item": "/biliup:///biliup/docs/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Tutorials",
+            "item": "/biliup:///biliup/docs/tutorials/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Post Recording Render",
+            "item": "/biliup:///biliup/docs/tutorials/post-recording-render/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+
+
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="/biliup/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/biliup/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/biliup/favicon-16x16.png">
+  
+    <link rel="manifest" href="/biliup/site.webmanifest" crossorigin>
+  
+
+
+  
+
+</head>
+
+  
+
+<body class="docs single">
+  
+  
+  
+  
+<div class="header-bar fixed-top"></div>
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+	<div class="container">
+		<input class="menu-btn order-0" type="checkbox" id="menu-btn">
+		<label class="menu-icon d-md-none" for="menu-btn"><span class="navicon"></span></label>
+		<a class="navbar-brand order-1 order-md-0 me-auto" href="/biliup">Biliup</a>
+		<button id="mode" class="btn btn-link order-2 order-md-4" type="button" aria-label="Toggle mode">
+			<span class="toggle-dark"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span>
+			<span class="toggle-light"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-sun"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span>
+		</button>
+		<ul class="navbar-nav fork-me order-3 order-md-5">
+			
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://biliup.github.io/"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-twitter"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path></svg><span class="ms-2 visually-hidden">Twitter</span></a>
+					</li>
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://github.com/biliup/biliup"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-github"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg><span class="ms-2 visually-hidden">GitHub</span></a>
+					</li>
+				
+			
+		</ul>
+		<div class="collapse navbar-collapse order-4 order-md-1">
+			<ul class="navbar-nav main-nav me-auto order-5 order-md-2">
+				
+					
+				
+				
+				
+					
+						<li class="nav-item docs active">
+							<a class="nav-link" href="/biliup/docs/getting-started/introduction/">Docs</a>
+						</li>
+					
+						<li class="nav-item">
+							<a class="nav-link" href="/biliup/blog/">Blog</a>
+						</li>
+					
+				
+			</ul>
+			<div class="break order-6 d-md-none"></div>
+			
+				<form class="navbar-form flex-grow-1 order-7 order-md-3">
+					<input id="userinput" class="form-control is-search" type="search" placeholder="Search docs..."
+						aria-label="Search docs..." autocomplete="off">
+					<div id="suggestions" class="shadow bg-white rounded"></div>
+				</form>
+			
+		</div>
+	</div>
+</header>
+
+
+
+  
+<div class="wrap container" role="document">
+  <div class="content">
+    <div class="row flex-xl-nowrap">
+	  
+<div class="col-lg-5 col-xl-4 docs-sidebar">
+	<nav class="docs-links" aria-label="Main navigation">
+			
+			
+			
+			
+					
+					
+					
+							<h3>Getting Started</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/introduction/">Introduction</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/changelog/">更新日志</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>使用指南</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/introduction/">说明</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/quick-start/">Quick Start</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Contributing</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/how-to-contribute/">How to Contribute</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Help</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/help/faq/">FAQ</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>教程</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/douyu-cookie-guide/">斗鱼登录、Cookie 续期与画质设置</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/recording-and-masking/">录制分段、画面遮挡与本地合并</a></li>
+							                           
+									<li><a class="docs-link active" href="/biliup/docs/tutorials/post-recording-render/">录后弹幕合成</a></li>
+							
+					</ul>
+					
+					
+			
+	</nav>
+</div>
+
+	  
+  
+  <nav class="docs-toc d-none d-xl-block col-xl-3" aria-label="Secondary navigation">
+  	<div class="page-links">
+  			<h3>On this page</h3>
+  			<nav id="TableOfContents">
+  					<ul>
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#zhun-bei-lu-xiang-he-dan-mu">准备录像和弹幕</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#zai-gong-zuo-tai-bian-ji-he-he-cheng">在工作台编辑和合成</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/post-recording-render/#zhe-dang-tu-ceng">遮挡图层</a></li>
+  											
+  											<li><a href="/biliup/docs/tutorials/post-recording-render/#dan-mu">弹幕</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#dao-chu">导出</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#shi-jian-he-yuan-pian-bao-hu">时间和原片保护</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#xing-neng-he-gu-zhang-chu-li">性能和故障处理</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#gpu-bian-ma-he-shi-yong-qing-kuang">GPU 编码和使用情况</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/post-recording-render/#intel-qsv-jian-ce-shi-bai">Intel QSV 检测失败</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/post-recording-render/#jie-ru-fen-duan-hou-chu-li">接入分段后处理</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/post-recording-render/#xia-zai-jie-shu-jiao-ben-de-shu-ru-he-shu-chu">下载结束脚本的输入和输出</a></li>
+  											
+  											<li><a href="/biliup/docs/tutorials/post-recording-render/#xia-zai-qi-yu-bao-cun-hou-zhui">下载器与保存后缀</a></li>
+  											
+  									</ul>
+  							
+  							
+  					</ul>
+  			</nav>
+  	</div>
+  </nav>
+  
+
+      <main class="docs-content col-lg-11 col-xl-9">
+        <h1>录后弹幕合成</h1>
+        <p class="lead">先落盘保存纯净视频和 XML，再在回看工作台完成遮挡、弹幕压制和切片。</p>
+        <h2 id="zhun-bei-lu-xiang-he-dan-mu">准备录像和弹幕</h2>
+<p>录后合成需要本地录像；压制弹幕还需要录制时保存的弹幕 XML，请在对应平台设置中开启「录制弹幕」。</p>
+<p>如果只需本地保存，在直播间编辑页不选择投稿模板，并将后处理操作清空至「保留文件」。使用落盘下载器（默认 <code>mesio</code>），不要选择「边录边传」。需要保留纯净画面时，不在分段处理中配置弹幕压制或画面遮挡，并在配置覆写中关闭画面遮挡，留到回看工作台编辑。</p>
+<h2 id="zai-gong-zuo-tai-bian-ji-he-he-cheng">在工作台编辑和合成</h2>
+<p>下播后打开 <strong>剪辑台 → 直播场次 → 回看</strong>，进入 <strong>画面与弹幕</strong> 面板。录后合成会生成独立的成品文件；素材是否保留仍取决于后处理和磁盘清理设置。</p>
+<h3 id="zhe-dang-tu-ceng">遮挡图层</h3>
+<ul>
+<li>添加马赛克、模糊、纯色或 PNG/JPEG 图片图层。</li>
+<li>勾选「画面拖拽编辑」后，在播放器上拖动图层；八个控制柄可以缩放图片或区域。</li>
+<li>默认锁定图片宽高比，也可以取消锁定。左侧、顶部、宽度、高度和不透明度可以用数字精确调整。</li>
+<li>图层支持调整顺序。每个图层可以全程生效，也可以添加多个场次时间区间；区间终点不包含在效果内。</li>
+<li>图片以资源 ID 保存，配置和合成任务不会接受浏览器直接提交的服务器路径。</li>
+</ul>
+<h3 id="dan-mu">弹幕</h3>
+<p>打开「压制弹幕」后，工作台使用与导出相同的 ASS 生成流程预览。可以调整字体、字号、透明度、描边、滚动速度、显示范围、密度、场次偏移和分段偏移补偿。正偏移表示弹幕延后。</p>
+<h2 id="dao-chu">导出</h2>
+<p>「合成导出选段」会把精确剪辑、遮挡、图片叠加和弹幕压制放进同一次 FFmpeg 编码。多个源分段在同一个滤镜图中拼接，完成后得到可播放的 MP4；「导出整场 MP4」只在场次结束后可用。</p>
+<p>第一次导出前，请在 <strong>空间配置</strong> 确认 FFmpeg 可用。打开回看中的「画面与弹幕」面板后，编码器检测会实际生成短视频，显示可用设备及失败原因。启用弹幕时还需要 <code>libass</code> 和随包中文字体。</p>
+<p>弹幕 XML 到 ASS 的转换已经内置在 biliup 中：使用原生 Rust 实现，排版算法派生自 <a href="https://github.com/hihkm/DanmakuFactory">DanmakuFactory</a>，随 biliup 本体和桌面版提供，不需要再安装 DanmakuFactory，也不再读取 <code>danmaku_factory_path</code> 配置（旧配置仍可正常加载，但该项会被忽略并在日志中提示）。预览和导出使用同一个转换流程和同一份字体：</p>
+<ul>
+<li>CLI 发布包、桌面安装包和 Docker 镜像均随包提供 Noto Sans CJK SC 和 Noto Emoji，字体作为独立资源文件分发，不内嵌进可执行文件或 Python 扩展模块；</li>
+<li>CLI 使用可执行文件旁的 <code>render-tools/fonts/</code>；Python 包仅提供基础 API，不携带字体或录制服务。字体文件不进仓库，构建与 CI 按固定 commit 与 SHA-256 取回（命令见 <code>crates/biliup-cli/assets/render-tools/README.txt</code>）。需要自定义字体时，在配置里把 <code>render_fonts_dir</code> 指向包含字体文件的目录。</li>
+</ul>
+<p>工具页面的弹幕转换检测会真正启动一次转换来确认它可用。合成任务会显示排队、进度、失败和重试状态；取消或失败不会删除原视频、XML 或图片资源。</p>
+<p>成品可以在任务列表中播放或下载，再交给你的切片整理和投稿流程。biliup 不会因为合成完成自动投稿；投稿仍由切片工作台和现有投稿流程决定。</p>
+<h2 id="shi-jian-he-yuan-pian-bao-hu">时间和原片保护</h2>
+<p>视频、XML、遮挡区间和弹幕偏移使用同一场次时间轴。断流空档不会写入成品，空档中的弹幕会被丢弃；跨越空档的滚动弹幕会在边界结束。片段入点前仍在滚动的弹幕会保留必要的前导时间，避免切片开头重新出现。</p>
+<p>合成任务使用创建时的配置和图片快照。之后修改工作台配置只影响新任务；原始视频、XML、工作台索引和旧成品仍可继续使用。</p>
+<h2 id="xing-neng-he-gu-zhang-chu-li">性能和故障处理</h2>
+<p>合成会重新编码视频，CPU 和临时磁盘占用会随分辨率、帧率和时长增加。默认「自动选择」优先使用通过真实编码探测的 GPU；没有可用硬件时使用 CPU，并在任务卡显示回退原因。长场次可以先导出需要的切片，再按需导出整场。</p>
+<p>弹幕 XML 按流读取，导出的 ASS 逐行写入目标目录中的独占 <code>.part</code> 文件，写入完成后才发布正式文件；转换过程不创建独立临时目录，也不保存归一化 XML 中间文件。排序和避碰排版仍需保留弹幕数据，浏览器预览还需返回完整 ASS 文本。转换在 biliup 进程内完成，不启动外部程序；单次转换超过 120 秒或任务被取消时返回错误，取消、超时或写入失败都不会发布半成品 ASS。</p>
+<p>缺失或损坏的 XML 会让启用弹幕的任务失败，并指出问题分段。关闭弹幕后可以重新导出；合法的空 XML 可以正常完成没有弹幕的成品。若任务失败，先检查 FFmpeg、编码器、字体、磁盘空间和源分段完整性，再使用任务列表中的「重试原配置」。</p>
+<h2 id="gpu-bian-ma-he-shi-yong-qing-kuang">GPU 编码和使用情况</h2>
+<p>在回看「画面与弹幕 → 视频编码」中选择自动模式、CPU 或具体硬件编码器；多块 DRM GPU 可以选择设备节点。配置随场次保存，新任务冻结当时的配置。手动指定的编码器或设备无法使用时任务会失败，自动模式才会在开始合成前回退 CPU。同一任务的所有分段使用同一编码器，然后流复制拼接。</p>
+<table><thead><tr><th>平台与显卡</th><th>H.264 编码器</th><th>运行条件</th></tr></thead><tbody>
+<tr><td>NVIDIA，Linux / Windows</td><td><code>h264_nvenc</code></td><td>FFmpeg 启用 NVENC，安装匹配的 NVIDIA 驱动；容器须透传 GPU 和驱动运行库</td></tr>
+<tr><td>Intel，Linux / Windows</td><td><code>h264_qsv</code></td><td>FFmpeg 启用 QSV / oneVPL，并同时安装调度库与 GPU 运行库（Arch Linux 为 <code>libvpl</code>、<code>vpl-gpu-rt</code>）</td></tr>
+<tr><td>Intel / AMD，Linux</td><td><code>h264_vaapi</code></td><td>FFmpeg 启用 VAAPI，安装驱动，进程可访问 <code>/dev/dri/renderD*</code></td></tr>
+<tr><td>AMD，Windows / 支持 AMF 的 Linux 驱动</td><td><code>h264_amf</code></td><td>FFmpeg 启用 AMF，安装对应 AMD 驱动和 AMF 运行库；Linux 可优先使用 VAAPI</td></tr>
+<tr><td>任意平台，CPU</td><td><code>libx264</code></td><td>FFmpeg 启用 libx264</td></tr>
+</tbody></table>
+<p>列在 FFmpeg 的 <code>-encoders</code> 输出里并不代表驱动可用。界面会在检测后显示短编码结果，任务开始时也会按视频实际尺寸和帧率确认可用性。探测结果短暂缓存，避免多个页面同时反复启动 FFmpeg。修改工具或驱动后可点击「重新检查」；失败结果最多缓存 30 秒。</p>
+<p>弹幕 ASS 仍由 <code>libass</code> 处理。使用 H.264 QSV 且视频尺寸为偶数、与目标尺寸一致，并且最多有 4 个持续生效的马赛克、平滑模糊或图片图层时，这些遮挡可走 QSV 滤镜路径；其他编码器或不满足条件的遮挡会回退到软件滤镜。GPU 编码和滤镜加速可减少相应处理环节的负担；解码、未加速滤镜、帧传输或磁盘吞吐仍可能限制整体速度。质量参数按各编码器采用约 20 的质量设置，不同编码器的画质和文件大小不保证完全相同。</p>
+<p>侧栏 <strong>压制任务</strong> 显示所有场次的任务，支持按状态和场次 ID 筛选、分页、取消、重试、播放及下载；回看页面仍显示本场任务。任务卡每 2 秒刷新，包含实际编码器和设备、百分比、处理 FPS、倍速、耗时及预计剩余时间。倍速优先使用 FFmpeg 的媒体时间 / 实际时间；若硬件编码的时间戳为零，则按固定输出帧率和已编码帧数估算。准备、拼接、排队或缺少有效速度时不估算剩余时间。重试会创建新任务，保留原任务和原配置。</p>
+<p>任务页的 GPU 卡分别显示整体利用率、视频编码引擎和显存。Linux 上 NVIDIA 读取 <code>nvidia-smi</code>（CSV / dmon，必要时回退 XML），AMD 读取驱动 sysfs，Intel 读取 <code>intel_gpu_top</code>。Windows 默认读取 WDDM 的 GPU Engine / GPU Adapter Memory 系统性能计数器，通过 DXGI 适配器 LUID 对应设备；NVIDIA 的 <code>nvidia-smi</code> 作为系统计数器不可用时的后备。Intel Video 引擎包含编码和解码活动。读不到的单项显示「不可用」，不会用整体占用代替编码占用，也不会把共享内存当独立显存。缺少工具、驱动不提供计数器或权限不足时仍可进行 GPU 编码，监测与编码可用性分别判断。Windows 的整体占用取最忙 GPU 引擎，编码占用单独取 Video Encode；计数器或显存预算不可读时对应指标显示不可用。</p>
+<p>参考实现和参数说明：<a href="https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/">Jellyfin 硬件转码</a>、<a href="https://docs.immich.app/features/hardware-transcoding/">Immich 硬件转码</a>、<a href="https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/ffmpeg-with-nvidia-gpu/index.html">NVIDIA FFmpeg 指南</a> 和 <a href="https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders">FFmpeg 视频编码器</a>。</p>
+<h3 id="intel-qsv-jian-ce-shi-bai">Intel QSV 检测失败</h3>
+<p>如果 VAAPI 正常但 QSV 报 <code>Error creating a MFX session: -9</code>，先检查 oneVPL GPU 运行库。仅安装 <code>libvpl</code> 调度库不足以运行 Intel GPU 编码；Arch Linux 还需要官方包 <code>vpl-gpu-rt</code>（与 <code>intel-media-driver</code> 版本匹配）。运行库补齐后重新检测，原先失败结果可能最多缓存 30 秒。不要把这个错误直接解释为显卡缺少编码能力。</p>
+<h2 id="jie-ru-fen-duan-hou-chu-li">接入分段后处理</h2>
+<p>自动打码和弹幕压制使用现有直播间 <code>segment_processor</code>，Noop 上传器也会执行它。
+例如以下步骤把本段弹幕与遮挡同时压制，完成后才交给后续处理和上传：</p>
+<pre data-lang="yaml" style="background-color:#2e3440;color:#d8dee9;" class="language-yaml "><code class="language-yaml" data-lang="yaml"><span style="color:#8fbcbb;">segment_processor</span><span style="color:#eceff4;">:
+</span><span>  - </span><span style="color:#8fbcbb;">render</span><span style="color:#eceff4;">:
+</span><span>      </span><span style="color:#8fbcbb;">danmaku</span><span style="color:#eceff4;">:
+</span><span>        </span><span style="color:#8fbcbb;">enabled</span><span style="color:#eceff4;">: </span><span style="color:#81a1c1;">true
+</span><span>      </span><span style="color:#8fbcbb;">regions</span><span style="color:#eceff4;">:
+</span><span>        - </span><span style="color:#8fbcbb;">id</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">privacy
+</span><span>          </span><span style="color:#8fbcbb;">effect_type</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">solid
+</span><span>          </span><span style="color:#8fbcbb;">x</span><span style="color:#eceff4;">: </span><span style="color:#b48ead;">0</span><span style="color:#eceff4;">.</span><span style="color:#b48ead;">1
+</span><span>          </span><span style="color:#81a1c1;">y</span><span style="color:#eceff4;">: </span><span style="color:#b48ead;">0</span><span style="color:#eceff4;">.</span><span style="color:#b48ead;">1
+</span><span>          </span><span style="color:#8fbcbb;">width</span><span style="color:#eceff4;">: </span><span style="color:#b48ead;">0</span><span style="color:#eceff4;">.</span><span style="color:#b48ead;">2
+</span><span>          </span><span style="color:#8fbcbb;">height</span><span style="color:#eceff4;">: </span><span style="color:#b48ead;">0</span><span style="color:#eceff4;">.</span><span style="color:#b48ead;">1
+</span><span>          </span><span style="color:#8fbcbb;">color</span><span style="color:#eceff4;">: </span><span style="color:#a3be8c;">&#39;#000000&#39;
+</span></code></pre>
+<p>需同时开启弹幕录制。旧 <code>mosaic_config</code> 会自动转成同一个原生步骤，并与弹幕设置合并，避免两次编码。
+上传后的 <code>postprocessor</code> 继续负责移动、删除等收尾操作。<code>rm</code> 会清理成品、弹幕，以及本次原生压制或转封装留下的原片和中间文件；设置了保留期或仍被剪辑引用时，整组文件延后清理。上传或投稿失败不会触发这项清理，显式设置空列表则保留文件。原生处理需要完整分段，不能用于边录边传。</p>
+<p>文件关联从处理时开始记录，重启后仍有效。升级前已经遗留、没有关联记录的原片不会按文件名猜测删除；自定义 <code>run</code> 命令生成的额外文件仍由命令自行管理。</p>
+<p>自动分段处理和工作台手动导出的成品统一保存到启动工作目录下的 <code>renders/&lt;场次ID&gt;/</code>。没有场次信息的自动处理保存到 <code>renders/</code>。普通自动处理使用 <code>原文件名.processed.mp4</code>；隔离原片完成遮挡后去掉 <code>.unmasked</code> 标记。上传、素材路径和索引会随成品路径更新。该目录目前是固定约定，没有单独的配置项。</p>
+<p>直播间配置中的“处理流程”提供现有四类钩子的可视化编排：点击节点修改参数，在同一阶段内拖动或用上下按钮排序。“画面与弹幕”节点可以直接配置弹幕样式和遮挡区域。下载结束钩子在整场下载及分段处理完成后执行一次；配置该钩子后，普通录制会等待它完成再上传。保存仍使用 <code>preprocessor</code>、<code>segment_processor</code>、<code>downloaded_processor</code>、<code>postprocessor</code> 四个字段；清空上传后步骤表示保留文件，未配置该字段则沿用默认清理。</p>
+<p>转换无需工作目录：XML 直接读入排版器，ASS 流式写入输出目录旁的单个 <code>.ass</code> 文件，转换完成后供 libass 按文件名读取；滤镜脚本使用 <code>.ffgraph</code> 文件，避免 Windows 命令行长度限制。两者处理结束后释放，不再生成分段视频、音频或拼接中间视频。最终视频写入同目录 <code>.part</code> 文件，写入并校验完成后发布为正常视频文件；<code>.part</code> 只表示尚未完成发布的输出。</p>
+<h3 id="xia-zai-jie-shu-jiao-ben-de-shu-ru-he-shu-chu">下载结束脚本的输入和输出</h3>
+<p><code>downloaded_processor</code> 在整场下载及分段处理完成后执行一次；配置该钩子时，普通录制会等待它完成再上传。边录边传在录制结束后执行，不能修改已提交的视频。空场次也会通知一次。未配置 <code>postprocessor</code> 时默认清理，显式空列表或仅配置脚本、回调时保留文件。</p>
+<p><code>run</code> 默认接收换行分隔的精确文件路径（视频及对应弹幕）。设置 <code>json = true</code>，或在处理流程中勾选 JSON 输入，改为接收与 v1.0.7 相同的六个字段：<code>name</code>、<code>url</code>、<code>room_title</code>、<code>start_time</code>、<code>end_time</code>、<code>file_list</code>。时间为秒级 Unix 时间戳，结束时间取实际录制结束时刻；JSON 的 <code>file_list</code> 只包含视频。</p>
+<p>仅生成封面、通知或原地修改文件的脚本无需返回值。脚本若改名、转码、合并或拆分文件，需要在标准输出中单独打印一行 UTF-8 JSON，例如：</p>
+<pre data-lang="text" style="background-color:#2e3440;color:#d8dee9;" class="language-text "><code class="language-text" data-lang="text"><span>BILIUP_OUTPUT={&quot;files&quot;:[{&quot;video&quot;:&quot;output.mp4&quot;,&quot;danmaku&quot;:&quot;output.xml&quot;}]}
+</span></code></pre>
+<p>相对路径以 biliup 的启动目录为基准，也可以返回绝对路径；结果行最大 1 MiB。</p>
+<p><code>files</code> 是该步骤完成后的完整产物列表，顺序也是上传顺序；每项必须有 <code>video</code>，<code>danmaku</code> 可省略或设为 <code>null</code>。每个脚本最多输出一条结果，其他 stdout/stderr 原样记入日志。后续脚本接收更新后的列表，上传也使用此列表。未返回结果则沿用原路径；返回无效、缺失、重复或未遮挡文件时停止本次上传并保留录像，不猜测新文件名、不扫描目录。脚本返回新路径时，程序不猜测它与原分段的时间映射，也不自动删除被替换的原片；如需继续在工作台使用原分段，脚本应保留这些文件。</p>
+<h3 id="xia-zai-qi-yu-bao-cun-hou-zhui">下载器与保存后缀</h3>
+<p>在处理流程的「下载」设置中，选择支持转封装的下载器后才显示保存后缀。FFmpeg 可选 MP4、FLV、TS、MKV；ytarchive 可选 MP4、MKV。其他下载方式不显示后缀选项，切换到不支持的下载器时清空原后缀。跟随全局设置时按全局下载器判断能力；无法读取录制节点的继承配置时，需要显式选择下载器才能编辑后缀。Twitch 的普通 FFmpeg 选项实际通过 streamlink 录制，因此也不显示后缀选择。</p>
+<p>FFmpeg 可以实际转封装。旧配置或 API 显式选择 mesio、stream-gears、streamlink 时，设置 MP4 等后缀不会把原始字节变成该容器：程序按实际容器保存。streamlink 从已录文件头识别容器，无法识别时保留临时录像。旧配置未显式选择下载器而要求 MP4 时，自动选择仍可使用 FFmpeg。</p>
+<p>yt-dlp 直接在录像目录下载和合并，使用 <code>after_move</code> 返回的最终路径，包括合并、转封装后的后缀；archive 命中且没有报告产物时，不会拾取旧文件或封面、信息 JSON。下载失败时保留该目录中的未完成录像，不另建视频缓存目录或清理残留文件。ytarchive 的输出模板不带扩展名，默认输出 MP4，选择 MKV 时传入 <code>--mkv</code>。边录边传固定使用 Matroska。后续处理和投稿始终使用下载器实际报告的文件。</p>
+
+        
+        
+<div class="docs-navigation d-flex justify-content-between">
+  
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+          
+        
+      
+        
+        
+          
+            
+              
+              <a href="&#x2F;biliup&#x2F;docs&#x2F;help&#x2F;faq&#x2F;">
+                <div class="card my-1">
+                  <div class="card-body py-2">
+                    &larr; FAQ
+                  </div>
+                </div>
+              </a>
+            
+            
+            
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+    
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+  
+</div>
+
+      </main>
+    </div>
+  </div>
+</div>
+
+
+  
+    
+<footer class="footer text-muted">
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-8 order-last order-lg-first">
+				<ul class="list-inline">
+					
+						<li class="list-inline-item">Powered by <a href="https://www.netlify.com/">Netlify</a>, <a href="https://www.getzola.org/">Zola</a>, and <a href="https://github.com/aaranxu/adidoks">AdiDoks</a></li>
+					
+				</ul>
+			</div>
+			<div class="col-lg-8 order-first order-lg-last text-lg-end">
+				<ul class="list-inline">
+					
+						
+							<li class="list-inline-item"><a href="/biliup/privacy-policy/">Privacy</a></li>
+						
+							<li class="list-inline-item"><a href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+						
+					
+				</ul>
+			</div>
+		</div>
+	</div>
+</footer>
+
+  
+
+  
+<script type="text/javascript" src="/biliup/js/main.js" defer></script>
+
+  <script type="text/javascript" src="/biliup/plugins/elasticlunr.min.js" defer></script>
+  <script type="text/javascript" src="/biliup/search_index.en.js" defer></script>
+  <script type="text/javascript" src="/biliup/js/search.js" defer></script>
+
+  
+</body>
+</html>
