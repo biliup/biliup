@@ -71,8 +71,6 @@ where
     execute_postprocessor(paths, ctx).await
 }
 
-const COPYRIGHT_REPOST: u8 = 2;
-
 async fn upload_and_submit<F>(
     rx: Inspect<Receiver<SegmentInfo>, F>,
     ctx: &Context,
@@ -1064,12 +1062,10 @@ pub(crate) fn studio_from_template(
     // B 站稿件标题上限 80 字。标题模板带上视频原标题后很容易超限，超了投稿会直接报错，
     // 这里按字符数截断（与上传文件名用的 `Video::truncate_title` 同一套规则）。
     let title = Video::truncate_title(&recorder.format_title(), 80);
-    // 未配置版权时按“转载”投稿：录制的多是别人的直播 / 视频，标“自制”属于虚假声明。
-    let copyright = upload_config.copyright.unwrap_or(COPYRIGHT_REPOST);
     Studio::builder()
         .desc(desc)
         .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
-        .maybe_copyright(Some(copyright))
+        .maybe_copyright(upload_config.copyright)
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
         .source(resolve_source(
@@ -2389,7 +2385,7 @@ mod credit_tests {
     }
 
     #[tokio::test]
-    async fn legacy_defaults_and_missing_cover_are_safe() {
+    async fn studio_defaults_and_missing_cover_are_safe() {
         let dir = tempfile::tempdir().unwrap();
         let mut upload_config = template("", serde_json::Value::Null);
         upload_config.copyright = None;
@@ -2404,14 +2400,16 @@ mod credit_tests {
         let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder)
             .await
             .unwrap();
-        assert_eq!(studio.copyright, 2);
+        assert_eq!(studio.copyright, 1);
         assert_eq!(studio.title.chars().count(), 80);
         assert!(studio.cover.is_empty());
-        upload_config.copyright = Some(1);
-        assert_eq!(
-            studio_from_template(&upload_config, Vec::new(), &recorder).copyright,
-            1
-        );
+        for copyright in [1, 2] {
+            upload_config.copyright = Some(copyright);
+            assert_eq!(
+                studio_from_template(&upload_config, Vec::new(), &recorder).copyright,
+                copyright
+            );
+        }
     }
 
     /// `submit_by_app` / `submit_by_web` / `edit_by_*` 都是 `.json(studio)`，
