@@ -1,4 +1,4 @@
-use crate::server::common::util::redact_process_debug;
+use crate::server::common::util::{FileValidator, redact_process_debug};
 use crate::server::core::downloader::{
     DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
@@ -6,7 +6,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::tools;
 use error_stack::{ResultExt, bail};
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 use tokio::{fs, time::timeout};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 #[derive(Clone, Debug)]
 pub enum Backend {
@@ -32,11 +32,6 @@ pub struct DownloadConfig {
     pub filename: String,
     pub suffix: String,
     pub working_dir: PathBuf,
-
-    // 目录策略
-    pub cache_dir: Option<PathBuf>,
-    pub temp_root: PathBuf,
-    pub use_temp_dir_for_ytdlp: bool,
 
     // 模式
     pub backend: Backend,
@@ -78,9 +73,6 @@ impl Default for DownloadConfig {
             filename: "output".into(),
             suffix: "mp4".into(),
             working_dir: PathBuf::from("."),
-            cache_dir: None,
-            temp_root: PathBuf::from("./cache/temp/youtube"),
-            use_temp_dir_for_ytdlp: true,
             backend: Backend::YtDlp,
             is_live: false,
             use_live_cover: false,
@@ -123,54 +115,45 @@ impl YouTubeDownloader {
         self.stopped.store(false, Ordering::Relaxed);
         let mut cfg = self.cfg.clone();
         cfg.suffix = runtime_cfg.suffix;
-        cfg.filename = runtime_cfg.recorder.generate_filename(&cfg.suffix);
+        cfg.filename = runtime_cfg.recorder.generate_filename_in(
+            &runtime_cfg.output_dir,
+            &["mp4", "flv", "ts", "mkv", "webm"],
+        );
         cfg.working_dir = runtime_cfg.output_dir;
 
         let downloader = Self {
             cfg,
             stopped: self.stopped.clone(),
         };
-        downloader.run().await?;
-
+        let paths = downloader.run().await?;
         if downloader.stopped.load(Ordering::Relaxed) {
             return Ok(DownloadStatus::StreamEnded);
         }
-
-        let output_path = downloader.output_path().await?;
-        callback(SegmentEvent::Segment(SegmentInfo::new(
-            output_path,
-            None,
-            None,
-            0,
-        )));
+        for (index, path) in paths.into_iter().enumerate() {
+            callback(SegmentEvent::Segment(SegmentInfo::new(
+                path, None, None, index,
+            )));
+        }
         Ok(DownloadStatus::StreamEnded)
     }
 
-    async fn run(&self) -> AppResult<()> {
-        // 1) 可选并发封面
-        let cover_handle = if self.cfg.use_live_cover {
-            self.spawn_cover_download()
-        } else {
-            None
-        };
-
-        // 2) 执行下载
-        match self.cfg.backend {
+    async fn run(&self) -> AppResult<Vec<PathBuf>> {
+        let cover_handle = self
+            .cfg
+            .use_live_cover
+            .then(|| self.spawn_cover_download())
+            .flatten();
+        let paths = match self.cfg.backend {
             Backend::YtArchive => self.run_ytarchive().await?,
             Backend::YtDlp => self.run_ytdlp().await?,
-        }
-
-        // 3) 等待封面（限时 20s）
+        };
         if let Some(handle) = cover_handle {
             match timeout(Duration::from_secs(20), handle).await {
                 Ok(Ok(Ok(()))) => info!("封面已下载"),
-                Ok(Ok(Err(e))) => warn!("封面下载失败: {e:#}"),
-                Ok(Err(e)) => warn!("封面下载任务异常: {e:#}"),
-                Err(_) => warn!("封面下载超时，继续执行"),
+                other => warn!(?other, "封面下载未完成"),
             }
         }
-
-        Ok(())
+        Ok(paths)
     }
 
     pub async fn stop(&self) -> AppResult<()> {
@@ -178,20 +161,15 @@ impl YouTubeDownloader {
         Ok(())
     }
 
-    async fn run_ytdlp(&self) -> AppResult<()> {
-        // 选择输出目录（临时目录 -> 搬运 -> 清理）
-        let download_dir = if self.cfg.use_temp_dir_for_ytdlp {
-            self.cfg.temp_root.join(&self.cfg.filename)
-        } else {
-            self.cfg.working_dir.clone()
-        };
-        fs::create_dir_all(&download_dir)
+    async fn run_ytdlp(&self) -> AppResult<Vec<PathBuf>> {
+        fs::create_dir_all(&self.cfg.working_dir)
             .await
-            .change_context(AppError::Custom(format!(
-                "创建 yt-dlp 下载目录失败: {}",
-                download_dir.display()
-            )))?;
-
+            .change_context(AppError::Unknown)?;
+        // Download and merge in the output directory. Only after_move reports
+        // completed media; partial files and sidecars are never discovered by scanning.
+        let manifest = tempfile::NamedTempFile::new()
+            .change_context(AppError::Unknown)?
+            .into_temp_path();
         // 构造格式串
         let format_str = if self.cfg.two_stream_merge {
             let mut s = String::from("bestvideo");
@@ -216,16 +194,12 @@ impl YouTubeDownloader {
         };
 
         let mut cmd = tools::command(&self.cfg.ytdlp_bin);
-        cmd.arg("--outtmpl")
-            .arg(format!(
-                "{}/{}.%(ext)s",
-                download_dir.display(),
-                self.cfg.filename
-            ))
-            .arg("--break-on-reject")
+        cmd.arg("-o")
+            .arg(format!("{}.%(ext)s", self.cfg.filename.replace('%', "%%")))
+            .arg("--paths")
+            .arg(format!("home:{}", self.cfg.working_dir.display()))
             .arg("--format")
             .arg(format_str);
-
         if let Some(cookie) = &self.cfg.cookies_file {
             cmd.arg("--cookies").arg(cookie);
         }
@@ -243,6 +217,10 @@ impl YouTubeDownloader {
             cmd.arg(a);
         }
 
+        cmd.arg("--print-to-file")
+            .arg("after_move:%(filepath)j")
+            .arg(manifest.to_string_lossy().replace('%', "%%"));
+
         let url = self
             .cfg
             .download_url
@@ -253,7 +231,7 @@ impl YouTubeDownloader {
         cmd.kill_on_drop(true);
 
         if self.stopped.load(Ordering::Relaxed) {
-            return Ok(());
+            return Ok(Vec::new());
         }
 
         info!("运行: {}", redact_process_debug(&cmd));
@@ -266,7 +244,12 @@ impl YouTubeDownloader {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let combined = format!("{}\n{}", stdout, stderr);
 
-        if !output.status.success() {
+        // yt-dlp 用退出码 101 表示“已达到 --max-downloads 上限，主动停止”。
+        // 这不是失败：该下的文件已经下载完并合并好了，只是不再继续下一个。
+        // 若当成失败，会漏掉已写入 archive 的完成产物，下一轮又被 archive 跳过。
+        let max_downloads_abort = output.status.code() == Some(101);
+
+        if !output.status.success() && !max_downloads_abort {
             if combined.contains("ffmpeg is not installed")
                 || combined.contains("ffmpeg not found")
                 || combined.contains("ffprobe not found")
@@ -283,194 +266,77 @@ impl YouTubeDownloader {
             }
         }
 
-        // 下载成功，必要时搬运文件到工作目录
-        if self.cfg.use_temp_dir_for_ytdlp && download_dir != self.cfg.working_dir {
-            self.move_dir_contents(&download_dir, &self.cfg.working_dir)
-                .await
-                .change_context(AppError::Custom(format!(
-                    "移动下载结果失败: {} -> {}",
-                    download_dir.display(),
-                    self.cfg.working_dir.display()
-                )))?;
+        if max_downloads_abort {
+            info!("yt-dlp 已达 --max-downloads 上限（exit 101），接收已完成的下载产物");
         }
 
-        // 清理临时目录
-        if self.cfg.use_temp_dir_for_ytdlp
-            && let Err(e) = fs::remove_dir_all(&download_dir).await
-        {
-            warn!(
-                "清理残留文件失败，请手动删除: {}，原因: {e}",
-                download_dir.display()
-            );
+        let reported = fs::read_to_string(&manifest)
+            .await
+            .change_context(AppError::Unknown)?;
+        let paths = completed_paths(&reported)?;
+        if paths.is_empty() {
+            info!("yt-dlp 未报告完成的视频（可能命中 archive），跳过上传");
         }
-
-        Ok(())
+        Ok(paths)
     }
 
-    async fn run_ytarchive(&self) -> AppResult<()> {
-        // ytarchive 工作目录（作为临时缓存）
-        let cache_dir = self
-            .cfg
-            .cache_dir
-            .clone()
-            .unwrap_or_else(|| PathBuf::from(format!("./cache/{}", self.cfg.filename)));
-        fs::create_dir_all(&cache_dir)
+    async fn run_ytarchive(&self) -> AppResult<Vec<PathBuf>> {
+        fs::create_dir_all(&self.cfg.working_dir)
             .await
-            .change_context(AppError::Custom(format!(
-                "创建缓存目录失败: {}",
-                cache_dir.display()
-            )))?;
-
-        // 在缓存目录中执行 ytarchive
+            .change_context(AppError::Unknown)?;
+        let working_dir =
+            std::fs::canonicalize(&self.cfg.working_dir).change_context(AppError::Unknown)?;
+        let suffix = if self
+            .cfg
+            .suffix
+            .trim_start_matches('.')
+            .eq_ignore_ascii_case("mkv")
+        {
+            "mkv"
+        } else {
+            "mp4"
+        };
+        let base = working_dir.join(&self.cfg.filename);
+        let output_path = working_dir.join(format!("{}.{}", self.cfg.filename, suffix));
+        if output_path.exists() {
+            bail!(AppError::Custom(format!(
+                "ytarchive 输出已存在，拒绝覆盖: {}",
+                output_path.display()
+            )));
+        }
         let mut cmd = tools::command(&self.cfg.ytarchive_bin);
-        cmd.current_dir(&cache_dir)
-            .arg(&self.cfg.webpage_url)
-            .arg("best")
-            .arg("--threads")
+        cmd.arg("--threads")
             .arg(self.cfg.yta_threads.to_string())
+            // ytarchive appends its own extension; --output is a basename.
             .arg("--output")
-            .arg(format!("{}.{}", self.cfg.filename, self.cfg.suffix));
-
+            .arg(base.to_string_lossy().replace('%', "%%"))
+            .arg("--add-metadata");
+        if suffix == "mkv" {
+            cmd.arg("--mkv");
+        }
         if let Some(cookie) = &self.cfg.cookies_file {
             cmd.arg("--cookies").arg(cookie);
         }
         if let Some(proxy) = &self.cfg.proxy {
             cmd.arg("--proxy").arg(proxy);
         }
-        cmd.arg("--add-metadata");
-
-        // 自定义附加参数
-        for a in &self.cfg.extra_yta_args {
-            cmd.arg(a);
-        }
-
-        cmd.kill_on_drop(true);
+        cmd.args(&self.cfg.extra_yta_args)
+            .arg(&self.cfg.webpage_url)
+            .arg("best")
+            .kill_on_drop(true);
         if self.stopped.load(Ordering::Relaxed) {
-            return Ok(());
+            return Ok(Vec::new());
         }
-        info!(
-            "运行: (cwd: {}) {}",
-            cache_dir.display(),
-            redact_process_debug(&cmd)
-        );
-
-        let output = cmd.output().await.change_context(AppError::Custom(format!(
-            "运行 {} 失败，请确认已安装并在 PATH 中",
-            &self.cfg.ytarchive_bin
-        )))?;
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let combined = format!("{}\n{}", stdout, stderr);
-
+        info!("运行: {}", redact_process_debug(&cmd));
+        let output = cmd.output().await.change_context(AppError::Unknown)?;
         if !output.status.success() {
-            if combined.contains("ffmpeg is not installed") || combined.contains("ffmpeg not found")
-            {
-                bail!(AppError::Custom(String::from(
-                    "ffmpeg 未安装，ytarchive 无法合并流"
-                )));
-            } else {
-                bail!(AppError::Custom(format!(
-                    "ytarchive 执行失败:\n{}",
-                    combined
-                )));
-            }
+            bail!(AppError::Custom(format!(
+                "ytarchive 执行失败: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-
-        // 搬运到工作目录
-        self.move_dir_contents(&cache_dir, &self.cfg.working_dir)
-            .await
-            .change_context(AppError::Custom(format!(
-                "移动下载结果失败: {} -> {}",
-                cache_dir.display(),
-                self.cfg.working_dir.display()
-            )))?;
-
-        // 清理缓存目录
-        if let Err(e) = fs::remove_dir_all(&cache_dir).await {
-            warn!(
-                "清理残留文件失败，请手动删除: {}，原因: {e}",
-                cache_dir.display()
-            );
-        }
-
-        Ok(())
-    }
-
-    async fn output_path(&self) -> AppResult<PathBuf> {
-        let expected = self
-            .cfg
-            .working_dir
-            .join(format!("{}.{}", self.cfg.filename, self.cfg.suffix));
-        if fs::metadata(&expected).await.is_ok() {
-            return Ok(expected);
-        }
-
-        let mut entries =
-            fs::read_dir(&self.cfg.working_dir)
-                .await
-                .change_context(AppError::Custom(format!(
-                    "读取 YouTube 下载目录失败: {}",
-                    self.cfg.working_dir.display()
-                )))?;
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .change_context(AppError::Unknown)?
-        {
-            let path = entry.path();
-            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if stem == self.cfg.filename {
-                return Ok(path);
-            }
-        }
-
-        Ok(expected)
-    }
-
-    async fn move_dir_contents(&self, from: &Path, to: &Path) -> AppResult<()> {
-        fs::create_dir_all(to)
-            .await
-            .change_context(AppError::Custom(format!(
-                "创建目标目录失败: {}",
-                to.display()
-            )))?;
-
-        let mut entries = fs::read_dir(from).await.change_context(AppError::Unknown)?;
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .change_context(AppError::Unknown)?
-        {
-            let p = entry.path();
-            let metadata = fs::metadata(&p).await.change_context(AppError::Unknown)?;
-            if metadata.is_file() {
-                let target = to.join(
-                    p.file_name()
-                        .ok_or_else(|| AppError::Custom(format!("非法文件名: {}", p.display())))?,
-                );
-                if let Err(_e) = fs::rename(&p, &target).await {
-                    // 跨设备移动失败 -> 复制再删除
-                    fs::copy(&p, &target)
-                        .await
-                        .change_context(AppError::Custom(format!(
-                            "复制文件失败: {} -> {}",
-                            p.display(),
-                            target.display()
-                        )))?;
-                    fs::remove_file(&p)
-                        .await
-                        .change_context(AppError::Custom(format!(
-                            "删除源文件失败: {}",
-                            p.display()
-                        )))?;
-                    debug!("跨设备移动: {} -> {}", p.display(), target.display());
-                }
-            }
-        }
-        Ok(())
+        FileValidator::validate_completed_video(&output_path)?;
+        Ok(vec![output_path])
     }
 
     fn spawn_cover_download(&self) -> Option<tokio::task::JoinHandle<AppResult<()>>> {
@@ -523,5 +389,111 @@ impl YouTubeDownloader {
         });
 
         Some(handle)
+    }
+}
+
+// JSON lines preserve Unicode, spaces and embedded newlines in paths.
+fn completed_paths(reported: &str) -> AppResult<Vec<PathBuf>> {
+    let mut paths = Vec::new();
+    for line in reported.lines().filter(|line| !line.trim().is_empty()) {
+        let path: PathBuf = serde_json::from_str(line).change_context(AppError::Unknown)?;
+        FileValidator::validate_completed_video(&path)?;
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn download_exit_never_deletes_leftover_media() {
+        for exit_code in [1, 0] {
+            let dir = tempfile::tempdir().unwrap();
+            let script = dir.path().join(if cfg!(windows) {
+                "yt-dlp.cmd"
+            } else {
+                "yt-dlp"
+            });
+            #[cfg(windows)]
+            let source = format!(
+                "@echo off\r\n:next\r\nif \"%~1\"==\"\" goto done\r\nset \"arg=%~1\"\r\nif \"%arg:~0,5%\"==\"temp:\" exit /b 2\r\nif \"%arg:~0,5%\"==\"home:\" set \"output=%arg:~5%\"\r\nshift\r\ngoto next\r\n:done\r\necho partial>\"%output%\\unfinished.mp4.part\"\r\nexit /b {exit_code}\r\n",
+            );
+            #[cfg(not(windows))]
+            let source = format!(
+                "#!/bin/sh\nfor arg do\n case \"$arg\" in\n temp:*) exit 2;;\n home:*) output=${{arg#home:}};;\n esac\ndone\nprintf partial > \"$output/unfinished.mp4.part\"\nexit {exit_code}\n",
+            );
+            fs::write(&script, source).await.unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                    .await
+                    .unwrap();
+            }
+            let downloader = YouTubeDownloader::new(DownloadConfig {
+                ytdlp_bin: script.to_string_lossy().into_owned(),
+                webpage_url: "https://example.invalid/video".into(),
+                working_dir: dir.path().join("output"),
+                download_archive: None,
+                ..Default::default()
+            });
+            let result = downloader.run_ytdlp().await;
+            assert_eq!(result.is_err(), exit_code != 0);
+            assert!(
+                dir.path().join("output/unfinished.mp4.part").is_file(),
+                "exit {exit_code} removed unfinished media"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn only_reported_outputs_are_published_regardless_of_configured_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let actual = dir.path().join("video with spaces.webm");
+        let stale = dir.path().join("video with spaces.mp4");
+        fs::write(&actual, b"webm").await.unwrap();
+        fs::write(&stale, b"old mp4").await.unwrap();
+        fs::write(dir.path().join("video with spaces.info.json"), b"{}")
+            .await
+            .unwrap();
+        let report = serde_json::to_string(&actual).unwrap();
+        assert_eq!(
+            completed_paths(&format!("{report}\n{report}\n")).unwrap(),
+            [actual]
+        );
+        assert!(
+            completed_paths("").unwrap().is_empty(),
+            "archive hits must not reuse old files"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_partial_and_non_media_reports_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in [
+            "missing.mp4",
+            "video.mp4.part",
+            "video.info.json",
+            "empty.mp4",
+        ] {
+            let path = dir.path().join(name);
+            if name != "missing.mp4" {
+                fs::write(
+                    &path,
+                    if name == "empty.mp4" {
+                        b"".as_slice()
+                    } else {
+                        b"fixture"
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            assert!(completed_paths(&serde_json::to_string(&path).unwrap()).is_err());
+        }
     }
 }

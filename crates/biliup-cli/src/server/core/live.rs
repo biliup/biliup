@@ -185,8 +185,12 @@ pub fn downloader_runtime(
     output_format: Option<&str>,
 ) -> DownloaderRuntime {
     // mesio 与 stream-gears 都不转封装，只把扩展名改成 .mp4 会得到没有可用视频流的文件
-    let wants_mp4 = output_format
-        .is_some_and(|format| format.trim_start_matches('.').eq_ignore_ascii_case("mp4"));
+    let wants_mp4 = output_format.is_some_and(|format| {
+        format
+            .trim()
+            .trim_start_matches('.')
+            .eq_ignore_ascii_case("mp4")
+    });
     let downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
         // 要求 MP4 输出时改用 ffmpeg 真正转封装
         DownloaderHint::StreamGears if wants_mp4 => DownloaderType::Ffmpeg,
@@ -198,13 +202,8 @@ pub fn downloader_runtime(
         DownloaderHint::YtDlp => DownloaderType::YtDlp,
     });
 
-    // 显式选了 stream-gears 同样不转封装。边录边传（sync-downloader）不改，以免丢掉流式上传；
-    // 显式选了 mesio 的由 mesio 自己提示扩展名不一致
-    let downloader_type = match downloader_type {
-        DownloaderType::StreamGears if wants_mp4 => DownloaderType::Ffmpeg,
-        other => other,
-    };
-
+    // Explicit native downloaders keep their selection and report their actual
+    // container. Only automatic selection may choose ffmpeg for MP4 output.
     match downloader_type {
         DownloaderType::Streamlink => streamlink_runtime(stream),
         // Twitch 指定 ffmpeg 时也走 streamlink：Python 版 ffmpeg 消费的是
@@ -392,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn mp4_output_switches_non_remuxing_downloaders_to_ffmpeg() {
+    fn automatic_mp4_uses_ffmpeg_but_explicit_downloaders_keep_native_containers() {
         let runtime = downloader_runtime(None, &stream(DownloaderHint::StreamGears), Some("mp4"));
         assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
         let runtime = downloader_runtime(
@@ -400,7 +399,7 @@ mod tests {
             &stream(DownloaderHint::StreamGears),
             Some(".MP4"),
         );
-        assert!(matches!(runtime, DownloaderRuntime::Ffmpeg(_)));
+        assert!(matches!(runtime, DownloaderRuntime::StreamGears(_)));
         // 边录边传与显式 mesio 保持用户的选择
         let runtime = downloader_runtime(
             Some(DownloaderType::SyncDownloader),

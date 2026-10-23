@@ -57,6 +57,12 @@ impl Recorder {
 
     /// 生成“基名”（不带扩展名），时间冲突时按秒+1继续尝试，直到唯一
     pub fn generate_filename(&self, suffix: &str) -> String {
+        self.generate_filename_in(Path::new("."), &[suffix])
+    }
+
+    /// Check only the exact candidate paths, including unfinished recordings.
+    /// Native downloaders may choose any of the supplied container extensions.
+    pub(crate) fn generate_filename_in(&self, dir: &Path, suffixes: &[&str]) -> String {
         let template = self.filename_template();
         let mut t = Local::now();
         let mut last = String::new();
@@ -69,7 +75,12 @@ impl Recorder {
             } else {
                 format!("{formatted}_{attempt}")
             };
-            if !path_with_suffix(&candidate, suffix).exists() {
+            if suffixes.iter().all(|suffix| {
+                !dir.join(path_with_suffix(&candidate, suffix)).exists()
+                    && !dir
+                        .join(path_with_suffix(&candidate, &format!("{suffix}.part")))
+                        .exists()
+            }) {
                 return candidate;
             }
             last = formatted;
@@ -395,6 +406,22 @@ mod tests {
         assert_eq!(recorder.format_filename(), "streamer_live_archive");
     }
 
+    #[test]
+    fn native_output_names_avoid_actual_containers_and_unfinished_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let recorder = Recorder::new(
+            Some("Mr.Beast".into()),
+            StreamerInfo::new("s", "u", "t", Utc::now(), ""),
+        );
+        std::fs::write(dir.path().join("Mr.Beast.webm"), b"previous video").unwrap();
+        std::fs::write(dir.path().join("Mr.Beast_1.ts.part"), b"unfinished").unwrap();
+        std::fs::write(dir.path().join("unrelated.mp4"), b"unrelated").unwrap();
+        assert_eq!(
+            recorder.generate_filename_in(dir.path(), &["mp4", "webm", "ts"]),
+            "Mr.Beast_2",
+        );
+    }
+
     /// 房间标题、主播名、直播间地址里的 `%` 是字面量，不能被当成 strftime 占位符：
     /// `50% off`、结尾的 `100%`、百分号编码的地址会让 chrono 的格式化报错，
     /// `to_string()` 直接 panic，录制任务（或投稿任务）随之崩掉。
@@ -548,6 +575,27 @@ impl FileValidator {
         Ok(())
     }
 
+    /// External results must name a published video, never a recording `.part`
+    /// or playlist. The recording validator intentionally accepts those paths.
+    pub(crate) fn validate_completed_video(path: &Path) -> AppResult<()> {
+        let metadata = fs::metadata(path).change_context(AppError::Unknown)?;
+        let ext = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !metadata.is_file()
+            || metadata.len() == 0
+            || !matches!(ext.as_str(), "mp4" | "flv" | "ts" | "mkv" | "webm")
+        {
+            bail!(AppError::Custom(format!(
+                "不是已完成的视频文件: {}",
+                path.display()
+            )));
+        }
+        Ok(())
+    }
+
     fn validate_format(&self, path: &Path) -> AppResult<()> {
         // 简单的格式验证 - 检查扩展名
         let masked = crate::server::common::processing::masking::masked_path(path);
@@ -555,7 +603,7 @@ impl FileValidator {
         if let Some(extension) = path.extension() {
             let ext = extension.to_string_lossy().to_lowercase();
             match ext.as_str() {
-                "mp4" | "flv" | "ts" | "m3u8" | "mkv" => Ok(()),
+                "mp4" | "flv" | "ts" | "m3u8" | "mkv" | "webm" => Ok(()),
                 _ => bail!(AppError::Custom(format!("Unsupported format: {}", ext))),
             }
         } else {

@@ -1,10 +1,12 @@
 'use client'
 
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ArrayField, Button, Form, Notification, useFormState } from '@douyinfe/semi-ui'
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArrayField, Button, Form, Notification, useFormApi, useFormState } from '@douyinfe/semi-ui'
 import { IconPlusCircle, IconMinusCircle } from '@douyinfe/semi-icons'
 import type { FormApi } from '@douyinfe/semi-ui/lib/es/form'
-import type { LiveStreamerEntity } from '../lib/api-streamer'
+import useSWR from 'swr'
+import { fetcher, type LiveStreamerEntity } from '../lib/api-streamer'
+import { downloadFormatPolicy, savedDownloadFormat } from '../lib/download-format'
 import { useMe } from '../lib/use-me'
 import { useAutoClip } from '../lib/auto-clip'
 import AfterLiveSwitch from './auto-clip/AfterLiveSwitch'
@@ -29,6 +31,8 @@ export default function StreamerEditor({ entity, title, back, onOk, templateOpti
   const [expanded, setExpanded] = useState(false)
   const { can } = useMe()
   const hooks = can('streamer.hooks')
+  const configuration = useSWR<{ downloader?: string | null }>(!fleet && can('config.view') ? '/v1/configuration' : null, fetcher)
+  const inheritedDownloader = configuration.data?.downloader
   const initValues = useMemo(() => {
     const initial = { ...entity, processing_flow: processingFlowFromEntity(entity) }
     if (typeof entity?.time_range === 'string' && entity.time_range) {
@@ -64,7 +68,9 @@ export default function StreamerEditor({ entity, title, back, onOk, templateOpti
     await onOk({
       ...values,
       ...(hooks ? processingFlowToForm(processing_flow ?? {}) : {}),
-      remark: values.remark.trim(), url: values.url.trim(), format: values.format?.trim(),
+      remark: values.remark.trim(), url: values.url.trim(),
+      format: savedDownloadFormat(values.format, values.override?.downloader ?? inheritedDownloader, values.url.trim(),
+        hooks && (values.override?.downloader != null || configuration.data != null)),
       time_range: values.time_range?.length ? JSON.stringify(values.time_range.map((date: Date) => date.toISOString())) : null,
     })
   }
@@ -73,18 +79,30 @@ export default function StreamerEditor({ entity, title, back, onOk, templateOpti
     <div className={styles.workspace}>
       <Form initValues={initValues} getFormApi={formApi => { api.current = formApi }} className={styles.workspaceForm}>
         <EditorPanels selected={selected} onSelect={setSelected} expanded={expanded} onExpandedChange={setExpanded}
-          hooks={hooks} fleet={fleet} templateOptions={templateOptions} extraFields={extraFields} />
+          hooks={hooks} fleet={fleet} templateOptions={templateOptions} extraFields={extraFields} inheritedDownloader={inheritedDownloader} configurationKnown={configuration.data != null} />
       </Form>
     </div>
   </FormPage>
 }
 
-function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, fleet, templateOptions, extraFields }: {
+function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, fleet, templateOptions, extraFields, inheritedDownloader, configurationKnown }: {
   selected: FlowNode; onSelect: (node: FlowNode) => void; hooks: boolean; fleet?: boolean
   expanded: boolean; onExpandedChange: (expanded: boolean) => void
   templateOptions: Props['templateOptions']; extraFields?: React.ReactNode
+  inheritedDownloader?: string | null
+  configurationKnown: boolean
 }) {
   const { values } = useFormState()
+  const formApi = useFormApi()
+  const downloader = values.override?.downloader ?? inheritedDownloader
+  // Without hook permission the API omits per-room overrides, so the effective
+  // downloader is unknown. Preserve the saved suffix when editing other fields.
+  const formatPolicy = downloadFormatPolicy(hooks ? downloader : undefined, values.url)
+  const formatKnown = hooks && (values.override?.downloader != null || configurationKnown)
+  useEffect(() => {
+    const next = savedDownloadFormat(values.format, downloader, values.url, formatKnown)
+    if (values.format != null && values.format !== next) formApi.setValue('format', next)
+  }, [downloader, values.url, values.format, formatKnown, formApi])
   const inspector = useRef<HTMLElement>(null)
   useLayoutEffect(() => { inspector.current?.scrollTo({ top: 0 }) }, [selected])
   const autoClip = useAutoClip(!fleet)
@@ -99,7 +117,7 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
           <span className={`${styles.inspectorIcon} ${styles[selected] || ''}`} aria-hidden="true">{FLOW_NODES[selected].icon}</span>
           {FLOW_NODES[selected].title}
         </h2>
-        {selected === 'downloaded_processor' && <p>整场下载结束后触发一次，不等待分段处理或上传完成。</p>}
+        {selected === 'downloaded_processor' && <p>整场下载和分段处理完成后触发一次，接收实际文件列表；普通录制在此步骤完成后上传，边录边传仅在录制结束后执行。</p>}
         {selected === 'postprocessor' && <p>{values.upload_streamers_id ? '全部分段上传、投稿成功后，处理视频文件。' : '未配置上传：全部分段处理成功后，处理视频文件。'}</p>}
       </header>
       {/* Keep every field registered so switching nodes never drops unsaved values. */}
@@ -126,16 +144,28 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
 
 
         {extraFields}
-          <Form.Input
-            field="format"
-            label="视频格式"
-            placeholder="flv"
-            style={{ width: 176 }}
-            helpText="视频保存格式（转封装）。mesio、stream-gears 下载器不转封装，按源站容器保存；YouTube 平台也不支持。"
-          />
-
       </div>
       <div hidden={selected !== 'download'}>
+              {hooks && <Form.Select field="override.downloader" label="下载器" showClear
+                placeholder={inheritedDownloader ? `跟随全局：${inheritedDownloader}` : fleet ? '跟随录制节点设置' : '自动选择'}
+                style={{ width: '100%' }} optionList={[
+                  { value: 'mesio', label: 'mesio' },
+                  { value: 'stream-gears', label: 'stream-gears' },
+                  { value: 'streamlink', label: 'streamlink' },
+                  { value: 'ffmpeg', label: 'FFmpeg（支持转封装）' },
+                  { value: 'ffmpeg-internal', label: 'FFmpeg 内部分段（支持转封装）' },
+                  { value: 'ffmpeg-external', label: 'FFmpeg 外部分段（支持转封装）' },
+                  { value: 'yt-dlp', label: 'yt-dlp' },
+                  { value: 'ytarchive', label: 'ytarchive（YouTube 直播）' },
+                  { value: 'sync-downloader', label: 'sync-downloader（边录边传）' },
+                ]} />}
+              <div hidden={!formatPolicy.formats.length}>
+                <Form.Select field="format" label="保存后缀（转封装）" showClear
+                  disabled={!formatPolicy.formats.length} style={{ width: 200 }}
+                  placeholder="默认格式"
+                  optionList={formatPolicy.formats.map(value => ({ value, label: `.${value}` }))}
+                  helpText={formatPolicy.help} />
+              </div>
               <Form.TimePicker
                 field="time_range"
                 type="timeRange"

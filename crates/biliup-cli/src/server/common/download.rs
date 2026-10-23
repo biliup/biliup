@@ -511,6 +511,10 @@ impl DownloadTask {
             Some(session) => session.lock().await.committed_parts(),
             None => 0,
         };
+        // 上一轮结束时已产出的分段数。yt-dlp 命中 --download-archive 时会以 exit 0
+        // 直接跳过、一个文件都不产出，却仍返回 StreamEnded；只看状态会把这种
+        // “什么都没下到”当成进展，于是 0 延迟无限重试同一个视频。
+        let mut last_seen = processor.output().seen;
         crate::server::fleet::ha::unit_started(ctx);
         let result = loop {
             // 创建守卫确保清理
@@ -566,6 +570,15 @@ impl DownloadTask {
                 info!(url = url, "task is cancelled");
                 break components;
             }
+            // Playlist/RSS discovery selects one video before constructing this
+            // downloader. Finish that VOD session instead of reusing its frozen
+            // URL for the next selected entry (and starving the upload queue).
+            if matches!(&stream.runtime_options,
+                Some(biliup::downloader::live::RuntimeOptions::YtDlp(options)) if !options.is_live)
+                && matches!(&components, Ok(DownloadStatus::StreamEnded))
+            {
+                break components;
+            }
             // 检查流状态
             match plugin.check_stream(live_request(ctx.worker())).await {
                 Ok(LiveStatus::Live {
@@ -582,6 +595,11 @@ impl DownloadTask {
                     // 否则拉流持续失败会零延迟重跑登录、preupload。
                     // 非边录边传：仅在分段成功或干净结束时立即续录；DownloadStatus::Error
                     // 必须走指数退避，避免仍在直播时 0ns 热循环（issue #1682）。
+                    // 另外要求本轮真的产出了新分段：yt-dlp 被 archive 跳过时同样是
+                    // StreamEnded，但没有任何文件落盘，必须按失败计数以结束循环。
+                    let seen_now = processor.output().seen;
+                    let produced = seen_now > last_seen;
+                    last_seen = seen_now;
                     let progressed = match &self.sync_session {
                         Some(session) => {
                             let committed = session.lock().await.committed_parts();
@@ -589,12 +607,22 @@ impl DownloadTask {
                             last_committed = committed;
                             progressed
                         }
-                        None => download_attempt_progressed(&components),
+                        None => produced && download_attempt_progressed(&components),
                     };
                     if progressed {
                         retry_count = 0;
                     } else {
                         retry_count += 1;
+                    }
+                    // yt-dlp 一个文件都没产出却报 StreamEnded，说明这个列表里已经没有
+                    // 可下载的新视频（archive 命中 / 格式不可用），继续重试只会空转，
+                    // 把房间交回监控循环按 checker_sleep 再轮询。
+                    if !produced
+                        && matches!(self.downloader, DownloaderRuntime::YtDlp(_))
+                        && matches!(&components, Ok(DownloadStatus::StreamEnded))
+                    {
+                        info!(url = url, "yt-dlp 无新内容可下载，结束本次轮询");
+                        break components;
                     }
                 }
                 Ok(LiveStatus::Offline) => {
@@ -669,6 +697,7 @@ impl DownloadTask {
         {
             error!("Error stopping danmaku client: {}", e);
         }
+        let ended_at = chrono::Utc::now().timestamp();
         // 场次的 ended_at 要在房间交回监控循环之前写好，很快再开播时才能接上这一场
         if tokio::time::timeout(Duration::from_secs(30), workbench.finish())
             .await
@@ -676,12 +705,32 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
-        if !processor.finish_processing().await {
+        let checked = processor.finish_processing().await;
+        ctx.download_end.finish(ended_at, checked);
+        if !checked {
             self.audio_processing_failed.store(true, Ordering::Release);
             warn!(
                 url = url,
                 "部分录制分段音频检查失败；失败分段已保留且未进入投稿或后处理"
             );
+        }
+        if let Some(session) = &self.sync_session {
+            if let Err(error) =
+                crate::server::common::sync::finish_downloaded_session(session, ctx).await
+            {
+                error!(%error, "边录边传下载结束钩子失败，保留文件");
+            }
+        } else if processor.channel.is_none() && super::downloaded::configured(ctx) {
+            // A session with no eligible segments still has one completion hook.
+            let (tx, rx) = async_channel::unbounded();
+            drop(tx);
+            if let Err(error) = processor
+                .uploader
+                .send(UploaderMessage::segment_event(rx, ctx.clone()))
+                .await
+            {
+                error!(%error, "下载结束钩子无法入队");
+            }
         }
         crate::server::fleet::ha::unit_ended(ctx, processor.output());
         if crate::server::fleet::ha::auto_clip_allowed(ctx) {
@@ -1020,9 +1069,9 @@ pub async fn start_download_workflow(
             url = ctx.live_streamer().url,
             "音频检查未能全部完成，跳过场次后处理"
         );
-    } else {
-        process(&[], &ctx.live_streamer().downloaded_processor).await;
     }
+    // The uploader runs the session hook once after all precise segment events
+    // have arrived; sync sessions finish theirs in DownloadTask::execute.
 
     info!(
         "Download workflow completed {} => {:?}",

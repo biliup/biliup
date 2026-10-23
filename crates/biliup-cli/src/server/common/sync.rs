@@ -175,9 +175,41 @@ async fn run_inner(
     .await?;
     // Keep the paths available for a subsequent attempt if the callback fails.
     let paths = session.lock().await.postprocess_paths.clone();
-    execute_postprocessor(paths, ctx).await?;
-    session.lock().await.postprocess_paths.clear();
+    if !super::downloaded::configured(ctx) {
+        execute_postprocessor(paths, ctx).await?;
+        session.lock().await.postprocess_paths.clear();
+    }
     Ok(result)
+}
+
+/// Streaming submission has already happened; its session hook runs once when
+/// recording ends, before postprocessing any explicitly saved local files.
+pub(crate) async fn finish_downloaded_session(
+    session: &Arc<Mutex<SyncSession>>,
+    ctx: &Context,
+) -> AppResult<()> {
+    if !super::downloaded::configured(ctx) {
+        return Ok(());
+    }
+    let paths = session.lock().await.postprocess_paths.clone();
+    let files = paths
+        .into_iter()
+        .map(|video| super::downloaded::HookFile {
+            video,
+            danmaku: None,
+        })
+        .collect();
+    let files = super::downloaded::run(files, ctx).await?;
+    execute_postprocessor(
+        files
+            .iter()
+            .flat_map(super::downloaded::HookFile::paths)
+            .collect(),
+        ctx,
+    )
+    .await?;
+    session.lock().await.postprocess_paths.clear();
+    Ok(())
 }
 
 async fn run_upload_session(

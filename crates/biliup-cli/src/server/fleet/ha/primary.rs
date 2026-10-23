@@ -2586,9 +2586,11 @@ mod tests {
         double::install(Some(double.clone()));
 
         let (_db, pool) = store::tests::pool().await;
+        let services = services(dir.path()).await;
+        let recording_pool = services.pool.clone();
         let primary = Primary::start(
             pool.clone(),
-            services(dir.path()).await,
+            services,
             HaMode::DualRecord,
             HaParams::default(),
             WINDOW,
@@ -2602,6 +2604,14 @@ mod tests {
         primary.standby_message(report(Vec::new()));
 
         let ctx = context(url, "2026-01-01T00:00:00Z");
+        // Default postprocessing uses the recording index even when the uploader
+        // is a test double, so use the same migrated database as the real worker.
+        let ctx = crate::server::infrastructure::context::Context::new(
+            ctx.id(),
+            ctx.worker().clone(),
+            recording_pool,
+            ctx.live_stream().clone(),
+        );
         let unit = Unit::of(&ctx);
         let key = key::primary_key(7, unit.started_at);
         primary.unit_started(&unit);
@@ -2615,6 +2625,8 @@ mod tests {
         plan.run(futures::stream::iter(segments), &ctx, &config)
             .await
             .unwrap();
+        assert!(!recording.join("a-part1.flv").exists());
+        assert!(!recording.join("a-part2.flv").exists());
         let messages = drain(&mut frames);
         let kinds: Vec<&str> = messages.iter().map(HaMessage::kind).collect();
         assert_eq!(
@@ -2683,6 +2695,7 @@ mod tests {
             )
             .await;
         assert!(result.is_err());
+        assert!(recording.join("c.flv").exists());
         let messages = drain(&mut frames);
         assert!(matches!(
             messages.last(),

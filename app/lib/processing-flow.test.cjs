@@ -37,6 +37,16 @@ test('implicit default cleanup and explicit keep-files are different after savin
   assert.deepEqual(stageSteps(from(submit(keep)), 'postprocessor'), [])
 })
 
+test('downloaded JSON hooks survive opening, editing and saving regardless of object key order', () => {
+  for (const step of [{ run: 'cover.sh', json: true }, { json: true, run: 'cover.sh' }]) {
+    const flow = from({ downloaded_processor: [step] })
+    assert.equal(validate(flow), '')
+    flow.downloaded_processor[0].value = 'new-cover.sh'
+    assert.deepEqual(submit(flow).downloaded_processor, [{ run: 'new-cover.sh', json: true }])
+  }
+  assert.deepEqual(submit(from({ downloaded_processor: [{ run: 'paths.sh' }] })).downloaded_processor, [{ run: 'paths.sh' }])
+})
+
 test('legacy webhook survives editing and is available only after upload with an HTTP endpoint', () => {
   const entity = { postprocessor: ['rm', { webhook: 'https://example.invalid/hook?token=local-test' }] }
   assert.deepEqual(submit(from(entity)).postprocessor, entity.postprocessor)

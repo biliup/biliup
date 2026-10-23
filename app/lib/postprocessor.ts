@@ -14,6 +14,7 @@
 export interface PostprocessorFormStep {
   cmd?: string
   value?: string
+  json?: boolean
 }
 
 /** 后端 HookStep → 表单 {cmd, value}(回显 / 编辑用) */
@@ -26,7 +27,10 @@ export function hookStepToForm(step: unknown): PostprocessorFormStep {
     const s = step as Record<string, unknown>
     // 已是表单形态
     if (typeof s.cmd === 'string') {
-      return { cmd: s.cmd, value: typeof s.value === 'string' ? s.value : undefined }
+      return { cmd: s.cmd, value: typeof s.value === 'string' ? s.value : undefined, ...(s.json === true ? { json: true } : {}) }
+    }
+    if (typeof s.run === 'string') {
+      return { cmd: 'run', value: s.run, ...(s.json === true ? { json: true } : {}) }
     }
     // {run}/{mv}/{remux} 等单键对象 → cmd/key, value/value
     const keys = Object.keys(s).filter(k => s[k] !== undefined && s[k] !== null && s[k] !== '')
@@ -46,7 +50,7 @@ export function formToHookStep(step: PostprocessorFormStep): unknown {
       // Remove("rm")
       return 'rm'
     case 'run':
-      return { run: value }
+      return { run: value, ...(step.json === true ? { json: true } : {}) }
     case 'mv':
       return { mv: value }
     case 'remux':
