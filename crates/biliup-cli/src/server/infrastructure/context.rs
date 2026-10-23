@@ -21,6 +21,7 @@ use tracing::{error, info};
 /// 应用程序上下文，包含工作器和扩展信息
 #[derive(Debug, Clone)]
 pub struct Context {
+    pub(crate) download_end: Arc<crate::server::common::downloaded::SessionEnd>,
     id: i64,
     /// 工作器实例
     worker: Arc<Worker>,
@@ -38,6 +39,7 @@ impl Context {
         let mut streamer_info = streamer_info(&stream);
         streamer_info.id = id;
         Self {
+            download_end: Arc::default(),
             id,
             worker,
             stream,
@@ -134,7 +136,7 @@ impl Context {
             recorder: self.recorder(stream_info),
             // output_dir: PathBuf::from("./downloads")
             output_dir: PathBuf::from("."),
-            suffix,
+            suffix: suffix.trim().trim_start_matches('.').to_ascii_lowercase(),
             bytes_written: Default::default(),
             preview: Default::default(),
             index_tap: None,

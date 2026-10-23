@@ -570,6 +570,15 @@ impl DownloadTask {
                 info!(url = url, "task is cancelled");
                 break components;
             }
+            // Playlist/RSS discovery selects one video before constructing this
+            // downloader. Finish that VOD session instead of reusing its frozen
+            // URL for the next selected entry (and starving the upload queue).
+            if matches!(&stream.runtime_options,
+                Some(biliup::downloader::live::RuntimeOptions::YtDlp(options)) if !options.is_live)
+                && matches!(&components, Ok(DownloadStatus::StreamEnded))
+            {
+                break components;
+            }
             // 检查流状态
             match plugin.check_stream(live_request(ctx.worker())).await {
                 Ok(LiveStatus::Live {
@@ -688,6 +697,7 @@ impl DownloadTask {
         {
             error!("Error stopping danmaku client: {}", e);
         }
+        let ended_at = chrono::Utc::now().timestamp();
         // 场次的 ended_at 要在房间交回监控循环之前写好，很快再开播时才能接上这一场
         if tokio::time::timeout(Duration::from_secs(30), workbench.finish())
             .await
@@ -695,12 +705,32 @@ impl DownloadTask {
         {
             warn!(url = url, "切片工作台场次收尾超时，转入后台完成");
         }
-        if !processor.finish_processing().await {
+        let checked = processor.finish_processing().await;
+        ctx.download_end.finish(ended_at, checked);
+        if !checked {
             self.audio_processing_failed.store(true, Ordering::Release);
             warn!(
                 url = url,
                 "部分录制分段音频检查失败；失败分段已保留且未进入投稿或后处理"
             );
+        }
+        if let Some(session) = &self.sync_session {
+            if let Err(error) =
+                crate::server::common::sync::finish_downloaded_session(session, ctx).await
+            {
+                error!(%error, "边录边传下载结束钩子失败，保留文件");
+            }
+        } else if processor.channel.is_none() && super::downloaded::configured(ctx) {
+            // A session with no eligible segments still has one completion hook.
+            let (tx, rx) = async_channel::unbounded();
+            drop(tx);
+            if let Err(error) = processor
+                .uploader
+                .send(UploaderMessage::segment_event(rx, ctx.clone()))
+                .await
+            {
+                error!(%error, "下载结束钩子无法入队");
+            }
         }
         crate::server::fleet::ha::unit_ended(ctx, processor.output());
         if crate::server::fleet::ha::auto_clip_allowed(ctx) {
@@ -1040,8 +1070,8 @@ pub async fn start_download_workflow(
             "音频检查未能全部完成，跳过场次后处理"
         );
     }
-    // downloaded_processor 已移到投稿前执行（见 upload.rs upload_and_submit）：
-    // 这里原本传空输入，hook 拿不到视频路径，且执行时机晚于投稿。
+    // The uploader runs the session hook once after all precise segment events
+    // have arrived; sync sessions finish theirs in DownloadTask::execute.
 
     info!(
         "Download workflow completed {} => {:?}",

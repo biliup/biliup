@@ -223,7 +223,7 @@ export interface LiveStreamerEntity {
     excluded_keywords?: string[];
 	preprocessor?: Record<'run', string>[];
 	segment_processor?: unknown[];
-	downloaded_processor?: Record<'run', string>[];
+	downloaded_processor?: { run: string; json?: boolean }[];
 	postprocessor?: (Record<'run' | 'mv', string> | 'rm')[];
 	opt_args?: string[];
 	override?: Record<string, any>;

@@ -68,97 +68,10 @@ where
     }
     let paths =
         super::webhook::on_failure(ctx, upload_and_submit(rx, ctx, upload_config).await).await?;
-    // 后处理先跑（`mv`、`render` 等还要用到文件），之后才删本地录像。
-    let cleanup_paths = paths.clone();
-    execute_postprocessor(paths, ctx).await?;
-    delete_after_upload(&cleanup_paths, ctx).await;
-    Ok(())
+    execute_postprocessor(paths, ctx).await
 }
 
-/// 投稿时未配置版权（`copyright`）时使用的默认值：2 = 转载。
-///
-/// 录制的多是别人的直播 / 视频，默认标“自制”等于虚假声明；要标自制请在
-/// 主播配置里显式写 `copyright = 1`。
 const COPYRIGHT_REPOST: u8 = 2;
-
-/// 跑 `downloaded_processor`（下载后处理钩子）。
-///
-/// 必须在投稿之前、并且带着真实的下载路径执行：投稿接口会校验 `cover_path` 指向的封面
-/// 文件，晚于投稿执行会直接返回“该封面地址不合法”（21008）；而钩子拿不到路径时
-/// 封面脚本只能生成一个空名字的封面。失败不阻断流程，交给投稿侧的封面兜底。
-async fn run_downloaded_processor(paths: &[PathBuf], ctx: &Context) {
-    let Some(steps) = ctx.live_streamer().downloaded_processor.as_deref() else {
-        return;
-    };
-    if steps.is_empty() || paths.is_empty() {
-        return;
-    }
-    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-    // `json = true` 的步骤要的是整场信息，只组装一次，多个步骤共用
-    let payload = hook_json_payload(paths, ctx);
-    for step in steps {
-        let result = match step {
-            HookStep::Run { json, .. } if *json => step.execute_with_stdin(&payload).await,
-            _ => process_video(&refs, std::slice::from_ref(step), None).await,
-        };
-        if let Err(error) = result {
-            error!(%error, "downloaded_processor 执行失败");
-            return;
-        }
-    }
-}
-
-/// 组装 `json = true` 的 hook 步骤的 stdin 内容。
-///
-/// 字段与 Python 版 biliup 的 `downloaded_processor` 入参一致，所以按那套约定写的
-/// 封面 / 通知脚本可以直接复用，不用改成读文件路径。
-fn hook_json_payload(paths: &[PathBuf], ctx: &Context) -> Vec<u8> {
-    let info = ctx.streamer_info();
-    let start = info.date.timestamp();
-    // 视频已经下载完，用“现在”当结束时间；至少不早于开始时间
-    let end = chrono::Utc::now().timestamp().max(start);
-    serde_json::json!({
-        "name": info.name,
-        "room_title": info.title,
-        "start_time": start,
-        "end_time": end,
-        "file_list": paths
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect::<Vec<_>>(),
-    })
-    .to_string()
-    .into_bytes()
-}
-
-/// 投稿成功后删掉本地录像。
-///
-/// 主播的 `postprocessor` 里已经写了 `rm` 时直接跳过，否则同一批文件会被删两次，
-/// 第二次必然 not found，反而把整轮后处理判成失败。删除走 `Retention`，所以
-/// `retention_hours`、切片工作台的引用与「保留这场」依然有效。
-async fn delete_after_upload(paths: &[PathBuf], ctx: &Context) {
-    if paths.is_empty() {
-        return;
-    }
-    let already_configured = ctx
-        .live_streamer()
-        .postprocessor
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .any(|step| matches!(step, HookStep::Remove(cmd) if cmd == "rm"));
-    if already_configured {
-        return;
-    }
-
-    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
-    let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
-    match process_video(&refs, &[HookStep::Remove("rm".into())], Some(&retention)).await {
-        Ok(()) => info!(count = refs.len(), "投稿成功，已清理本地录像"),
-        // 删不掉不影响投稿结果：投稿已经成功了，这里只记录，不往上抛
-        Err(error) => error!(%error, "投稿后删除本地录像失败"),
-    }
-}
 
 async fn upload_and_submit<F>(
     rx: Inspect<Receiver<SegmentInfo>, F>,
@@ -169,8 +82,14 @@ where
     F: FnMut(&SegmentInfo),
 {
     // 1. 初始化上传环境
-    let upload_context =
-        initialize_upload_context(&ctx.config(), &ctx.stateless_client(), upload_config).await?;
+    // A session hook must still run when login fails. Initialize only when the
+    // processed file list is ready to upload.
+    let upload_context = tokio::sync::OnceCell::new();
+    if !super::downloaded::configured(ctx) {
+        let context =
+            initialize_upload_context(&ctx.config(), ctx.stateless_client(), upload_config).await?;
+        let _ = upload_context.set(context);
+    }
     if let Some(task) = TaskObservation::current() {
         task.phase("waiting_segment");
     }
@@ -184,13 +103,24 @@ where
         .clone()
         .unwrap_or_default();
     let uploaded_videos = pipeline_upload_videos(rx, &segment_processors, ctx, |path| {
-        let retries = upload_retries(ctx.config().max_upload_limit);
-        upload_owned_file(path, &upload_context, retries)
+        let upload_context = &upload_context;
+        async move {
+            let context = upload_context
+                .get_or_try_init(|| async {
+                    initialize_upload_context(&ctx.config(), ctx.stateless_client(), upload_config)
+                        .await
+                })
+                .await?;
+            upload_owned_file(path, context, upload_retries(ctx.config().max_upload_limit)).await
+        }
     })
     .await?;
 
     // 4. 提交到B站
     if !uploaded_videos.videos.is_empty() {
+        let upload_context = upload_context
+            .get()
+            .expect("uploaded files have an upload context");
         let mut recorder = ctx.recorder(ctx.streamer_info().clone()).clone();
         recorder.filename_prefix = upload_config.title.clone();
 
@@ -341,7 +271,9 @@ async fn update_processed_path(
     danmaku: Option<&Path>,
 ) -> AppResult<()> {
     use crate::server::workbench::{index, segment_path};
-    let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE.write().await;
+    let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE
+        .write()
+        .await;
     let from = segment_path(from).to_string_lossy().into_owned();
     let to_path = segment_path(to);
     let to = to_path.to_string_lossy().into_owned();
@@ -400,6 +332,8 @@ where
     Fut: Future<Output = AppResult<Video>>,
 {
     let mut uploaded = UploadedVideos::default();
+    let deferred = super::downloaded::configured(ctx);
+    let mut prepared = Vec::new();
     pin!(rx);
     // 流式处理后续事件
     while let Some(mut event) = rx.next().await {
@@ -487,14 +421,14 @@ where
         } else {
             None
         };
-        let replaced = match process_video_paths_with_source(&mut paths, &steps, source.as_ref()).await
-        {
-            Ok(replaced) => replaced,
-            Err(error) => {
-                error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
-                continue;
-            }
-        };
+        let replaced =
+            match process_video_paths_with_source(&mut paths, &steps, source.as_ref()).await {
+                Ok(replaced) => replaced,
+                Err(error) => {
+                    error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
+                    continue;
+                }
+            };
         if let Some(path) = paths.first() {
             event.prev_file_path = path.clone();
         }
@@ -509,9 +443,13 @@ where
         }
         if original != event.prev_file_path {
             if let Err(error) = update_processed_path(
-                ctx, &original, &event.prev_file_path, &replaced,
+                ctx,
+                &original,
+                &event.prev_file_path,
+                &replaced,
                 event.danmaku_file_path.as_deref(),
-            ).await
+            )
+            .await
             {
                 error!(%error, "更新处理后的录像路径失败，本段停止投稿");
                 continue;
@@ -545,38 +483,45 @@ where
             continue;
         }
 
-        let upload_path = paths
-            .first()
-            .cloned()
-            .unwrap_or_else(|| event.prev_file_path.clone());
-        if crate::server::common::processing::masking::is_unmasked(&upload_path) {
-            error!(file = ?upload_path, "segment_processor 返回未遮挡录像，本段停止投稿");
-            continue;
-        }
-        // 视频已经完整落盘、分段处理也做完了，上传之前先跑 downloaded_processor。
-        // 封面脚本依赖这一步产出的封面文件，而投稿接口会校验它，所以必须挡在上传/投稿之前。
-        run_downloaded_processor(&paths, ctx).await;
-        match upload(upload_path.clone()).await {
-            Ok(video) => {
-                uploaded.videos.push(video);
-                // 1.0.7 的 FileInfo(video, danmaku) 语义：上传完成后的 postprocessor
-                // 继续接收本段视频路径和对应弹幕路径。segment_processor 可能已把
-                // 首个视频路径原地替换（例如 Remux .ts→.mp4），因此这里保留转换后的路径集。
-                uploaded.paths.extend(paths);
-            }
-            Err(e) => {
-                error!(
-                    file = ?upload_path,
-                    "upload_single_file failed, skipping segment: {:?}", e
-                );
-            }
+        if deferred {
+            prepared.push(super::downloaded::HookFile::from_paths(paths));
+        } else {
+            upload_prepared(paths, &upload, &mut uploaded).await;
         }
         if let Some(task) = TaskObservation::current() {
             task.phase("waiting_segment");
         }
     }
 
+    if deferred {
+        let prepared = super::downloaded::run(prepared, ctx).await?;
+        // Shell results may reorder, merge or split videos. Do not infer segment
+        // ownership from positions in the returned list; preserve indexed sources.
+        // Native remux/render already updates exact source mappings above.
+        for file in prepared {
+            upload_prepared(file.paths(), &upload, &mut uploaded).await;
+        }
+    }
     Ok(uploaded)
+}
+
+async fn upload_prepared<U, Fut>(paths: Vec<PathBuf>, upload: &U, uploaded: &mut UploadedVideos)
+where
+    U: Fn(PathBuf) -> Fut,
+    Fut: Future<Output = AppResult<Video>>,
+{
+    let path = paths[0].clone();
+    if crate::server::common::processing::masking::is_unmasked(&path) {
+        error!(?path, "未遮挡录像禁止上传");
+        return;
+    }
+    match upload(path.clone()).await {
+        Ok(video) => {
+            uploaded.videos.push(video);
+            uploaded.paths.extend(paths);
+        }
+        Err(error) => error!(?path, ?error, "upload_single_file failed, skipping segment"),
+    }
 }
 
 pub(crate) async fn upload_single_file(
@@ -1159,16 +1104,19 @@ pub async fn execute_postprocessor(video_paths: Vec<PathBuf>, ctx: &Context) -> 
     if video_paths.is_empty() {
         return Ok(());
     }
-    if let Some(processor) = &ctx.live_streamer().postprocessor {
-        let processor: Vec<_> = processor
-            .iter()
-            .filter(|step| !matches!(step, HookStep::Webhook { .. }))
-            .cloned()
-            .collect();
-        let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
-        let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
-        process_video(&paths, &processor, Some(&retention)).await?;
-    }
+    let default = [HookStep::Remove("rm".into())];
+    let processor: Vec<_> = ctx
+        .live_streamer()
+        .postprocessor
+        .as_deref()
+        .unwrap_or(&default)
+        .iter()
+        .filter(|step| !matches!(step, HookStep::Webhook { .. }))
+        .cloned()
+        .collect();
+    let paths: Vec<&Path> = video_paths.iter().map(|p| p.as_path()).collect();
+    let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
+    process_video(&paths, &processor, Some(&retention)).await?;
     Ok(())
 }
 
@@ -1240,6 +1188,7 @@ pub async fn upload(
 #[cfg(test)]
 mod tests {
     use super::*;
+    mod downloaded;
 
     mod cleanup;
 
@@ -1434,6 +1383,22 @@ mod tests {
         let ctx = test_context(config);
         // The fixture needs only the persistence tables used by the processing
         // pipeline, avoiding a network/real uploader dependency in this test.
+        // This test inspects the retained result; absent postprocessor now
+        // deliberately invokes the v1.0.7 default cleanup.
+        let mut room = ctx.live_streamer().clone();
+        room.postprocessor = Some(vec![]);
+        let worker = crate::server::infrastructure::context::Worker::new(
+            room,
+            None,
+            Arc::new(std::sync::RwLock::new(ctx.config())),
+            Default::default(),
+        );
+        let ctx = Context::new(
+            ctx.id(),
+            Arc::new(worker),
+            ctx.pool().clone(),
+            ctx.live_stream().clone(),
+        );
         sqlx::raw_sql("CREATE TABLE segments (id INTEGER PRIMARY KEY, session_id INTEGER, path TEXT, bytes INTEGER, index_path TEXT, danmaku_path TEXT, start_ms INTEGER NOT NULL DEFAULT 0, end_ms INTEGER DEFAULT 200, recorded_at_ms INTEGER); CREATE TABLE filelist (id INTEGER PRIMARY KEY, file TEXT, session_id INTEGER)")
             .execute(ctx.pool()).await.unwrap();
         sqlx::query("INSERT INTO segments (session_id, path) VALUES (1, ?)")
@@ -2421,6 +2386,32 @@ mod credit_tests {
                 "",
             ),
         )
+    }
+
+    #[tokio::test]
+    async fn legacy_defaults_and_missing_cover_are_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut upload_config = template("", serde_json::Value::Null);
+        upload_config.copyright = None;
+        upload_config.cover_path = Some(
+            dir.path()
+                .join("missing.jpg")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let mut recorder = recorder();
+        recorder.filename_prefix = Some("直播🎬".repeat(40));
+        let studio = build_studio(&upload_config, &fake_bilibili(), Vec::new(), &recorder)
+            .await
+            .unwrap();
+        assert_eq!(studio.copyright, 2);
+        assert_eq!(studio.title.chars().count(), 80);
+        assert!(studio.cover.is_empty());
+        upload_config.copyright = Some(1);
+        assert_eq!(
+            studio_from_template(&upload_config, Vec::new(), &recorder).copyright,
+            1
+        );
     }
 
     /// `submit_by_app` / `submit_by_web` / `edit_by_*` 都是 `.json(studio)`，

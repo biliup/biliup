@@ -3,9 +3,10 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 pub mod download;
-pub mod processing;
+pub(crate) mod downloaded;
 /// 直播间封面 / 主播头像的抓取与落盘
 pub mod live_image;
+pub mod processing;
 /// 录制准入策略
 pub mod recording_policy;
 pub mod room_metadata;
@@ -19,9 +20,9 @@ pub mod throughput;
 pub mod timerange;
 pub mod upload;
 pub mod upload_observation;
-pub mod webhook;
 /// 通用工具函数
 pub mod util;
+pub mod webhook;
 
 pub fn construct_headers(hash_map: &HashMap<String, String>) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
