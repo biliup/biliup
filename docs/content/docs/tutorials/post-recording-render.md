@@ -144,6 +144,6 @@ BILIUP_OUTPUT={"files":[{"video":"output.mp4","danmaku":"output.xml"}]}
 
 在处理流程的「下载」设置中，选择支持转封装的下载器后才显示保存后缀。FFmpeg 可选 MP4、FLV、TS、MKV；ytarchive 可选 MP4、MKV。其他下载方式不显示后缀选项，切换到不支持的下载器时清空原后缀。跟随全局设置时按全局下载器判断能力；无法读取录制节点的继承配置时，需要显式选择下载器才能编辑后缀。Twitch 的普通 FFmpeg 选项实际通过 streamlink 录制，因此也不显示后缀选择。
 
-FFmpeg 可以实际转封装。旧配置或 API 显式选择 mesio、stream-gears、streamlink 时，设置 MP4 等后缀不会把原始字节变成该容器：程序按实际容器保存并提示不匹配。streamlink 从已录文件头识别容器，无法识别时保留临时录像。旧配置未显式选择下载器而要求 MP4 时，自动选择仍可使用 FFmpeg。
+FFmpeg 可以实际转封装。旧配置或 API 显式选择 mesio、stream-gears、streamlink 时，设置 MP4 等后缀不会把原始字节变成该容器：程序按实际容器保存。streamlink 从已录文件头识别容器，无法识别时保留临时录像。旧配置未显式选择下载器而要求 MP4 时，自动选择仍可使用 FFmpeg。
 
-yt-dlp 使用 `after_move` 返回的最终路径，包括合并、转封装后的后缀；archive 命中且没有报告产物时，不会拾取旧文件或封面、信息 JSON。ytarchive 的输出模板不带扩展名，默认输出 MP4，选择 MKV 时传入 `--mkv`。边录边传固定使用 Matroska。后续处理和投稿始终使用下载器实际报告的文件。
+yt-dlp 使用 `after_move` 返回的最终路径，包括合并、转封装后的后缀；archive 命中且没有报告产物时，不会拾取旧文件或封面、信息 JSON。下载失败时保留临时录像，成功后也只移除空缓存目录。ytarchive 的输出模板不带扩展名，默认输出 MP4，选择 MKV 时传入 `--mkv`。边录边传固定使用 Matroska。后续处理和投稿始终使用下载器实际报告的文件。

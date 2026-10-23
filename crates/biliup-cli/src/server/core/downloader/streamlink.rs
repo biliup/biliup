@@ -97,7 +97,6 @@ impl Streamlink {
             .change_context(AppError::Unknown)?
         {
             let actual = recorded_container(std::path::Path::new(&part_file)).await?;
-            super::warn_native_suffix(&download_config.suffix, actual, "streamlink");
             let output_file = output_file.with_extension(actual);
             if output_file.exists() {
                 return Err(

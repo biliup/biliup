@@ -183,9 +183,6 @@ check_sourcecode: 15
 ### 如果正在下载回放将无法录制直播
 ### 例如录制https://www.youtube.com/@NeneAmanoCh/streams，关闭后将忽略直播回放
 #youtube_enable_download_playback: true
-### 追加给 yt-dlp 的额外参数，默认空（[]）。按顺序原样拼到命令行里，写错参数会让下载直接失败
-### 例如 ["--write-info-json"] 会在下载视频时同时写出同名 .info.json（标题、频道、发布时间等）
-#youtube_extra_ytdlp_args: []
 
 #------Twitch直播录制------#
 ### 录制Twitch弹幕，默认关闭

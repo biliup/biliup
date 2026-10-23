@@ -163,16 +163,6 @@ impl HookStep {
         Ok(())
     }
 
-    /// 以调用方给定的字节作为 stdin 执行 `run` 步骤（用于 JSON 形式的 hook 入参）。
-    pub async fn execute_with_stdin(&self, src: &[u8]) -> AppResult<()> {
-        match self {
-            HookStep::Run { run, .. } => self.execute_command(run, src).await,
-            other => bail!(AppError::Custom(format!(
-                "只有 run 步骤支持自定义 stdin，收到: {other:?}"
-            ))),
-        }
-    }
-
     /// Path-mutating variant: lets steps swap entries in the working set
     /// (e.g. Remux replaces .ts with the newly-created .mp4).
     pub async fn execute_paths(&self, video_paths: &mut Vec<PathBuf>) -> AppResult<()> {

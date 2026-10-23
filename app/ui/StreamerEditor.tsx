@@ -157,7 +157,7 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
                   { value: 'ffmpeg-external', label: 'FFmpeg 外部分段（支持转封装）' },
                   { value: 'yt-dlp', label: 'yt-dlp' },
                   { value: 'ytarchive', label: 'ytarchive（YouTube 直播）' },
-                  ...(hooks ? [{ value: 'sync-downloader', label: 'sync-downloader（边录边传）' }] : []),
+                  { value: 'sync-downloader', label: 'sync-downloader（边录边传）' },
                 ]} />}
               <div hidden={!formatPolicy.formats.length}>
                 <Form.Select field="format" label="保存后缀（转封装）" showClear

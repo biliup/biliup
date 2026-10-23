@@ -11,14 +11,7 @@ export function downloadFormatPolicy(downloader: unknown, url: string = '') {
   if (downloader === 'ytarchive') {
     return { formats: ['mp4', 'mkv'], help: 'ytarchive 支持 MP4 和 MKV，留空默认 MP4；仅用于 YouTube 直播。' }
   }
-  return {
-    formats: [],
-    help: downloader === 'ffmpeg' && twitch
-      ? 'Twitch 的 FFmpeg 选项实际通过 streamlink 录制，按实际容器保存，不能指定后缀。'
-      : downloader === 'sync-downloader'
-        ? '边录边传固定使用 Matroska（.mkv），不能指定后缀。'
-        : '当前下载方式按实际容器保存。选择支持转封装的下载器后才能设置后缀。',
-  }
+  return { formats: [], help: '' }
 }
 
 export function savedDownloadFormat(format: unknown, downloader: unknown, url: string, known = true) {

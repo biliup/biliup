@@ -83,12 +83,8 @@ impl StreamGears {
         };
         let hook = {
             let mut i = 0;
-            let requested_suffix = download_config.suffix.clone();
             move |s: &str| {
                 let file_path = PathBuf::from(s);
-                if let Some(actual) = file_path.extension().and_then(|ext| ext.to_str()) {
-                    super::warn_native_suffix(&requested_suffix, actual, "stream-gears");
-                }
 
                 let event = SegmentInfo {
                     prev_file_path: file_path,

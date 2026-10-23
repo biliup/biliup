@@ -1,4 +1,4 @@
-use crate::server::common::util::redact_process_debug;
+use crate::server::common::util::{FileValidator, redact_process_debug};
 use crate::server::core::downloader::{
     DownloadConfig as RuntimeDownloadConfig, DownloadStatus, SegmentEvent, SegmentInfo,
 };
@@ -6,7 +6,7 @@ use crate::server::errors::{AppError, AppResult};
 use crate::tools;
 use error_stack::{ResultExt, bail};
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -34,7 +34,6 @@ pub struct DownloadConfig {
     pub working_dir: PathBuf,
 
     // 目录策略
-    pub cache_dir: Option<PathBuf>,
     pub temp_root: PathBuf,
     pub use_temp_dir_for_ytdlp: bool,
 
@@ -78,7 +77,6 @@ impl Default for DownloadConfig {
             filename: "output".into(),
             suffix: "mp4".into(),
             working_dir: PathBuf::from("."),
-            cache_dir: None,
             temp_root: PathBuf::from("./cache/temp/youtube"),
             use_temp_dir_for_ytdlp: true,
             backend: Backend::YtDlp,
@@ -187,7 +185,9 @@ impl YouTubeDownloader {
                 tempfile::Builder::new()
                     .prefix("biliup-")
                     .tempdir_in(&self.cfg.temp_root)
-                    .change_context(AppError::Unknown)?,
+                    .change_context(AppError::Unknown)?
+                    // Failed downloads and cancelled futures must keep partial media.
+                    .keep(),
             )
         } else {
             None
@@ -224,8 +224,7 @@ impl YouTubeDownloader {
             .arg("--format")
             .arg(format_str);
         if let Some(temp) = &temp {
-            cmd.arg("--paths")
-                .arg(format!("temp:{}", temp.path().display()));
+            cmd.arg("--paths").arg(format!("temp:{}", temp.display()));
         }
 
         if let Some(cookie) = &self.cfg.cookies_file {
@@ -274,8 +273,7 @@ impl YouTubeDownloader {
 
         // yt-dlp 用退出码 101 表示“已达到 --max-downloads 上限，主动停止”。
         // 这不是失败：该下的文件已经下载完并合并好了，只是不再继续下一个。
-        // 当成失败处理会在搬运文件之前就 bail，视频留在临时目录里被丢掉，
-        // 而 archive 已经记过这个视频，下一轮只会“已记录，跳过”，最终什么都没上传。
+        // 若当成失败，会漏掉已写入 archive 的完成产物，下一轮又被 archive 跳过。
         let max_downloads_abort = output.status.code() == Some(101);
 
         if !output.status.success() && !max_downloads_abort {
@@ -296,13 +294,18 @@ impl YouTubeDownloader {
         }
 
         if max_downloads_abort {
-            info!("yt-dlp 已达 --max-downloads 上限并正常收尾（exit 101），继续搬运已下载的文件");
+            info!("yt-dlp 已达 --max-downloads 上限（exit 101），接收已完成的下载产物");
         }
 
         let reported = fs::read_to_string(&manifest)
             .await
             .change_context(AppError::Unknown)?;
-        let paths = completed_paths(&reported).await?;
+        let paths = completed_paths(&reported)?;
+        if let Some(temp) = temp {
+            // yt-dlp moves completed files itself. Remove only an empty cache;
+            // leftover fragments stay available without enumerating the directory.
+            let _ = fs::remove_dir(temp).await;
+        }
         if paths.is_empty() {
             info!("yt-dlp 未报告完成的视频（可能命中 archive），跳过上传");
         }
@@ -364,7 +367,7 @@ impl YouTubeDownloader {
                 String::from_utf8_lossy(&output.stderr)
             )));
         }
-        ensure_completed_file(&output_path).await?;
+        FileValidator::validate_completed_video(&output_path)?;
         Ok(vec![output_path])
     }
 
@@ -422,11 +425,11 @@ impl YouTubeDownloader {
 }
 
 // JSON lines preserve Unicode, spaces and embedded newlines in paths.
-async fn completed_paths(reported: &str) -> AppResult<Vec<PathBuf>> {
+fn completed_paths(reported: &str) -> AppResult<Vec<PathBuf>> {
     let mut paths = Vec::new();
     for line in reported.lines().filter(|line| !line.trim().is_empty()) {
         let path: PathBuf = serde_json::from_str(line).change_context(AppError::Unknown)?;
-        ensure_completed_file(&path).await?;
+        FileValidator::validate_completed_video(&path)?;
         if !paths.contains(&path) {
             paths.push(path);
         }
@@ -434,13 +437,55 @@ async fn completed_paths(reported: &str) -> AppResult<Vec<PathBuf>> {
     Ok(paths)
 }
 
-async fn ensure_completed_file(path: &Path) -> AppResult<()> {
-    crate::server::common::util::FileValidator::validate_completed_video(path)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn download_exit_never_deletes_leftover_media() {
+        for exit_code in [1, 0] {
+            let dir = tempfile::tempdir().unwrap();
+            let report = dir.path().join("temp-path.txt");
+            let script = dir.path().join(if cfg!(windows) {
+                "yt-dlp.cmd"
+            } else {
+                "yt-dlp"
+            });
+            #[cfg(windows)]
+            let source = format!(
+                "@echo off\r\n:next\r\nif \"%~1\"==\"\" exit /b 2\r\nset \"arg=%~1\"\r\nif \"%arg:~0,5%\"==\"temp:\" goto found\r\nshift\r\ngoto next\r\n:found\r\nset \"tempdir=%arg:~5%\"\r\necho partial>\"%tempdir%\\unfinished.mp4.part\"\r\necho %tempdir%>\"{}\"\r\nexit /b {exit_code}\r\n",
+                report.display(),
+            );
+            #[cfg(not(windows))]
+            let source = format!(
+                "#!/bin/sh\nfor arg do\n case \"$arg\" in temp:*)\n tempdir=${{arg#temp:}}\n printf partial > \"$tempdir/unfinished.mp4.part\"\n printf '%s' \"$tempdir\" > '{}'\n exit {exit_code};;\n esac\ndone\nexit 2\n",
+                report.display().to_string().replace('\'', "'\"'\"'"),
+            );
+            fs::write(&script, source).await.unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))
+                    .await
+                    .unwrap();
+            }
+            let downloader = YouTubeDownloader::new(DownloadConfig {
+                ytdlp_bin: script.to_string_lossy().into_owned(),
+                webpage_url: "https://example.invalid/video".into(),
+                working_dir: dir.path().join("output"),
+                temp_root: dir.path().join("cache"),
+                download_archive: None,
+                ..Default::default()
+            });
+            let result = downloader.run_ytdlp().await;
+            assert_eq!(result.is_err(), exit_code != 0);
+            let temp = PathBuf::from(fs::read_to_string(report).await.unwrap().trim());
+            assert!(
+                temp.join("unfinished.mp4.part").is_file(),
+                "exit {exit_code} removed unfinished media"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn only_reported_outputs_are_published_regardless_of_configured_suffix() {
@@ -454,13 +499,11 @@ mod tests {
             .unwrap();
         let report = serde_json::to_string(&actual).unwrap();
         assert_eq!(
-            completed_paths(&format!("{report}\n{report}\n"))
-                .await
-                .unwrap(),
+            completed_paths(&format!("{report}\n{report}\n")).unwrap(),
             [actual]
         );
         assert!(
-            completed_paths("").await.unwrap().is_empty(),
+            completed_paths("").unwrap().is_empty(),
             "archive hits must not reuse old files"
         );
     }
@@ -487,11 +530,7 @@ mod tests {
                 .await
                 .unwrap();
             }
-            assert!(
-                completed_paths(&serde_json::to_string(&path).unwrap())
-                    .await
-                    .is_err()
-            );
+            assert!(completed_paths(&serde_json::to_string(&path).unwrap()).is_err());
         }
     }
 }

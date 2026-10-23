@@ -352,10 +352,6 @@ pub struct Config {
     /// 兼容旧版配置的 YouTube 弹幕录制字段
     #[serde(default)]
     pub ytb_danmaku: Option<bool>,
-    /// 追加给 yt-dlp 的额外参数，默认空。按顺序原样拼到命令行里，
-    /// 例如 `["--write-info-json"]` 会在下载视频时同时写出 .info.json。
-    #[serde(default)]
-    pub youtube_extra_ytdlp_args: Option<Vec<String>>,
 
     // Twitch平台设置
     /// Twitch弹幕录制

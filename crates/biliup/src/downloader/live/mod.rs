@@ -296,8 +296,6 @@ pub struct YoutubeOptions {
     pub max_resolution: Option<u32>,
     pub max_videosize: Option<String>,
     pub danmaku: bool,
-    /// 追加给 yt-dlp 的额外参数（全局配置 `youtube_extra_ytdlp_args`），原样拼到命令行。
-    pub extra_ytdlp_args: Vec<String>,
 }
 
 impl Default for YoutubeOptions {
@@ -312,7 +310,6 @@ impl Default for YoutubeOptions {
             max_resolution: None,
             max_videosize: None,
             danmaku: false,
-            extra_ytdlp_args: Vec::new(),
         }
     }
 }

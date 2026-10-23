@@ -63,7 +63,6 @@ struct YoutubeLive {
     max_resolution: Option<u32>,
     max_videosize: Option<String>,
     youtube_danmaku: bool,
-    extra_ytdlp_args: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -117,7 +116,6 @@ impl YoutubeLive {
             max_resolution: options.max_resolution,
             max_videosize: options.max_videosize,
             youtube_danmaku: options.danmaku,
-            extra_ytdlp_args: options.extra_ytdlp_args,
         }
     }
 
@@ -189,7 +187,7 @@ impl YoutubeLive {
                     // 直播完成后 yt-dlp 也会写入 archive（对齐 youtube.py:312），
                     // 避免直播结束后同一视频被当作回放重复下载
                     download_archive: Some(std::path::PathBuf::from("archive.txt")),
-                    extra_ytdlp_args: self.extra_ytdlp_args.clone(),
+                    extra_ytdlp_args: Vec::new(),
                 })),
             }),
         })
@@ -754,7 +752,6 @@ mod tests {
             max_resolution: None,
             max_videosize: None,
             youtube_danmaku: false,
-            extra_ytdlp_args: Vec::new(),
         }
     }
 

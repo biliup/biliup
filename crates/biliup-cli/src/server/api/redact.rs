@@ -77,7 +77,6 @@ pub const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "youtube_enable_download_live",
     "youtube_enable_download_playback",
     "youtube_danmaku",
-    "youtube_extra_ytdlp_args",
     "ytb_danmaku",
     "twitch_danmaku",
     "twitch_disable_ads",

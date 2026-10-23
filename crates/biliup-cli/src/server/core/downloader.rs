@@ -154,22 +154,6 @@ pub enum DownloaderRuntime {
     Mesio(Mesio),
 }
 
-/// Native writers report the real container, never relabel bytes to satisfy a suffix.
-pub(crate) fn warn_native_suffix(configured: &str, actual: &str, downloader: &str) {
-    let configured = configured
-        .trim()
-        .trim_start_matches('.')
-        .to_ascii_lowercase();
-    if configured != actual && configured != "m3u8" {
-        warn!(
-            configured,
-            actual,
-            downloader,
-            "下载器按实际容器保存，配置后缀不改变容器；需要转封装请使用 ffmpeg 或原生处理步骤"
-        );
-    }
-}
-
 impl DownloaderRuntime {
     /// 从配置创建
     pub fn from_type(downloader_type: DownloaderType) -> Self {
