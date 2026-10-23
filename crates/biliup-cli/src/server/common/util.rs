@@ -555,7 +555,7 @@ impl FileValidator {
         if let Some(extension) = path.extension() {
             let ext = extension.to_string_lossy().to_lowercase();
             match ext.as_str() {
-                "mp4" | "flv" | "ts" | "m3u8" | "mkv" => Ok(()),
+                "mp4" | "flv" | "ts" | "m3u8" | "mkv" | "webm" => Ok(()),
                 _ => bail!(AppError::Custom(format!("Unsupported format: {}", ext))),
             }
         } else {

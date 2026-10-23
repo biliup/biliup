@@ -68,7 +68,96 @@ where
     }
     let paths =
         super::webhook::on_failure(ctx, upload_and_submit(rx, ctx, upload_config).await).await?;
-    execute_postprocessor(paths, ctx).await
+    // 后处理先跑（`mv`、`render` 等还要用到文件），之后才删本地录像。
+    let cleanup_paths = paths.clone();
+    execute_postprocessor(paths, ctx).await?;
+    delete_after_upload(&cleanup_paths, ctx).await;
+    Ok(())
+}
+
+/// 投稿时未配置版权（`copyright`）时使用的默认值：2 = 转载。
+///
+/// 录制的多是别人的直播 / 视频，默认标“自制”等于虚假声明；要标自制请在
+/// 主播配置里显式写 `copyright = 1`。
+const COPYRIGHT_REPOST: u8 = 2;
+
+/// 跑 `downloaded_processor`（下载后处理钩子）。
+///
+/// 必须在投稿之前、并且带着真实的下载路径执行：投稿接口会校验 `cover_path` 指向的封面
+/// 文件，晚于投稿执行会直接返回“该封面地址不合法”（21008）；而钩子拿不到路径时
+/// 封面脚本只能生成一个空名字的封面。失败不阻断流程，交给投稿侧的封面兜底。
+async fn run_downloaded_processor(paths: &[PathBuf], ctx: &Context) {
+    let Some(steps) = ctx.live_streamer().downloaded_processor.as_deref() else {
+        return;
+    };
+    if steps.is_empty() || paths.is_empty() {
+        return;
+    }
+    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+    // `json = true` 的步骤要的是整场信息，只组装一次，多个步骤共用
+    let payload = hook_json_payload(paths, ctx);
+    for step in steps {
+        let result = match step {
+            HookStep::Run { json, .. } if *json => step.execute_with_stdin(&payload).await,
+            _ => process_video(&refs, std::slice::from_ref(step), None).await,
+        };
+        if let Err(error) = result {
+            error!(%error, "downloaded_processor 执行失败");
+            return;
+        }
+    }
+}
+
+/// 组装 `json = true` 的 hook 步骤的 stdin 内容。
+///
+/// 字段与 Python 版 biliup 的 `downloaded_processor` 入参一致，所以按那套约定写的
+/// 封面 / 通知脚本可以直接复用，不用改成读文件路径。
+fn hook_json_payload(paths: &[PathBuf], ctx: &Context) -> Vec<u8> {
+    let info = ctx.streamer_info();
+    let start = info.date.timestamp();
+    // 视频已经下载完，用“现在”当结束时间；至少不早于开始时间
+    let end = chrono::Utc::now().timestamp().max(start);
+    serde_json::json!({
+        "name": info.name,
+        "room_title": info.title,
+        "start_time": start,
+        "end_time": end,
+        "file_list": paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>(),
+    })
+    .to_string()
+    .into_bytes()
+}
+
+/// 投稿成功后删掉本地录像。
+///
+/// 主播的 `postprocessor` 里已经写了 `rm` 时直接跳过，否则同一批文件会被删两次，
+/// 第二次必然 not found，反而把整轮后处理判成失败。删除走 `Retention`，所以
+/// `retention_hours`、切片工作台的引用与「保留这场」依然有效。
+async fn delete_after_upload(paths: &[PathBuf], ctx: &Context) {
+    if paths.is_empty() {
+        return;
+    }
+    let already_configured = ctx
+        .live_streamer()
+        .postprocessor
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .any(|step| matches!(step, HookStep::Remove(cmd) if cmd == "rm"));
+    if already_configured {
+        return;
+    }
+
+    let refs: Vec<&Path> = paths.iter().map(PathBuf::as_path).collect();
+    let retention = Retention::after_upload(ctx.pool().clone(), &ctx.config());
+    match process_video(&refs, &[HookStep::Remove("rm".into())], Some(&retention)).await {
+        Ok(()) => info!(count = refs.len(), "投稿成功，已清理本地录像"),
+        // 删不掉不影响投稿结果：投稿已经成功了，这里只记录，不往上抛
+        Err(error) => error!(%error, "投稿后删除本地录像失败"),
+    }
 }
 
 async fn upload_and_submit<F>(
@@ -464,6 +553,9 @@ where
             error!(file = ?upload_path, "segment_processor 返回未遮挡录像，本段停止投稿");
             continue;
         }
+        // 视频已经完整落盘、分段处理也做完了，上传之前先跑 downloaded_processor。
+        // 封面脚本依赖这一步产出的封面文件，而投稿接口会校验它，所以必须挡在上传/投稿之前。
+        run_downloaded_processor(&paths, ctx).await;
         match upload(upload_path.clone()).await {
             Ok(video) => {
                 uploaded.videos.push(video);
@@ -980,13 +1072,36 @@ pub(crate) async fn build_studio(
     recorder: &Recorder,
 ) -> AppResult<Studio> {
     let mut studio = studio_from_template(upload_config, videos, recorder);
-    // 处理封面上传
-    if !studio.cover.is_empty()
-        && let Ok(c) = &std::fs::read(&studio.cover).inspect_err(|e| error!(e=?e))
-        && let Ok(url) = bilibili.cover_up(c).await.inspect_err(|e| error!(e=?e))
-    {
-        studio.cover = url;
-    };
+    // 处理封面上传。
+    //
+    // 这里必须“读不到就退化成不带封面”，不能把本地路径原样交给投稿接口：
+    // 投稿接口只会校验这个字符串是不是可用的图片地址，本地路径会被判为
+    // “该封面地址不合法”（21008），导致整次投稿失败、视频白传一遍。
+    // 相对路径按进程工作目录解析，日志里一并打出 cwd，方便定位封面脚本
+    // 究竟把封面写到了哪里。
+    if !studio.cover.is_empty() {
+        match std::fs::read(&studio.cover) {
+            Ok(bytes) => match bilibili.cover_up(&bytes).await {
+                Ok(url) => studio.cover = url,
+                Err(e) => {
+                    error!(e=?e, cover=%studio.cover, "封面上传失败，本次投稿改用 B 站默认封面");
+                    studio.cover.clear();
+                }
+            },
+            Err(e) => {
+                let cwd = std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default();
+                error!(
+                    e=?e,
+                    cover=%studio.cover,
+                    cwd=%cwd,
+                    "封面文件不存在或不可读（请确认 downloaded_processor 已生成该文件），本次投稿改用 B 站默认封面"
+                );
+                studio.cover.clear();
+            }
+        }
+    }
 
     Ok(studio)
 }
@@ -1001,10 +1116,15 @@ pub(crate) fn studio_from_template(
         recorder.format(&upload_config.description.clone().unwrap_or_default()),
         upload_config.credits.as_ref(),
     );
+    // B 站稿件标题上限 80 字。标题模板带上视频原标题后很容易超限，超了投稿会直接报错，
+    // 这里按字符数截断（与上传文件名用的 `Video::truncate_title` 同一套规则）。
+    let title = Video::truncate_title(&recorder.format_title(), 80);
+    // 未配置版权时按“转载”投稿：录制的多是别人的直播 / 视频，标“自制”属于虚假声明。
+    let copyright = upload_config.copyright.unwrap_or(COPYRIGHT_REPOST);
     Studio::builder()
         .desc(desc)
         .maybe_dtime(scheduled_publish_ts(upload_config.dtime, now_unix()))
-        .maybe_copyright(upload_config.copyright)
+        .maybe_copyright(Some(copyright))
         .cover(upload_config.cover_path.clone().unwrap_or_default())
         .dynamic(upload_config.dynamic.clone().unwrap_or_default())
         .source(resolve_source(
@@ -1014,7 +1134,7 @@ pub(crate) fn studio_from_template(
         .tag(upload_config.tags.join(","))
         .maybe_tid(upload_config.tid)
         .maybe_tid_v2(upload_config.tid_v2)
-        .title(recorder.format_title())
+        .title(title)
         .videos(videos)
         .dolby(upload_config.dolby.unwrap_or_default())
         // .lossless_music(upload_config.)

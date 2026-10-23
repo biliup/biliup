@@ -136,6 +136,7 @@ fn live_options(config: &Config) -> LiveOptions {
                 .youtube_danmaku
                 .or(config.ytb_danmaku)
                 .unwrap_or(false),
+            extra_ytdlp_args: config.youtube_extra_ytdlp_args.clone().unwrap_or_default(),
         },
     }
 }

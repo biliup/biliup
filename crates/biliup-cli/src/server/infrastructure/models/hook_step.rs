@@ -15,8 +15,16 @@ use tracing::{error, info};
 #[derive(PartialEq, Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum HookStep {
-    /// 执行命令格式：{run: "command"}
-    Run { run: String },
+    /// 执行命令格式：`{run: "command"}`。
+    ///
+    /// 默认把**换行分隔的文件路径**写到 stdin；加上 `json = true` 后改成写一个
+    /// JSON 对象（`name` / `room_title` / `start_time` / `end_time` / `file_list`），
+    /// 与 Python 版 biliup 的 downloaded_processor 入参一致，现有脚本可以直接复用。
+    Run {
+        run: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        json: bool,
+    },
     /// 移动文件格式：{mv: "target_dir"}
     Move { mv: String },
     /// 上传结果回调；在任何文件后处理之前由上传流程执行。
@@ -33,6 +41,10 @@ pub enum HookStep {
     },
     /// 删除文件格式："rm"
     Remove(String),
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl HookStep {
@@ -55,7 +67,7 @@ impl HookStep {
         retention: Option<&Retention>,
     ) -> AppResult<()> {
         match self {
-            HookStep::Run { run } => {
+            HookStep::Run { run, .. } => {
                 // 执行自定义命令
                 let paths: Vec<String> = video_paths
                     .iter()
@@ -103,6 +115,16 @@ impl HookStep {
             }
         }
         Ok(())
+    }
+
+    /// 以调用方给定的字节作为 stdin 执行 `run` 步骤（用于 JSON 形式的 hook 入参）。
+    pub async fn execute_with_stdin(&self, src: &[u8]) -> AppResult<()> {
+        match self {
+            HookStep::Run { run, .. } => self.execute_command(run, src).await,
+            other => bail!(AppError::Custom(format!(
+                "只有 run 步骤支持自定义 stdin，收到: {other:?}"
+            ))),
+        }
     }
 
     /// Path-mutating variant: lets steps swap entries in the working set
@@ -246,7 +268,7 @@ impl HookStep {
     /// 执行成功返回Ok(())，失败返回错误信息
     pub async fn execute_with(&self, src: &[u8]) -> AppResult<()> {
         match self {
-            HookStep::Run { run } => {
+            HookStep::Run { run, .. } => {
                 self.execute_command(run, src).await?;
             }
             cmd => {
@@ -536,6 +558,24 @@ mod tests {
         assert!(matches!(steps[1], HookStep::Move { .. }));
         assert!(matches!(steps[2], HookStep::Remux { .. }));
         assert!(matches!(steps[3], HookStep::Remove(_)));
+    }
+
+    #[test]
+    fn run_step_json_flag_is_opt_in() {
+        // 不写 json 时保持原行为：换行分隔的文件路径
+        let yaml = "- run: \"sh ./a.sh\"\n- run: \"sh ./cover.sh\"\n  json: true\n";
+        let steps: Vec<HookStep> = serde_yaml::from_str(yaml).unwrap();
+        match &steps[0] {
+            HookStep::Run { json, .. } => assert!(!*json, "默认必须是路径模式"),
+            other => panic!("应为 run 步骤: {other:?}"),
+        }
+        match &steps[1] {
+            HookStep::Run { json, .. } => assert!(*json, "显式 json = true 才走 JSON"),
+            other => panic!("应为 run 步骤: {other:?}"),
+        }
+        // 序列化时不写出默认值，避免配置文件被写脏
+        let back = serde_yaml::to_string(&steps).unwrap();
+        assert!(!back.contains("json: false"), "默认值不应被序列化: {back}");
     }
 
     #[test]

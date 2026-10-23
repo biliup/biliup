@@ -511,6 +511,10 @@ impl DownloadTask {
             Some(session) => session.lock().await.committed_parts(),
             None => 0,
         };
+        // 上一轮结束时已产出的分段数。yt-dlp 命中 --download-archive 时会以 exit 0
+        // 直接跳过、一个文件都不产出，却仍返回 StreamEnded；只看状态会把这种
+        // “什么都没下到”当成进展，于是 0 延迟无限重试同一个视频。
+        let mut last_seen = processor.output().seen;
         crate::server::fleet::ha::unit_started(ctx);
         let result = loop {
             // 创建守卫确保清理
@@ -582,6 +586,11 @@ impl DownloadTask {
                     // 否则拉流持续失败会零延迟重跑登录、preupload。
                     // 非边录边传：仅在分段成功或干净结束时立即续录；DownloadStatus::Error
                     // 必须走指数退避，避免仍在直播时 0ns 热循环（issue #1682）。
+                    // 另外要求本轮真的产出了新分段：yt-dlp 被 archive 跳过时同样是
+                    // StreamEnded，但没有任何文件落盘，必须按失败计数以结束循环。
+                    let seen_now = processor.output().seen;
+                    let produced = seen_now > last_seen;
+                    last_seen = seen_now;
                     let progressed = match &self.sync_session {
                         Some(session) => {
                             let committed = session.lock().await.committed_parts();
@@ -589,12 +598,22 @@ impl DownloadTask {
                             last_committed = committed;
                             progressed
                         }
-                        None => download_attempt_progressed(&components),
+                        None => produced && download_attempt_progressed(&components),
                     };
                     if progressed {
                         retry_count = 0;
                     } else {
                         retry_count += 1;
+                    }
+                    // yt-dlp 一个文件都没产出却报 StreamEnded，说明这个列表里已经没有
+                    // 可下载的新视频（archive 命中 / 格式不可用），继续重试只会空转，
+                    // 把房间交回监控循环按 checker_sleep 再轮询。
+                    if !produced
+                        && matches!(self.downloader, DownloaderRuntime::YtDlp(_))
+                        && matches!(&components, Ok(DownloadStatus::StreamEnded))
+                    {
+                        info!(url = url, "yt-dlp 无新内容可下载，结束本次轮询");
+                        break components;
                     }
                 }
                 Ok(LiveStatus::Offline) => {
@@ -1020,9 +1039,9 @@ pub async fn start_download_workflow(
             url = ctx.live_streamer().url,
             "音频检查未能全部完成，跳过场次后处理"
         );
-    } else {
-        process(&[], &ctx.live_streamer().downloaded_processor).await;
     }
+    // downloaded_processor 已移到投稿前执行（见 upload.rs upload_and_submit）：
+    // 这里原本传空输入，hook 拿不到视频路径，且执行时机晚于投稿。
 
     info!(
         "Download workflow completed {} => {:?}",

@@ -137,6 +137,15 @@ impl YouTubeDownloader {
         }
 
         let output_path = downloader.output_path().await?;
+        // 确认文件实际存在：archive 跳过时 yt-dlp 会正常退出但一个文件都不产出，
+        // 这里继续往下走会给上传流程一个不存在的路径。
+        if fs::metadata(&output_path).await.is_err() {
+            info!(
+                "输出文件不存在，视为无新内容可处理: {}",
+                output_path.display()
+            );
+            return Ok(DownloadStatus::StreamEnded);
+        }
         callback(SegmentEvent::Segment(SegmentInfo::new(
             output_path,
             None,
@@ -216,15 +225,26 @@ impl YouTubeDownloader {
         };
 
         let mut cmd = tools::command(&self.cfg.ytdlp_bin);
-        cmd.arg("--outtmpl")
+        // `-o` 是各版本 yt-dlp 都认的短参数；`--outtmpl` 在部分版本里没有，会报
+        // “no such option: --outtmpl” 直接退出。
+        cmd.arg("-o")
             .arg(format!(
                 "{}/{}.%(ext)s",
                 download_dir.display(),
                 self.cfg.filename
             ))
-            .arg("--break-on-reject")
+            // 这里刻意不传 `--break-on-reject`：它的语义是“遇到 archive 里已有的条目就整轮中止”。
+            // 列表类 URL 按时间倒序，一旦最新一条已经下过，后面还没下的新视频就永远拿不到。
+            // 配合 `--download-archive` 就是“跳过已下载的，继续下新的”。
             .arg("--format")
             .arg(format_str);
+
+        // 不在这里加 `--max-downloads 1`：它限制的是**单次 yt-dlp 调用**能下几个条目，
+        // 对单条直播/点播地址没有作用，却会让列表类地址（RSS、频道页、播放列表）一次
+        // 只能下一个，剩下的要靠轮询一轮一轮捡 —— 录播批量下载会慢到不可用。
+        // 需要限流的场景（例如一个播放列表一次带出几十条新视频，全下完才上传，长期
+        // 占住下载与上传槽位）用 `youtube_extra_ytdlp_args = ["--max-downloads", "1"]`
+        // 显式开启，默认保持上游行为。
 
         if let Some(cookie) = &self.cfg.cookies_file {
             cmd.arg("--cookies").arg(cookie);
@@ -266,7 +286,13 @@ impl YouTubeDownloader {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let combined = format!("{}\n{}", stdout, stderr);
 
-        if !output.status.success() {
+        // yt-dlp 用退出码 101 表示“已达到 --max-downloads 上限，主动停止”。
+        // 这不是失败：该下的文件已经下载完并合并好了，只是不再继续下一个。
+        // 当成失败处理会在搬运文件之前就 bail，视频留在临时目录里被丢掉，
+        // 而 archive 已经记过这个视频，下一轮只会“已记录，跳过”，最终什么都没上传。
+        let max_downloads_abort = output.status.code() == Some(101);
+
+        if !output.status.success() && !max_downloads_abort {
             if combined.contains("ffmpeg is not installed")
                 || combined.contains("ffmpeg not found")
                 || combined.contains("ffprobe not found")
@@ -281,6 +307,31 @@ impl YouTubeDownloader {
             } else {
                 bail!(AppError::Custom(format!("yt-dlp 执行失败:\n{}", combined)));
             }
+        }
+
+        if max_downloads_abort {
+            info!("yt-dlp 已达 --max-downloads 上限并正常收尾（exit 101），继续搬运已下载的文件");
+        }
+
+        // yt-dlp 返回成功但可能因为 --download-archive 跳过了已下载的视频，
+        // 检查输出目录是否实际有文件，没有则视为跳过而非下载成功
+        let has_output = match fs::read_dir(&download_dir).await {
+            Ok(mut entries) => {
+                let mut found = false;
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    if entry.metadata().await.map(|m| m.is_file()).unwrap_or(false) {
+                        found = true;
+                        break;
+                    }
+                }
+                found
+            }
+            Err(_) => false,
+        };
+        if !has_output {
+            // 跳过下载（archive 命中），不算错误但也不应触发后续搬运
+            info!("yt-dlp 未产出文件（可能已被 --download-archive 跳过），跳过搬运");
+            return Ok(());
         }
 
         // 下载成功，必要时搬运文件到工作目录
