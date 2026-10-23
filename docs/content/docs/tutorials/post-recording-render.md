@@ -146,4 +146,4 @@ BILIUP_OUTPUT={"files":[{"video":"output.mp4","danmaku":"output.xml"}]}
 
 FFmpeg 可以实际转封装。旧配置或 API 显式选择 mesio、stream-gears、streamlink 时，设置 MP4 等后缀不会把原始字节变成该容器：程序按实际容器保存。streamlink 从已录文件头识别容器，无法识别时保留临时录像。旧配置未显式选择下载器而要求 MP4 时，自动选择仍可使用 FFmpeg。
 
-yt-dlp 使用 `after_move` 返回的最终路径，包括合并、转封装后的后缀；archive 命中且没有报告产物时，不会拾取旧文件或封面、信息 JSON。下载失败时保留临时录像，成功后也只移除空缓存目录。ytarchive 的输出模板不带扩展名，默认输出 MP4，选择 MKV 时传入 `--mkv`。边录边传固定使用 Matroska。后续处理和投稿始终使用下载器实际报告的文件。
+yt-dlp 直接在录像目录下载和合并，使用 `after_move` 返回的最终路径，包括合并、转封装后的后缀；archive 命中且没有报告产物时，不会拾取旧文件或封面、信息 JSON。下载失败时保留该目录中的未完成录像，不另建视频缓存目录或清理残留文件。ytarchive 的输出模板不带扩展名，默认输出 MP4，选择 MKV 时传入 `--mkv`。边录边传固定使用 Matroska。后续处理和投稿始终使用下载器实际报告的文件。

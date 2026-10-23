@@ -33,10 +33,6 @@ pub struct DownloadConfig {
     pub suffix: String,
     pub working_dir: PathBuf,
 
-    // 目录策略
-    pub temp_root: PathBuf,
-    pub use_temp_dir_for_ytdlp: bool,
-
     // 模式
     pub backend: Backend,
     pub is_live: bool,
@@ -77,8 +73,6 @@ impl Default for DownloadConfig {
             filename: "output".into(),
             suffix: "mp4".into(),
             working_dir: PathBuf::from("."),
-            temp_root: PathBuf::from("./cache/temp/youtube"),
-            use_temp_dir_for_ytdlp: true,
             backend: Backend::YtDlp,
             is_live: false,
             use_live_cover: false,
@@ -171,28 +165,11 @@ impl YouTubeDownloader {
         fs::create_dir_all(&self.cfg.working_dir)
             .await
             .change_context(AppError::Unknown)?;
-        // Let yt-dlp move media and sidecars together. Only after_move reports
-        // the final container/path; neither the requested suffix nor directory
-        // contents can identify this invocation's completed downloads.
+        // Download and merge in the output directory. Only after_move reports
+        // completed media; partial files and sidecars are never discovered by scanning.
         let manifest = tempfile::NamedTempFile::new()
             .change_context(AppError::Unknown)?
             .into_temp_path();
-        let temp = if self.cfg.use_temp_dir_for_ytdlp {
-            fs::create_dir_all(&self.cfg.temp_root)
-                .await
-                .change_context(AppError::Unknown)?;
-            Some(
-                tempfile::Builder::new()
-                    .prefix("biliup-")
-                    .tempdir_in(&self.cfg.temp_root)
-                    .change_context(AppError::Unknown)?
-                    // Failed downloads and cancelled futures must keep partial media.
-                    .keep(),
-            )
-        } else {
-            None
-        };
-
         // 构造格式串
         let format_str = if self.cfg.two_stream_merge {
             let mut s = String::from("bestvideo");
@@ -223,10 +200,6 @@ impl YouTubeDownloader {
             .arg(format!("home:{}", self.cfg.working_dir.display()))
             .arg("--format")
             .arg(format_str);
-        if let Some(temp) = &temp {
-            cmd.arg("--paths").arg(format!("temp:{}", temp.display()));
-        }
-
         if let Some(cookie) = &self.cfg.cookies_file {
             cmd.arg("--cookies").arg(cookie);
         }
@@ -301,11 +274,6 @@ impl YouTubeDownloader {
             .await
             .change_context(AppError::Unknown)?;
         let paths = completed_paths(&reported)?;
-        if let Some(temp) = temp {
-            // yt-dlp moves completed files itself. Remove only an empty cache;
-            // leftover fragments stay available without enumerating the directory.
-            let _ = fs::remove_dir(temp).await;
-        }
         if paths.is_empty() {
             info!("yt-dlp 未报告完成的视频（可能命中 archive），跳过上传");
         }
@@ -445,7 +413,6 @@ mod tests {
     async fn download_exit_never_deletes_leftover_media() {
         for exit_code in [1, 0] {
             let dir = tempfile::tempdir().unwrap();
-            let report = dir.path().join("temp-path.txt");
             let script = dir.path().join(if cfg!(windows) {
                 "yt-dlp.cmd"
             } else {
@@ -453,13 +420,11 @@ mod tests {
             });
             #[cfg(windows)]
             let source = format!(
-                "@echo off\r\n:next\r\nif \"%~1\"==\"\" exit /b 2\r\nset \"arg=%~1\"\r\nif \"%arg:~0,5%\"==\"temp:\" goto found\r\nshift\r\ngoto next\r\n:found\r\nset \"tempdir=%arg:~5%\"\r\necho partial>\"%tempdir%\\unfinished.mp4.part\"\r\necho %tempdir%>\"{}\"\r\nexit /b {exit_code}\r\n",
-                report.display(),
+                "@echo off\r\n:next\r\nif \"%~1\"==\"\" goto done\r\nset \"arg=%~1\"\r\nif \"%arg:~0,5%\"==\"temp:\" exit /b 2\r\nif \"%arg:~0,5%\"==\"home:\" set \"output=%arg:~5%\"\r\nshift\r\ngoto next\r\n:done\r\necho partial>\"%output%\\unfinished.mp4.part\"\r\nexit /b {exit_code}\r\n",
             );
             #[cfg(not(windows))]
             let source = format!(
-                "#!/bin/sh\nfor arg do\n case \"$arg\" in temp:*)\n tempdir=${{arg#temp:}}\n printf partial > \"$tempdir/unfinished.mp4.part\"\n printf '%s' \"$tempdir\" > '{}'\n exit {exit_code};;\n esac\ndone\nexit 2\n",
-                report.display().to_string().replace('\'', "'\"'\"'"),
+                "#!/bin/sh\nfor arg do\n case \"$arg\" in\n temp:*) exit 2;;\n home:*) output=${{arg#home:}};;\n esac\ndone\nprintf partial > \"$output/unfinished.mp4.part\"\nexit {exit_code}\n",
             );
             fs::write(&script, source).await.unwrap();
             #[cfg(unix)]
@@ -473,15 +438,13 @@ mod tests {
                 ytdlp_bin: script.to_string_lossy().into_owned(),
                 webpage_url: "https://example.invalid/video".into(),
                 working_dir: dir.path().join("output"),
-                temp_root: dir.path().join("cache"),
                 download_archive: None,
                 ..Default::default()
             });
             let result = downloader.run_ytdlp().await;
             assert_eq!(result.is_err(), exit_code != 0);
-            let temp = PathBuf::from(fs::read_to_string(report).await.unwrap().trim());
             assert!(
-                temp.join("unfinished.mp4.part").is_file(),
+                dir.path().join("output/unfinished.mp4.part").is_file(),
                 "exit {exit_code} removed unfinished media"
             );
         }
