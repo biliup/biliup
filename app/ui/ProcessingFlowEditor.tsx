@@ -13,8 +13,8 @@ import styles from './ProcessingFlowEditor.module.css'
 
 export type FlowNode = 'start' | 'download' | 'upload' | ProcessingStage
 export const FLOW_NODES: Record<FlowNode, { title: string; description: string; icon: React.ReactNode }> = {
-  start: { title: '直播开始', description: '设置录播备注、直播链接、文件名模板和视频格式。', icon: <IconPlayCircle /> },
-  download: { title: '下载', description: '设置录制时间范围、不录制关键词与 ffmpeg 参数。', icon: <IconDownloadStroked /> },
+  start: { title: '直播开始', description: '设置录播备注、直播链接和文件名模板。', icon: <IconPlayCircle /> },
+  download: { title: '下载', description: '设置下载器、保存后缀、录制时间范围、不录制关键词与 ffmpeg 参数。', icon: <IconDownloadStroked /> },
   upload: { title: '上传', description: '为这个直播间选择投稿模板，分段上传后统一投稿。', icon: <IconCloudUploadStroked /> },
   preprocessor: { title: '下载前处理', description: '下载直播前触发，按顺序执行 run 命令。', icon: <IconCodeStroked /> },
   segment_processor: { title: '分段时后处理', description: '每个分段上传前触发，按顺序执行操作。弹幕与遮挡可在同一个 render 步骤中完成。', icon: <IconFlowChartStroked /> },

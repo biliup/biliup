@@ -70,7 +70,7 @@ export default function StreamerEditor({ entity, title, back, onOk, templateOpti
       ...(hooks ? processingFlowToForm(processing_flow ?? {}) : {}),
       remark: values.remark.trim(), url: values.url.trim(),
       format: savedDownloadFormat(values.format, values.override?.downloader ?? inheritedDownloader, values.url.trim(),
-        values.override?.downloader != null || configuration.data != null),
+        hooks && (values.override?.downloader != null || configuration.data != null)),
       time_range: values.time_range?.length ? JSON.stringify(values.time_range.map((date: Date) => date.toISOString())) : null,
     })
   }
@@ -95,8 +95,10 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
   const { values } = useFormState()
   const formApi = useFormApi()
   const downloader = values.override?.downloader ?? inheritedDownloader
-  const formatPolicy = downloadFormatPolicy(downloader, values.url)
-  const formatKnown = values.override?.downloader != null || configurationKnown
+  // Without hook permission the API omits per-room overrides, so the effective
+  // downloader is unknown. Preserve the saved suffix when editing other fields.
+  const formatPolicy = downloadFormatPolicy(hooks ? downloader : undefined, values.url)
+  const formatKnown = hooks && (values.override?.downloader != null || configurationKnown)
   useEffect(() => {
     const next = savedDownloadFormat(values.format, downloader, values.url, formatKnown)
     if (values.format != null && values.format !== next) formApi.setValue('format', next)
@@ -144,7 +146,7 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
         {extraFields}
       </div>
       <div hidden={selected !== 'download'}>
-              <Form.Select field="override.downloader" label="下载器" showClear
+              {hooks && <Form.Select field="override.downloader" label="下载器" showClear
                 placeholder={inheritedDownloader ? `跟随全局：${inheritedDownloader}` : fleet ? '跟随录制节点设置' : '自动选择'}
                 style={{ width: '100%' }} optionList={[
                   { value: 'mesio', label: 'mesio' },
@@ -156,12 +158,14 @@ function EditorPanels({ selected, onSelect, expanded, onExpandedChange, hooks, f
                   { value: 'yt-dlp', label: 'yt-dlp' },
                   { value: 'ytarchive', label: 'ytarchive（YouTube 直播）' },
                   ...(hooks ? [{ value: 'sync-downloader', label: 'sync-downloader（边录边传）' }] : []),
-                ]} />
-              <Form.Select field="format" label="保存后缀（转封装）" showClear
-                disabled={!formatPolicy.formats.length} style={{ width: 200 }}
-                placeholder={formatPolicy.formats.length ? '默认格式' : '按实际容器保存'}
-                optionList={formatPolicy.formats.map(value => ({ value, label: `.${value}` }))}
-                helpText={formatPolicy.help} />
+                ]} />}
+              <div hidden={!formatPolicy.formats.length}>
+                <Form.Select field="format" label="保存后缀（转封装）" showClear
+                  disabled={!formatPolicy.formats.length} style={{ width: 200 }}
+                  placeholder="默认格式"
+                  optionList={formatPolicy.formats.map(value => ({ value, label: `.${value}` }))}
+                  helpText={formatPolicy.help} />
+              </div>
               <Form.TimePicker
                 field="time_range"
                 type="timeRange"
