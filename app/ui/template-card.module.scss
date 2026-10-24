@@ -1,0 +1,164 @@
+/* 投稿模板卡片 —— 与直播间卡片、「任务平台 › 投稿模板」卡片同一套视觉语言 */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 16px 4px;
+  background: var(--semi-color-bg-1);
+  border: 1px solid var(--semi-color-fill-2);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(var(--semi-grey-9), 0.04), 0 2px 6px rgba(var(--semi-grey-9), 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.card:hover {
+  border-color: var(--semi-color-primary);
+  box-shadow: 0 6px 16px rgba(var(--semi-grey-9), 0.08);
+  transform: translateY(-1px);
+}
+
+/* 名称与「托管 / 配对」标记同一行，名称占满剩余宽度，最多两行 */
+.head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.badge {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* 稿件标题模板：让卡片能看出这个模板会投出什么标题 */
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--semi-color-text-1);
+}
+
+.titleText {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.muted {
+  color: var(--semi-color-text-3);
+}
+
+.label {
+  flex-shrink: 0;
+  color: var(--semi-color-text-3);
+  font-size: 12px;
+}
+
+/* 账号 / 类型 / 分区 / 定时 / 上传插件：与节点卡片的 meta 行一致，窄了自动换行 */
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--semi-color-text-2);
+}
+
+.metaItem {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.metaValue {
+  min-width: 0;
+  color: var(--semi-color-text-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 模板里带的默认标签，最多展示 4 个，其余折成 +n */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.chip {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--semi-color-fill-0);
+  color: var(--semi-color-text-2);
+  font-size: 11.5px;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+/* 底栏操作：右对齐，压在卡片底部（与节点 / 模板卡片一致），卡片高度不齐也贴底 */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  margin-top: auto;
+  padding: 4px 0;
+  border-top: 1px solid var(--semi-color-border);
+}
+
+.foot :global(.semi-button) {
+  padding: 4px 8px;
+  font-size: 12.5px;
+}
+
+.loading,
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 64px 16px;
+}
+
+.empty :global(.semi-empty-description) {
+  max-width: 460px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    transition: none;
+  }
+  .card:hover {
+    transform: none;
+  }
+}
