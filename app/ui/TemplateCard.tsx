@@ -11,7 +11,8 @@ const { Text } = Typography
 export function formatDelay(dtime?: number | null): string | null {
   if (!dtime || dtime <= 0) return null
   const hours = Math.floor(dtime / 3600)
-  const minutes = Math.round((dtime % 3600) / 60)
+  // 向下取整，否则不是整分钟的 dtime 会被进位成「3 小时 60 分钟」
+  const minutes = Math.floor((dtime % 3600) / 60)
   if (hours > 0 && minutes > 0) return `${hours} 小时 ${minutes} 分钟`
   return hours > 0 ? `${hours} 小时` : `${minutes} 分钟`
 }
@@ -25,8 +26,15 @@ function copyrightLabel(copyright: number): string {
 
 export interface TemplateCardProps {
   template: StudioEntity
-  /** 投稿账号显示名（由 user_cookie 换成 B 站昵称）；未知时回落到 cookie 名 */
+  /**
+   * 投稿账号显示名（由 user_cookie 换成 B 站昵称）。拿不到就显示「—」：
+   * user_cookie 是 biliup 所在机器上的凭据文件路径，不能回落到它
+   */
   account?: string | null
+  /** 分区名（tid → 「网络游戏」）；拉不到分区树时为空，只显示 tid */
+  tidName?: string
+  /** 分区悬浮提示：完整路径「游戏 / 网络游戏」，外加 tid_v2 */
+  tidHint?: string
   canSubmit: boolean
   canEdit: boolean
   /** 控制面 / 本机 Fleet 下发的模板：只读，改删在后端返回 409 */
@@ -49,6 +57,8 @@ export interface TemplateCardProps {
 export default function TemplateCard({
   template,
   account,
+  tidName,
+  tidHint,
   canSubmit,
   canEdit,
   managed,
@@ -62,7 +72,7 @@ export default function TemplateCard({
 }: TemplateCardProps) {
   const delay = formatDelay(template.dtime)
   const tags = template.tags ?? []
-  const accountText = account || template.user_cookie || '—'
+  const accountText = account || '—'
   const title = template.title?.trim()
   const deleteDisabled = !!managed || !!pairLabel
 
@@ -106,9 +116,12 @@ export default function TemplateCard({
           <span className={styles.label}>类型</span>
           <span className={styles.metaValue}>{copyrightLabel(template.copyright)}</span>
         </span>
-        <span className={styles.metaItem} title="投稿分区 tid">
+        <span className={styles.metaItem} title={tidHint ?? '投稿分区 tid'}>
           <span className={styles.label}>分区</span>
-          <span className={styles.metaValue}>{template.tid ?? '—'}</span>
+          <span className={styles.metaValue}>
+            {template.tid ?? '—'}
+            {tidName ? `(${tidName})` : null}
+          </span>
         </span>
         {delay ? (
           <span className={styles.metaItem} title="录完后再等这么久投稿">

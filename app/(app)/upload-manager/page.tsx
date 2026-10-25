@@ -20,7 +20,7 @@ import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import UserList from '../../ui/UserList'
 import useSWRMutation from 'swr/mutation'
-import { useBiliUsers } from '../../lib/use-streamers'
+import { useBiliUsers, useTidNames } from '../../lib/use-streamers'
 import PageHeader from '../components/PageHeader'
 import { pairLabel, pairPeer, useMe } from '../../lib/use-me'
 import dc from '@/app/ui/data-card.module.scss'
@@ -28,6 +28,7 @@ import tc from '@/app/ui/template-card.module.scss'
 import TemplateCard from '@/app/ui/TemplateCard'
 import { FormDialog } from '@/app/ui/shell'
 import { SubmissionLock } from '@/app/lib/submission-lock'
+import { errorMessage } from '@/app/lib/use-fleet'
 
 export default function UploadManager() {
   const { Text } = Typography
@@ -39,6 +40,8 @@ export default function UploadManager() {
     fetcher
   )
   const { biliUsers } = useBiliUsers()
+  // 分区名来自 /bili/archive/pre，与投稿表单的分区选择器同一张表；拿不到时卡片只显示 tid
+  const tidNames = useTidNames()
   const { me, can } = useMe()
   const canManageAccounts = can('account.manage')
   const canEditTemplates = can('template.edit')
@@ -216,11 +219,25 @@ export default function UploadManager() {
           <div className={tc.grid}>
             {templates.map((item) => {
               const paired = !!pair && pairedIds.has(item.id)
+              const tid = tidNames.get(item.tid)
               return (
                 <TemplateCard
                   key={item.id}
                   template={item}
-                  account={biliUsers.find((user) => user.value === item.user_cookie)?.name}
+                  // 没有 template.edit 权限时拿不到账号列表（useBiliUsers 按这个权限门控），
+                  // 这时不能回落到 user_cookie —— 那是 biliup 机器上的凭据文件路径
+                  account={
+                    canEditTemplates
+                      ? biliUsers.find((user) => user.value === item.user_cookie)?.name
+                      : undefined
+                  }
+                  tidName={tid?.name}
+                  tidHint={[
+                    tid ? `投稿分区：${tid.path}` : '投稿分区 tid',
+                    item.tid_v2 ? `tid_v2 ${item.tid_v2}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join('；')}
                   canSubmit={canSubmit}
                   canEdit={canEditTemplates}
                   managed={managedIds.has(item.id)}
@@ -247,9 +264,9 @@ export default function UploadManager() {
               title={error ? '投稿模板加载失败' : '还没有投稿模板'}
               description={
                 error
-                  ? error instanceof Error
-                    ? error.message
-                    : '请稍后重试'
+                  ? // fetcher 抛出的是响应体原文，后端返回 JSON 时要取里面的 message，
+                    // 不能直接把 {"message":"..."} 印到页面上
+                    errorMessage(error) || '请稍后重试'
                   : canEditTemplates
                     ? '投稿模板决定录完的视频投到哪个账号、用什么标题和分区。新建后这里会列出它的账号、类型、分区和默认标签。'
                     : '管理员添加投稿模板后会显示在这里'

@@ -1,3 +1,4 @@
+import {useMemo} from "react";
 import useSWR from "swr";
 
 import {
@@ -63,16 +64,46 @@ export function useBiliUsers(enabled = true) {
 export function useTypeTree() {
   const {can} = useMe();
   const { data: archivePre, error, isLoading } = useSWR(can("upload.submit") ? "/bili/archive/pre" : null, fetcher);
-  const treeData = archivePre?.data?.typelist.map((type: BiliType)=> {
+  // 包一层 useMemo：下游（useTidNames、TemplateFields 的 Cascader）按引用做缓存，
+  // 每次渲染都 map 出一个新数组的话，那些 useMemo 等于没生效
+  const treeData = useMemo(() => archivePre?.data?.typelist.map((type: BiliType)=> {
     return {
       label: type.name,
       value: type.id,
       children: type.children
     };
-  });
+  }), [archivePre]);
   return {
     isLoading,
     isError: error,
     typeTree: treeData,
   };
+}
+
+/** 分区树的一级分区（游戏 / 知识 / 生活…）；children 是二级分区，它的 id 才是投稿时用的 tid */
+export interface TypeTreeNode {
+  label: string;
+  value: number;
+  children: BiliType[];
+}
+
+/**
+ * 投稿分区 tid → 分区名与完整路径（172 → 「网络游戏」/「游戏 / 网络游戏」）。
+ * 数据源与投稿表单里的分区 Cascader 同为 /bili/archive/pre：后端拿本机第一个能登录的 cookie
+ * 直接向 B 站要 typelist，所以不要硬编码 tid 表 —— B 站会增删分区、改名，而且返回的
+ * 分区随账号类型而变（认证号、机构号能看到更多）。
+ * 没有 upload.submit 权限、本机没有可用 cookie、接口失败时 map 为空，调用方回落到裸 tid。
+ */
+export function useTidNames() {
+  const {typeTree} = useTypeTree();
+
+  return useMemo(() => {
+    const map = new Map<number, {name: string; path: string}>();
+    for (const type of (typeTree ?? []) as TypeTreeNode[]) {
+      for (const child of type.children ?? []) {
+        map.set(child.id, {name: child.name, path: `${type.label} / ${child.name}`});
+      }
+    }
+    return map;
+  }, [typeTree]);
 }
