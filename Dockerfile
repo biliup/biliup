@@ -42,6 +42,9 @@ RUN set -eux; \
 	useApt=false; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
+	    ca-certificates \
+        libssl3t64 \
+        intel-gpu-tools \
 		wget \
 		curl \
 		xz-utils \
