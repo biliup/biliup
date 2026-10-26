@@ -42,13 +42,18 @@ RUN set -eux; \
 	useApt=false; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
-        intel-gpu-tools \
+	if [ "$arch" = "amd64" ]; then \
+        apt-get install -y --no-install-recommends intel-gpu-tools; \
+    fi; \
 		wget \
 		curl \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
 	apt-mark manual curl intel-gpu-tools wget; \
+	if [ "$arch" = "amd64" ]; then \
+        apt-mark manual intel-gpu-tools; \
+    fi; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：
