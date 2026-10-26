@@ -40,7 +40,11 @@ RUN set -eux; \
 	\
 	savedAptMark="$(apt-mark showmanual)"; \
 	useApt=false; \
+	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	apt-get update; \
+	if [ "$arch" = "amd64" ]; then \
+		apt-get install -y --no-install-recommends intel-gpu-tools; \
+	fi; \
 	apt-get install -y --no-install-recommends \
         intel-gpu-tools \
 		wget \
@@ -48,9 +52,11 @@ RUN set -eux; \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
-	apt-mark manual curl intel-gpu-tools wget; \
+	apt-mark manual curl wget; \
+	if [ "$arch" = "amd64" ]; then \
+		apt-mark manual intel-gpu-tools; \
+	fi; \
 	\
-	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：
 	# latest 是滚动 tag，资产每日重建，既不可复现也无法防篡改。
 	# 只能固定到「每月最后一天」的 autobuild：BtbN 长期保留月末构建，
