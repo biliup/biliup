@@ -42,15 +42,13 @@ RUN set -eux; \
 	useApt=false; \
 	apt-get update; \
 	apt-get install -y --no-install-recommends \
-	    ca-certificates \
-        libssl3t64 \
         intel-gpu-tools \
 		wget \
 		curl \
 		xz-utils \
 	; \
 	apt-mark auto '.*' > /dev/null; \
-	apt-mark manual curl wget; \
+	apt-mark manual curl intel-gpu-tools wget; \
 	\
 	arch="$(dpkg --print-architecture)"; arch="${arch##*-}"; \
 	# 固定 FFmpeg 到确定版本并校验 SHA-256：
