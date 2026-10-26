@@ -88,6 +88,14 @@ top = false
 
 参考实现和参数说明：[Jellyfin 硬件转码](https://jellyfin.org/docs/general/post-install/transcoding/hardware-acceleration/)、[Immich 硬件转码](https://docs.immich.app/features/hardware-transcoding/)、[NVIDIA FFmpeg 指南](https://docs.nvidia.com/video-technologies/video-codec-sdk/13.0/ffmpeg-with-nvidia-gpu/index.html) 和 [FFmpeg 视频编码器](https://ffmpeg.org/ffmpeg-codecs.html#Video-Encoders)。
 
+### Docker 中的 Intel VAAPI
+
+Dockerfile 为 Linux/amd64 镜像安装 VAAPI DRM 运行库和完整 iHD 编码驱动 `intel-media-va-driver-non-free`，后者来自 Debian `non-free` 软件源，版权声明随镜像保留在 `/usr/share/doc/`；其他架构不安装该 Intel 驱动。此依赖补齐针对 VAAPI，不会额外安装 QSV / oneVPL 运行库。
+
+使用核显时，在原有 Docker 启动参数中增加 `--device /dev/dri:/dev/dri`，并确保容器运行用户有权限访问目标 `/dev/dri/renderD*`。宿主机仍须有正常工作的 GPU 内核驱动；镜像内的库不能代替设备透传或修复宿主驱动。没有 GPU 时仍可使用 `libx264`，自动模式保留原有 CPU 回退。
+
+Intel Video 引擎监测可能另外需要 `--cap-add PERFMON`，具体取决于内核及容器安全策略；该权限不是 VAAPI 编码的前提。不要为开启编码或读取监测数据默认使用 `--privileged`。监测与编码可用性应分别排查。
+
 ### Intel QSV 检测失败
 
 如果 VAAPI 正常但 QSV 报 `Error creating a MFX session: -9`，先检查 oneVPL GPU 运行库。仅安装 `libvpl` 调度库不足以运行 Intel GPU 编码；Arch Linux 还需要官方包 `vpl-gpu-rt`（与 `intel-media-driver` 版本匹配）。运行库补齐后重新检测，原先失败结果可能最多缓存 30 秒。不要把这个错误直接解释为显卡缺少编码能力。

@@ -34,7 +34,16 @@ EXPOSE 19159/tcp
 VOLUME /opt
 COPY --from=binary-builder /biliup/target/release/biliup /usr/local/bin/biliup
 COPY --from=binary-builder /biliup/crates/biliup-cli/assets/render-tools /usr/local/bin/render-tools
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3t64 && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+	packages="ca-certificates libssl3t64 libva-drm2"; \
+	if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+		# 完整 iHD 驱动提供 Intel VAAPI 编码；Debian 仅在 x86 平台提供此包。
+		sed -i 's/Components: main$/Components: main non-free/' /etc/apt/sources.list.d/debian.sources; \
+		packages="$packages intel-media-va-driver-non-free"; \
+	fi; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends $packages; \
+	rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
 	\
@@ -96,7 +105,6 @@ RUN set -eux; \
 	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
 	rm -rf \
 		/tmp/* \
-		/usr/share/doc/* \
 		/var/cache/* \
 		/var/lib/apt/lists/* \
 		/var/tmp/* \
