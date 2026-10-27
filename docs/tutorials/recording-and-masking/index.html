@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="x-ua-compatible" content="ie=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-regular.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="/biliup/fonts/vendor/jost/jost-v4-latin-700.woff2"  type="font/woff2" crossorigin>
+
+
+<link rel="stylesheet" href="/biliup/main.css">
+
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+  
+  
+    
+  
+  
+  
+  
+    
+  
+  
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>录制分段、画面遮挡与本地合并 | Biliup</title>
+<meta name="description" content="设置自定义录制分段，在真实直播截帧上圈选遮挡区域，并使用 FFmpeg 快速合并完成的视频">
+<link rel="canonical" href="/biliup/docs/tutorials/recording-and-masking/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="/biliup/doks.png">
+  
+  <meta name="twitter:title" content="录制分段、画面遮挡与本地合并">
+  <meta name="twitter:description" content="设置自定义录制分段，在真实直播截帧上圈选遮挡区域，并使用 FFmpeg 快速合并完成的视频">
+  <meta name="twitter:site" content="@aaranxu">
+  <meta name="twitter:creator" content="@aaranxu">
+  
+  <meta property="og:title" content="录制分段、画面遮挡与本地合并">
+  <meta property="og:description" content="设置自定义录制分段，在真实直播截帧上圈选遮挡区域，并使用 FFmpeg 快速合并完成的视频">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="/biliup/docs/tutorials/recording-and-masking/">
+
+  
+    <meta property="og:image" content="/biliup/doks.png">
+  
+
+  <meta property="og:updated_time" content="2026-10-09T00:00:00+00:00">
+  <meta property="og:site_name" content="录制分段、画面遮挡与本地合并">
+
+  
+
+  
+
+  
+  <meta property="article:publisher" content="https://www.facebook.com/ichunyun">
+  <meta property="article:author" content="https://www.facebook.com/ichunyun">
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "/biliup:///biliup/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Docs",
+            "item": "/biliup:///biliup/docs/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Tutorials",
+            "item": "/biliup:///biliup/docs/tutorials/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Recording And Masking",
+            "item": "/biliup:///biliup/docs/tutorials/recording-and-masking/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+
+
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="/biliup/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/biliup/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/biliup/favicon-16x16.png">
+  
+    <link rel="manifest" href="/biliup/site.webmanifest" crossorigin>
+  
+
+
+  
+
+</head>
+
+  
+
+<body class="docs single">
+  
+  
+  
+  
+<div class="header-bar fixed-top"></div>
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+	<div class="container">
+		<input class="menu-btn order-0" type="checkbox" id="menu-btn">
+		<label class="menu-icon d-md-none" for="menu-btn"><span class="navicon"></span></label>
+		<a class="navbar-brand order-1 order-md-0 me-auto" href="/biliup">Biliup</a>
+		<button id="mode" class="btn btn-link order-2 order-md-4" type="button" aria-label="Toggle mode">
+			<span class="toggle-dark"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-moon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></span>
+			<span class="toggle-light"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-sun"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg></span>
+		</button>
+		<ul class="navbar-nav fork-me order-3 order-md-5">
+			
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://biliup.github.io/"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-twitter"><path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path></svg><span class="ms-2 visually-hidden">Twitter</span></a>
+					</li>
+				
+					<li class="nav-item">
+						<a class="nav-link" href="https://github.com/biliup/biliup"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-github"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg><span class="ms-2 visually-hidden">GitHub</span></a>
+					</li>
+				
+			
+		</ul>
+		<div class="collapse navbar-collapse order-4 order-md-1">
+			<ul class="navbar-nav main-nav me-auto order-5 order-md-2">
+				
+					
+				
+				
+				
+					
+						<li class="nav-item docs active">
+							<a class="nav-link" href="/biliup/docs/getting-started/introduction/">Docs</a>
+						</li>
+					
+						<li class="nav-item">
+							<a class="nav-link" href="/biliup/blog/">Blog</a>
+						</li>
+					
+				
+			</ul>
+			<div class="break order-6 d-md-none"></div>
+			
+				<form class="navbar-form flex-grow-1 order-7 order-md-3">
+					<input id="userinput" class="form-control is-search" type="search" placeholder="Search docs..."
+						aria-label="Search docs..." autocomplete="off">
+					<div id="suggestions" class="shadow bg-white rounded"></div>
+				</form>
+			
+		</div>
+	</div>
+</header>
+
+
+
+  
+<div class="wrap container" role="document">
+  <div class="content">
+    <div class="row flex-xl-nowrap">
+	  
+<div class="col-lg-5 col-xl-4 docs-sidebar">
+	<nav class="docs-links" aria-label="Main navigation">
+			
+			
+			
+			
+					
+					
+					
+							<h3>使用指南</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/introduction/">说明</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/getting-started/quick-start/">Quick Start</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Getting Started</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/introduction/">Introduction</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/guide/changelog/">更新日志</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Contributing</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/how-to-contribute/">How to Contribute</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>Help</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/help/faq/">FAQ</a></li>
+							
+					</ul>
+					
+					
+					
+					
+							<h3>教程</h3>
+							<ul class="list-unstyled">
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/douyu-cookie-guide/">斗鱼登录、Cookie 续期与画质设置</a></li>
+							                           
+									<li><a class="docs-link active" href="/biliup/docs/tutorials/recording-and-masking/">录制分段、画面遮挡与本地合并</a></li>
+							                           
+									<li><a class="docs-link" href="/biliup/docs/tutorials/post-recording-render/">录后弹幕合成</a></li>
+							
+					</ul>
+					
+					
+			
+	</nav>
+</div>
+
+	  
+  
+  <nav class="docs-toc d-none d-xl-block col-xl-3" aria-label="Secondary navigation">
+  	<div class="page-links">
+  			<h3>On this page</h3>
+  			<nav id="TableOfContents">
+  					<ul>
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#xian-que-ren-zi-dong-yu-shou-dong-de-fan-wei">先确认自动与手动的范围</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#she-zhi-zi-ding-yi-lu-zhi-fen-duan-shi-chang">设置自定义录制分段时长</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#zai-zhen-shi-zhi-bo-jie-zheng-shang-quan-xuan-zhe-dang-qu-yu">在真实直播截帧上圈选遮挡区域</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#que-ren-zhe-dang-wan-cheng-hou-zai-shi-yong-wen-jian">确认遮挡完成后再使用文件</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#flv-yin-pin-shi-jian-chuo-jian-cha-yu-zi-dong-xiu-fu">FLV 音频时间戳检查与自动修复</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#shi-yong-ffmpeg-kuai-su-he-bing-ben-di-fen-duan">使用 FFmpeg 快速合并本地分段</a></li>
+  							
+  									<ul>
+  											
+  											<li><a href="/biliup/docs/tutorials/recording-and-masking/#1-he-dui-dai-he-bing-de-wen-jian">1. 核对待合并的文件</a></li>
+  											
+  											<li><a href="/biliup/docs/tutorials/recording-and-masking/#2-an-bo-fang-shun-xu-chuang-jian-wen-jian-lie-biao">2. 按播放顺序创建文件列表</a></li>
+  											
+  											<li><a href="/biliup/docs/tutorials/recording-and-masking/#3-shu-chu-yi-ge-xin-de-mp4">3. 输出一个新的 MP4</a></li>
+  											
+  									</ul>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#xu-yao-zi-dong-he-bing-shi-ru-he-pei-zhi">需要自动合并时如何配置</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#chu-li-qi-de-zhi-xing-jie-duan">处理器的执行阶段</a></li>
+  							
+  							
+  							<li><a href="/biliup/docs/tutorials/recording-and-masking/#chang-jian-wen-ti">常见问题</a></li>
+  							
+  							
+  					</ul>
+  			</nav>
+  	</div>
+  </nav>
+  
+
+      <main class="docs-content col-lg-11 col-xl-9">
+        <h1>录制分段、画面遮挡与本地合并</h1>
+        <p class="lead">录制和遮挡按分段自动进行。本地合并默认需要手动执行；本文说明配置、确认处理完成及无重编码合并的步骤。</p>
+        <h2 id="xian-que-ren-zi-dong-yu-shou-dong-de-fan-wei">先确认自动与手动的范围</h2>
+<table><thead><tr><th>行为</th><th>当前处理方式</th></tr></thead><tbody>
+<tr><td>根据设定时长或文件大小分段录制</td><td>自动</td></tr>
+<tr><td>检查已关闭的 FLV 分段中的 AAC 时间戳</td><td>自动，发现重复或回退时修复音频</td></tr>
+<tr><td>对启用画面遮挡的房间处理已关闭的分段</td><td>自动，处理成功后再进入后续流程</td></tr>
+<tr><td>上传多个分段至同一个 B 站稿件</td><td>按投稿流程处理，通常是多个分 P</td></tr>
+<tr><td>将短暂断流后的录像归入同一场次</td><td>按断流合并窗口管理工作台场次</td></tr>
+<tr><td>将本地多个分段拼成一个视频文件</td><td>默认手动，可自行配置后处理脚本</td></tr>
+</tbody></table>
+<p>多分 P 投稿和工作台场次合并都不会把本地分段拼接成一个文件。当前没有“下播后自动合并本地录像”的内置开关。</p>
+<p>本文以支持落盘分段的下载器为前提。使用斗鱼时，账号配置和实际画质检查见<a href="/biliup/docs/tutorials/douyu-cookie-guide/">斗鱼 Cookie 与画质设置</a>。</p>
+<h2 id="she-zhi-zi-ding-yi-lu-zhi-fen-duan-shi-chang">设置自定义录制分段时长</h2>
+<p>全局设置入口是 <strong>空间配置 → 全局设置 → 视频分段时长（segment_time）</strong>。需要单独设置某个房间时，进入 <strong>直播管理 → 对应房间的配置覆写 → 下载设置</strong>。</p>
+<p>选择 <strong>自定义时长…</strong>，填写大于零的时长并保存。以下三种写法都表示 7 分 30 秒：</p>
+<table><thead><tr><th>输入格式</th><th>示例</th></tr></thead><tbody>
+<tr><td>时:分:秒</td><td><code>00:07:30</code></td></tr>
+<tr><td>分:秒</td><td><code>7:30</code></td></tr>
+<tr><td>秒数</td><td><code>450</code></td></tr>
+</tbody></table>
+<p>也支持小数秒。房间级设置有三个独立状态：</p>
+<ul>
+<li><strong>跟随全局设置</strong>：使用全局分段时长。</li>
+<li><strong>不按时长分段</strong>：关闭该房间的时长限制，即使全局设置了时长也不采用；仍可能按文件大小、断流等条件分段。</li>
+<li><strong>预设或自定义时长</strong>：使用该房间自己的时长。</li>
+</ul>
+<p>分段通常需要等到合适的关键帧边界才关闭，实际时长可能略长于设定值。保存后重新打开设置，确认选项和时长已保留；对于已经开始的录制任务，停止后重新录制可确保采用新设置。</p>
+<p>同时检查 <strong>碎片过滤（filtering_threshold）</strong>。短分段如果小于该阈值，会被过滤，不进入投稿和后处理。启用遮挡时，程序先完成遮挡，再按原始分段大小执行过滤；被工作台引用而保留的小分段也会是遮挡后的内容。需要保留短分段用于本地合并时，应降低阈值；设为 <code>0</code> 可关闭按大小过滤。</p>
+<p><img src="/images/recording-and-masking/segment-duration-settings.webp" alt="房间自定义分段时长与碎片过滤设置" /></p>
+<h2 id="zai-zhen-shi-zhi-bo-jie-zheng-shang-quan-xuan-zhe-dang-qu-yu">在真实直播截帧上圈选遮挡区域</h2>
+<ol>
+<li>在 <strong>直播管理</strong> 中找到已保存的直播间，点击卡片或列表中的 <strong>画面遮挡</strong>。也可以进入 <strong>配置覆写 → 画面遮挡（实验性）</strong>。</li>
+<li>展开面板后，等待程序取得该直播间当前的真实直播截帧。</li>
+<li>打开 <strong>启用画面遮挡功能</strong>，在画面上按住鼠标左键或触屏拖拽，圈选矩形区域。</li>
+<li>在区域表格里选择马赛克、模糊或纯色，调整强度或颜色；多余的区域可删除。</li>
+<li>保存配置，录制一小段，等待处理完成后检查正式输出中的位置和效果。</li>
+</ol>
+<p>编辑器使用一张固定截帧，圈选时画面不会移动。点击 <strong>刷新画面</strong> 可以重新抓帧，已配置的区域会保留。直播间未开播或抓帧失败时，会显示错误和重试入口；取得真实画面前不能新增区域。</p>
+<p>画布按直播画面的实际宽高比例显示。区域位置和大小按画面百分比保存，因此不同分辨率下能保持相对位置；每个区域的宽高至少为画面的 1%，最多设置 32 个区域。直播布局发生变化后，重新抓帧并检查圈选位置。</p>
+<table><thead><tr><th>效果</th><th>可调整项</th></tr></thead><tbody>
+<tr><td>马赛克</td><td>块大小，4–64 的整数</td></tr>
+<tr><td>模糊</td><td>强度，1–100 的整数</td></tr>
+<tr><td>纯色</td><td><code>#RRGGBB</code> 颜色，默认黑色</td></tr>
+</tbody></table>
+<p>编辑器展示原始截帧和区域标记，不预览 FFmpeg 最终处理效果。马赛克和模糊不能保证内容无法辨认，需要完整遮住某处时可以选纯色。</p>
+<p>配置用于后续分段处理，已产生的录像不会自动追溯修改。房间未设置遮挡覆写时可跟随全局 <code>mosaic_config</code>；显式关闭房间开关会覆盖全局的启用状态。</p>
+<p>如果看不到入口，先确认账号有配置处理器的权限：启用 Web 鉴权时，默认只有超级管理员可操作；Fleet 托管房间需要在控制面修改。还应确认正在运行包含此功能的新版本，并强制刷新浏览器。源码构建需要先用 <code>npm run build</code> 更新前端 <code>out/</code>，后端改动需要重新编译和启动；发布构建会把前端嵌入二进制，也需要重新构建程序。</p>
+<p><img src="/images/recording-and-masking/mosaic-frame-selection.webp" alt="在固定直播截帧上圈选遮挡区域" /></p>
+<h2 id="que-ren-zhe-dang-wan-cheng-hou-zai-shi-yong-wen-jian">确认遮挡完成后再使用文件</h2>
+<p>需要安装包含 <code>libx264</code> 编码器和相关滤镜的 FFmpeg，程序复用已有的 FFmpeg 路径配置。遮挡会把视频重新编码为 H.264；时间戳正常的音频直接复制。输入是 FLV 且 AAC 音频包时间戳重复或回退时，会一并修复音频并重新编码为 192 kbps AAC。音频与目标容器不兼容、转码失败或修复结果校验失败时，保留原片并停止该分段的后续处理。</p>
+<p>每个分段的处理顺序是：</p>
+<pre style="background-color:#2e3440;color:#d8dee9;"><code><span>录制原始分段 → 关闭分段 → 排队执行 FFmpeg 遮挡
+</span><span>  → 发布正式文件并更新工作台路径与索引
+</span><span>  → 碎片过滤 → 后续分段处理、投稿或本地后处理
+</span></code></pre>
+<p>选择 <strong>Noop（不上传）</strong> 或没有投稿模板时，已完成的分段仍会执行遮挡。当前不兼容 <strong>sync-downloader（边录边传）</strong>；启用遮挡时会拒绝启动该路径，应选择 mesio、stream-gears 或 FFmpeg 等落盘下载器。</p>
+<p><strong>直播预览、录制中的 DVR 画面、<code>.part</code> 文件，以及等待处理或处理失败的原片仍可能包含原始画面。</strong> 遮挡不是实时处理。分段处理失败时不会自动回退上传原片，而是保留带 <code>.unmasked</code> 标记的隔离文件；不要移除标记后把它当成安全输出。</p>
+<p>同一进程内的遮挡任务逐个执行，其他分段会排队。下播或停止录制并不代表队列已经完成。合并前，应核对日志中每个目标分段都有 <strong>画面遮挡处理完成</strong>，且没有对应失败记录，再播放正式文件检查效果。日志还会显示输出尺寸和耗时。仅看到文件存在，或仅排除 <code>.unmasked</code> 文件，都不足以证明整场录像没有漏段。</p>
+<p>高分辨率和高帧率会增加 CPU 负载、处理时间与临时磁盘占用。4K60 转码可能慢于实时；缩短分段只能让单个任务更短，不能提高总处理能力。等待期间预留磁盘空间，必要时减少区域或降低录制分辨率。</p>
+<p><img src="/images/recording-and-masking/mosaic-output-comparison.webp" alt="同一帧在遮挡前与正式输出中的效果对比" /></p>
+<h2 id="flv-yin-pin-shi-jian-chuo-jian-cha-yu-zi-dong-xiu-fu">FLV 音频时间戳检查与自动修复</h2>
+<p>落盘录制的 FLV 分段关闭后，程序会检查 AAC 音频包的时间戳。未开启画面遮挡时也会执行此检查；时间戳正常的文件保持原样，避免不必要的音频转码。发现重复或回退时，程序保留解码得到的音频样本，修正冲突的时间戳并重新编码为 192 kbps AAC；视频直接复制。开启画面遮挡时，此修复与视频遮挡在同一次 FFmpeg 处理中完成。</p>
+<p>修复输出必须再次通过 AAC 时间戳严格递增检查，才会替换原文件或发布正式输出，并更新受影响的工作台索引。检查、转码或校验失败时保留原片，该分段不会进入投稿或后处理。日志会记录触发原因和失败信息；自动修复需要可用的 FFmpeg 及 AAC 编码器。</p>
+<p>这项保护作用于升级后完成的落盘分段，不会自动修改磁盘里已有的录像，也不处理 sync-downloader 的边录边传数据。检查针对 FLV 中重复或回退的 AAC 时间戳；它不能补回源站缺失的声音、网络丢失的音频样本，也不会填平正常的前向时间间隔。</p>
+<p>网页回看与外部播放器对 FLV 时间戳的处理可能不同。网页能正常播放，并不能证明原文件的每个音频包都兼容外部播放器。合并或分享前，仍应使用目标播放器检查正式文件的音画同步及分段接缝。</p>
+<h2 id="shi-yong-ffmpeg-kuai-su-he-bing-ben-di-fen-duan">使用 FFmpeg 快速合并本地分段</h2>
+<p>最快的常见方式是使用 FFmpeg concat demuxer，配合 <code>-c copy</code> 直接复制音视频流。合并本身不重新编码，也不会再次损失画质；速度主要取决于文件大小和磁盘读写。此前的遮挡步骤仍需要转码。</p>
+<h3 id="1-he-dui-dai-he-bing-de-wen-jian">1. 核对待合并的文件</h3>
+<p>确认目标分段已经完成遮挡并保存在本地，按实际录制时间排序。只选择同一个房间、目标场次的正式视频文件，排除：</p>
+<ul>
+<li><code>.part</code>、带 <code>.unmasked</code> 标记的原片及 <code>.biliup-mosaic-*</code>、<code>.biliup-audio-*</code> 临时文件。</li>
+<li>弹幕 XML、索引和其他非视频文件。</li>
+<li>已经合并出的文件，避免重复拼接。</li>
+</ul>
+<p>合并的分段需要音视频流结构及参数一致，包括编码、分辨率、帧率、音频采样率、声道布局和时间基等。录制中切换画质、编码或音频参数时，不能保证直接复制后正常播放；先按兼容参数分组，或另行使用统一参数转码。</p>
+<p>可以对每个分段运行下列命令检查参数：</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#88c0d0;">ffprobe</span><span> -v error </span><span style="color:#81a1c1;">\
+</span><span>  -show_entries stream=index,codec_type,codec_name,width,height,avg_frame_rate,time_base,sample_rate,channels,channel_layout </span><span style="color:#81a1c1;">\
+</span><span>  -of json </span><span style="color:#a3be8c;">&quot;第一段.flv&quot;
+</span></code></pre>
+<h3 id="2-an-bo-fang-shun-xu-chuang-jian-wen-jian-lie-biao">2. 按播放顺序创建文件列表</h3>
+<p>在分段所在目录创建 UTF-8、不带 BOM 的 <code>list.txt</code>，第一行和示例格式如下：</p>
+<pre style="background-color:#2e3440;color:#d8dee9;"><code><span>ffconcat version 1.0
+</span><span>file &#39;第一段.flv&#39;
+</span><span>file &#39;第二段.flv&#39;
+</span><span>file &#39;第三段.flv&#39;
+</span></code></pre>
+<p>将示例文件名换成真实文件名。相对路径以 <code>list.txt</code> 所在目录为基准，扩展名可以是实际使用的 FLV、TS 或 MP4。列表决定播放顺序，不要只根据未经检查的目录排序生成它。示例中的单引号用于包住文件名；文件名本身含单引号时需要按 FFmpeg concat 格式转义。</p>
+<h3 id="3-shu-chu-yi-ge-xin-de-mp4">3. 输出一个新的 MP4</h3>
+<p>在该目录执行：</p>
+<pre data-lang="bash" style="background-color:#2e3440;color:#d8dee9;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#88c0d0;">ffmpeg</span><span> -hide_banner -n -f concat -safe 0 -i list.txt </span><span style="color:#81a1c1;">\
+</span><span>  -map 0:v:0 -map </span><span style="color:#a3be8c;">&#39;0:a?&#39; </span><span style="color:#81a1c1;">\
+</span><span>  -c copy -movflags +faststart </span><span style="color:#81a1c1;">\
+</span><span>  </span><span style="color:#a3be8c;">&quot;合并录像.mp4&quot;
+</span></code></pre>
+<p><code>-map 0:v:0</code> 选择第一路视频，<code>-map '0:a?'</code> 保留音频并兼容没有音频的输入。<code>-n</code> 避免覆盖已有输出，<code>+faststart</code> 把 MP4 的播放索引移至开头。<code>-safe 0</code> 允许列表使用这些路径，请只使用自己核对过的文件列表。如果提示输出已存在，换一个新文件名后再运行，不能把此前的输出当成本次合并结果。</p>
+<p>目标音视频编码还必须适合 MP4 容器。如果 FFmpeg 报告编码不兼容，可在兼容的情况下改用 <code>.mkv</code> 输出并去掉 <code>-movflags +faststart</code>，或另行转码；不要仅改扩展名假装转换成功。</p>
+<p>确认 FFmpeg 成功退出后，用播放器检查开头、结尾及每处分段接缝，核对总时长、音画同步和遮挡位置。先保留原分段；无重编码合并不会补回已过滤、缺失或处理失败的部分。</p>
+<h2 id="xu-yao-zi-dong-he-bing-shi-ru-he-pei-zhi">需要自动合并时如何配置</h2>
+<p>可以自行编写合并脚本，在 <strong>直播管理 → 编辑主播 → 后处理</strong> 中选择 <strong>run（运行）</strong>，填写脚本调用命令。程序把本次处理得到的路径通过标准输入传入，以换行分隔；这些路径可能包含视频和弹幕 XML，脚本需要区分、筛选并核对顺序。它们不是自动追加到命令末尾的参数。</p>
+<p>普通投稿流程在本批分段处理、上传及提交结束后调用后处理；Noop 流程在本批分段处理完后调用。因碎片过滤、遮挡或上传失败而被跳过的文件不会完整出现在后处理输入里。一次调用对应的是本次处理批次，不能直接假设它就是工作台合并后的整场直播；断流重录等情况可能产生多次调用。</p>
+<p>脚本需要自行决定如何划分场次、等待跨批次处理、避免重复执行、生成不覆盖输入的新输出，并检查 FFmpeg 结果。<code>run</code> 产生的新文件不会自动替换原有分段列表或已投稿的多分 P。配置时检查默认的 <strong>rm（删除文件）</strong> 步骤，避免脚本读取前文件就被删除；先用一场短录制验证，再启用日常自动化。</p>
+<p>如果只需要偶尔合并，按上一节手动创建列表即可，无需编写脚本。当前没有能直接勾选并保证“整场下播后等待所有遮挡，再合并单文件”的内置流程。</p>
+<h2 id="chu-li-qi-de-zhi-xing-jie-duan">处理器的执行阶段</h2>
+<table><thead><tr><th>阶段</th><th>可选处理器</th><th>执行时机</th></tr></thead><tbody>
+<tr><td>下载前处理</td><td><code>run</code></td><td>开始下载前执行命令，此时还没有视频文件</td></tr>
+<tr><td>分段时后处理</td><td><code>run</code>、<code>remux</code>、<code>render</code></td><td>每个分段上传前处理；转封装和压制得到的新路径交给上传流程</td></tr>
+<tr><td>下载后处理</td><td><code>run</code></td><td>本轮下载结束时执行命令，不等待正在进行的分段处理与上传</td></tr>
+<tr><td>后处理</td><td><code>run</code>、<code>mv</code>、<code>rm</code>、<code>webhook</code></td><td>上传、投稿结束后处理结果与文件；未配置上传时在分段处理结束后执行</td></tr>
+</tbody></table>
+<p><code>webhook</code> 恢复旧版 <code>{ &quot;webhook&quot;: &quot;https://example.com/notify&quot; }</code> 配置格式。程序使用 POST 发送 <code>stream_info</code>（直播信息及房间、投稿配置）和 <code>caught_error</code>（成功时为空字符串）。回调须返回 HTTP 成功状态，正文为 <code>success</code>。所有回调通过后才执行 <code>run</code>、<code>mv</code>、<code>rm</code> 等文件后处理，无论回调在列表中的位置。</p>
+<p>上传失败也会通知回调，但回调成功不会把失败的投稿当成成功。回调失败、超时或返回其他正文时保留文件并报告错误；不会因为回调失败而重新投稿已成功的稿件。普通上传、边录边传及主备接管的实际投稿均使用此规则，未执行投稿的备用节点不会重复通知。</p>
+<h2 id="chang-jian-wen-ti">常见问题</h2>
+<ul>
+<li><strong>保存时提示至少绘制一个区域</strong>：启用遮挡后必须圈选区域；没有真实截帧时先解决抓帧错误。</li>
+<li><strong>录制完成后只看到未遮挡文件</strong>：检查队列是否还在处理，以及 FFmpeg、<code>libx264</code>、磁盘空间和容器兼容性。处理失败的原片不会自动投稿。</li>
+<li><strong>短录像没有进入后处理或合并列表</strong>：检查碎片过滤阈值以及该段的处理、上传失败日志。</li>
+<li><strong>设置了分段时长仍提前切段</strong>：同时检查文件大小限制和断流；关闭时长限制也不会关闭其他切段条件。</li>
+<li><strong>合并后花屏或音画不同步</strong>：逐段核对音视频参数、接缝和输入完整性；参数变化或坏段需要另行处理，<code>-c copy</code> 不会修复它们。</li>
+<li><strong>网页回看正常，外部播放 FLV 时音频卡顿</strong>：检查日志是否报告 AAC 时间戳重复或回退，以及修复是否完成。升级后的已关闭 FLV 分段会自动检查；旧录像不会追溯修复。不要只改扩展名或直接 <code>-c copy</code> 合并，复制音频包会保留原有时间戳问题。</li>
+<li><strong>预览里没有马赛克</strong>：检查正式分段输出；实时预览和编辑截帧显示原始画面。</li>
+</ul>
+
+        
+        
+<div class="docs-navigation d-flex justify-content-between">
+  
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+          
+        
+      
+        
+        
+          
+            
+              
+              <a href="&#x2F;biliup&#x2F;docs&#x2F;help&#x2F;faq&#x2F;">
+                <div class="card my-1">
+                  <div class="card-body py-2">
+                    &larr; FAQ
+                  </div>
+                </div>
+              </a>
+            
+            
+            
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+        
+        
+          
+        
+      
+    
+  
+
+  
+  
+  
+  
+  
+    
+    
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+      
+      
+        
+      
+    
+  
+</div>
+
+      </main>
+    </div>
+  </div>
+</div>
+
+
+  
+    
+<footer class="footer text-muted">
+	<div class="container">
+		<div class="row">
+			<div class="col-lg-8 order-last order-lg-first">
+				<ul class="list-inline">
+					
+						<li class="list-inline-item">Powered by <a href="https://www.netlify.com/">Netlify</a>, <a href="https://www.getzola.org/">Zola</a>, and <a href="https://github.com/aaranxu/adidoks">AdiDoks</a></li>
+					
+				</ul>
+			</div>
+			<div class="col-lg-8 order-first order-lg-last text-lg-end">
+				<ul class="list-inline">
+					
+						
+							<li class="list-inline-item"><a href="/biliup/privacy-policy/">Privacy</a></li>
+						
+							<li class="list-inline-item"><a href="/biliup/docs/contributing/code-of-conduct/">Code of Conduct</a></li>
+						
+					
+				</ul>
+			</div>
+		</div>
+	</div>
+</footer>
+
+  
+
+  
+<script type="text/javascript" src="/biliup/js/main.js" defer></script>
+
+  <script type="text/javascript" src="/biliup/plugins/elasticlunr.min.js" defer></script>
+  <script type="text/javascript" src="/biliup/search_index.en.js" defer></script>
+  <script type="text/javascript" src="/biliup/js/search.js" defer></script>
+
+  
+</body>
+</html>
