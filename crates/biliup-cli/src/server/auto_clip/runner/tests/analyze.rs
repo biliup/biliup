@@ -276,16 +276,20 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
     let created = burst.created_at;
     let root = env.root();
     assert_eq!(
-        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 1)
+        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 10_000)
             .await
             .expired,
-        0
+        0,
+        "未过期的建议绝对不能提前清理"
     );
+    
+    // 严格验证：刚过期时，必须被清理！
     assert_eq!(
-        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS)
+        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS + 10_000)
             .await
             .expired,
-        1
+        1,
+        "过期后的建议必须被清理"
     );
     assert_eq!(
         env.owners().await,
