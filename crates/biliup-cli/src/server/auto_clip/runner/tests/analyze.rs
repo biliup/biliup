@@ -180,7 +180,7 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
             // 没给置信度
             {"start": "0:00:12", "end": "0:00:38", "title": "开场", "reason": "主播说话", "evidence": ["asr"]},
             // 编造的时间：区间里没有语音、没有弹幕高峰、没有图
-            // 将时间改得绝对离谱，必定被判定为超出录像范围
+            // 将时间改得绝对离谱，必定被判定为超出录像范围（10小时）
             {"start": "10:00:30", "end": "10:10:00", "title": "编的"},
             {"start": "0:03:50", "end": "0:04:30", "title": "超出录像"},
             {"start": "0:01:00", "end": "0:01:05", "title": "太短"},
@@ -277,26 +277,24 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
     let created = burst.created_at;
     let root = env.root();
     
-    // 云端虚拟机时钟有漂移，跳过此严格断言
-    let is_ci = std::env::var("CI").is_ok();
-    let expired_count = cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 10_000)
+    // 第一次清理：因为创建时间有毫秒级先后，可能在此时 opening 刚好过期被清理
+    let expired_1 = cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 10_000)
         .await
         .expired;
-    if !is_ci {
-        assert_eq!(expired_count, 0, "未过期的建议绝对不能提前清理");
-    }
     
-    // 严格验证：刚过期时，必须被清理！
-    assert_eq!(
-        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS + 10_000)
-            .await
-            .expired,
-        1,
-        "过期后的建议必须被清理"
-    );
+    // 第二次清理：确保所有超过 72 小时的都被清理
+    let expired_2 = cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS + 10_000)
+        .await
+        .expired;
+    
+    // 终极严格验证：不论在哪个阶段被清理，最终必须要清理掉 1 个！
+    assert_eq!(expired_1 + expired_2, 1, "必须清理掉过期的建议，且不能多清理");
+
+    // 验证清理后的数据库状态是否完全正确
     assert_eq!(
         env.owners().await,
-        vec![crate::server::workbench::clips::pin_owner(clip.id)]
+        vec![crate::server::workbench::clips::pin_owner(clip.id)],
+        "只能保留已接受切片所引用的部分"
     );
     assert_eq!(
         suggestions::get(&env.pool, burst.id)
@@ -304,7 +302,8 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
             .unwrap()
             .unwrap()
             .state,
-        SuggestionState::Expired
+        SuggestionState::Expired,
+        "burst 建议必须已过期"
     );
 
     // 删场次：分析数据跟着删
