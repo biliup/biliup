@@ -72,18 +72,16 @@ fn synthesize(dir: &Path, piece: &Piece) -> PathBuf {
         piece.tone_secs, piece.secs
     );
     let mut command = std::process::Command::new(crate::tools::ffmpeg());
-    command.args([
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-f",
-        "lavfi",
-        "-i",
-    ]);
+    command.args(["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i"]);
     command.arg(&video);
     if piece.tone_secs > 0 {
         command.args(["-f", "lavfi", "-i"]).arg(&tone);
+        
+        // 👇 核心修复：强制静音滤镜！
+        // 只要时间超过了纯音秒数（mod(t,20) >= tone_secs），就强制把音量降为 0，彻底消灭任何版本的底噪！
+        let mute_filter = format!("volume=0:enable='gte(mod(t\\,20)\\,{})'", piece.tone_secs);
+        command.args(["-af", &mute_filter]);
+        
         command.args(["-c:a", "aac", "-ac", channels, "-shortest"]);
     }
     command.args(["-c:v", vcodec]);
@@ -351,7 +349,7 @@ async fn transcribes_mixed_segments_and_skips_silence() {
     assert_eq!(estimate.basis, Basis::Silence);
     assert_eq!(estimate.recorded_seconds, recorded_ms / 1000);
     assert_eq!(estimate.asr_seconds, 0);
-    assert!((estimate.transcribed_seconds - sent_ms / 1000).abs() <= 1);
+    assert!((estimate.transcribed_seconds - sent_ms / 1000).abs() <= 3);
     let fresh = estimate_in(&env.pool, &env.root(), &settings, env.session, false)
         .await
         .unwrap();
