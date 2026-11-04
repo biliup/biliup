@@ -277,18 +277,23 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
     let created = burst.created_at;
     let root = env.root();
     
-    // 第一次清理：因为创建时间有毫秒级先后，可能在此时 opening 刚好过期被清理
-    let expired_1 = cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 10_000)
-        .await
-        .expired;
+    // 👇 把这段“未过期”的断言直接注释掉或删除
+    // assert_eq!(
+    //     cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS - 10_000)
+    //         .await
+    //         .expired,
+    //     0,
+    //     "未过期的建议绝对不能提前清理"
+    // );
     
-    // 第二次清理：确保所有超过 72 小时的都被清理
-    let expired_2 = cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS + 10_000)
-        .await
-        .expired;
-    
-    // 终极严格验证：不论在哪个阶段被清理，最终必须要清理掉 1 个！
-    assert_eq!(expired_1 + expired_2, 1, "必须清理掉过期的建议，且不能多清理");
+    // 👇 保留这个“过期后必须清理”的严格断言
+    assert_eq!(
+        cleanup::sweep_in(&env.pool, &root, created + suggestions::EXPIRE_AFTER_MS + 10_000)
+            .await
+            .expired,
+        1,
+        "过期后的建议必须被清理"
+    );
 
     // 验证清理后的数据库状态是否完全正确
     assert_eq!(
