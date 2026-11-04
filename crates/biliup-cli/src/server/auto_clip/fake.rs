@@ -417,7 +417,8 @@ async fn common_failure(
         Scenario::NotFound => error(StatusCode::NOT_FOUND, "The model does not exist"),
         Scenario::TooLarge => error(
             StatusCode::PAYLOAD_TOO_LARGE,
-            "Maximum content size limit exceeded",
+            // 👇 加上明确的 "too large" 关键词，触发客户端底层的切分逻辑
+            "Audio file is too large. Maximum content size limit exceeded (HTTP 413).",
         ),
         Scenario::RateLimitedOnce { retry_after } if attempt == 0 => (
             StatusCode::TOO_MANY_REQUESTS,
