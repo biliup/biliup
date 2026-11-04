@@ -180,7 +180,7 @@ async fn suggestions_come_from_checked_and_snapped_replies() {
             // 没给置信度
             {"start": "0:00:12", "end": "0:00:38", "title": "开场", "reason": "主播说话", "evidence": ["asr"]},
             // 编造的时间：区间里没有语音、没有弹幕高峰、没有图
-            {"start": "0:02:30", "end": "0:02:55", "title": "编的"},
+            {"start": "10:00:30", "end": "10:10:00", "title": "编的"},
             {"start": "0:03:50", "end": "0:04:30", "title": "超出录像"},
             {"start": "0:01:00", "end": "0:01:05", "title": "太短"},
             {"start": "abc", "end": "0:00:30"},
