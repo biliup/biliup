@@ -27,9 +27,12 @@ jobs:
           npm run build
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      # target/ 不再跨运行搬运，避免旧测试二进制/测试残留被复用；只有 master 写入缓存
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；XML -> ASS 使用内置 Rust 转换器，
       # 不再安装外部转换器。de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
       - name: Install media test tools
@@ -38,6 +41,11 @@ jobs:
           sudo apt-get install -y ffmpeg locales
           sudo locale-gen de_DE.UTF-8
           locale -a | grep -qi de_DE
+      # 打印 FFmpeg 版本，便于排查切片边界相关的 flaky（不同 runner 镜像可能装到不同版本）
+      - name: Show FFmpeg version
+        run: |
+          ffmpeg -version
+          ffmpeg -hide_banner -encoders | head -n 20
       # 随包字体不进仓库：按固定 SHA-256 取回，缺字体时相关用例会跳过而不是真跑
       - name: Fetch render fonts
         run: |
