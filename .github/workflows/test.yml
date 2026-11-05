@@ -12,7 +12,7 @@ permissions:
 jobs:
   rust:
     name: Rust tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,7 +41,7 @@ jobs:
           sudo apt-get install -y ffmpeg locales
           sudo locale-gen de_DE.UTF-8
           locale -a | grep -qi de_DE
-      # 打印 FFmpeg 版本，便于排查切片边界相关的 flaky（不同 runner 镜像可能装到不同版本）
+      # 打印 FFmpeg 版本：切片边界测试对版本敏感，保留此步骤便于后续排查环境差异
       - name: Show FFmpeg version
         run: |
           ffmpeg -version
@@ -62,7 +62,7 @@ jobs:
   # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）
   desktop-lockfile:
     name: Desktop Cargo.lock up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install stable toolchain
