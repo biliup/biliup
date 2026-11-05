@@ -28,6 +28,8 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
       # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；XML -> ASS 使用内置 Rust 转换器，
       # 不再安装外部转换器。de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
       - name: Install media test tools
