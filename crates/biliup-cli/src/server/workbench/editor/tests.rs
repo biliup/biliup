@@ -68,7 +68,30 @@ pub(super) async fn fixture() -> (
         .unwrap();
     let session: i64 = sqlx::query_scalar("INSERT INTO stream_sessions(name,url,title,date,live_cover_path,started_at,ended_at) VALUES('test','https://test','test','2026-10-24','',1000,11000) RETURNING id").fetch_one(&pool).await.unwrap();
     let path = dir.path().join("source.mp4");
-    std::fs::write(&path, b"keep recording").unwrap();
+    let output = crate::tools::ffmpeg_command()
+        .args([
+            "-v",
+            "error",
+            "-nostdin",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=64x64:r=30:d=10",
+            "-c:v",
+            "mpeg4",
+            "-threads",
+            "1",
+        ])
+        .arg(&path)
+        .output()
+        .await
+        .expect("FFmpeg is required to create the editor recording fixture");
+    assert!(
+        output.status.success(),
+        "failed to create editor recording: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let segment: i64 = sqlx::query_scalar("INSERT INTO segments(session_id,path,container,state,start_ms,end_ms) VALUES(?,?,'mp4','finished',0,10000) RETURNING id")
         .bind(session).bind(path.to_string_lossy().as_ref()).fetch_one(&pool).await.unwrap();
     let id = format!("recording-{session}-{segment}");
@@ -89,6 +112,10 @@ async fn saves_history_and_rejects_stale_writes_and_deletes() {
     let (_dir, pool, doc, _) = fixture().await;
     let first = save(&pool, None, doc).await.unwrap();
     assert_eq!(first.summary.revision, 1);
+    assert_eq!(
+        first.document.project["media"][0]["probe"],
+        json!({"width":64,"height":64,"fps":30.0,"hasAudio":false,"frames":300})
+    );
     assert_eq!(
         first
             .document

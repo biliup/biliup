@@ -516,6 +516,10 @@ mod tests {
                 17,
                 "7186a4ca1c54defbcab04f485f2365fb1677e346703c0f5d5bfd3cd6b7d8208895be4608024585dbb73a7e0463b548ec",
             ),
+            (
+                18,
+                "dd77be0c39401b245fb8291a6db4b0b3a7c56c9ca62ebf4ad0764afdb3f937b121bb25feb6c0febb79abd7b5c5aa8f18",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -580,12 +584,12 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
+        let embedded = sqlx::migrate!();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            (1..=17).collect::<Vec<_>>(),
+            embedded.iter().map(|m| m.version).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
-        let embedded = sqlx::migrate!();
         for (version, checksum) in &migrations {
             let expected = embedded.iter().find(|m| m.version == *version).unwrap();
             assert_eq!(
@@ -654,7 +658,10 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(applied, (1..=17).collect::<Vec<_>>());
+        assert_eq!(
+            applied,
+            embedded.iter().map(|m| m.version).collect::<Vec<_>>()
+        );
         let seeded: Vec<i64> = sqlx::query_scalar("SELECT id FROM stream_session_ids ORDER BY id")
             .fetch_all(&pool)
             .await
@@ -900,7 +907,13 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=17).collect::<Vec<_>>());
+        assert_eq!(
+            versions,
+            sqlx::migrate!()
+                .iter()
+                .map(|m| m.version)
+                .collect::<Vec<_>>()
+        );
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",
