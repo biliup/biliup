@@ -1,0 +1,74 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.callout",
+  "kind": "component",
+  "name": "Callout",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "type": "string",
+        "x-group": "Content",
+        "maxLength": 120,
+        "description": "The words in the pill."
+      },
+      "arrow": {
+        "enum": [
+          "left",
+          "right",
+          "up",
+          "down",
+          "none"
+        ],
+        "x-group": "Content",
+        "description": "Which side the arrow points to."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The pill's colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour."
+      },
+      "pop": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "Pop in, the arrow drawing out after."
+      }
+    }
+  },
+  "description": "A label in a pill with an arrow pointing left, right, up or down: point at something on screen.",
+  "component": {
+    "size": {
+      "width": 560,
+      "height": 160
+    },
+    "defaults": {
+      "label": "Look here",
+      "arrow": "left",
+      "color": "accent",
+      "text": "#0A0A0B",
+      "pop": true
+    },
+    "animated": true
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "mouse-pointer-click"
+  }
+}

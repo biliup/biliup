@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "generate.sound",
+  "kind": "generator",
+  "name": "Sound effects",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "process"
+  },
+  "capabilities": [
+    "network",
+    "api-key",
+    "media:write"
+  ],
+  "generator": {
+    "media": "audio",
+    "provider": "elevenlabs",
+    "model": "eleven_text_to_sound_v2"
+  },
+  "ui": {
+    "panel": "generate"
+  }
+}

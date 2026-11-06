@@ -88,7 +88,8 @@ async fn remove_processed_sources(pool: &ConnectionPool, output: &Path) -> io::R
     .map_err(io::Error::other)?;
     for source in sources {
         let shared: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM processed_video_sources WHERE source_path = ? AND output_path != ?)",
+            "SELECT EXISTS(SELECT 1 FROM processed_video_sources WHERE source_path = ?1 AND output_path != ?2)
+                OR EXISTS(SELECT 1 FROM editor_sources r JOIN segments g ON g.id=r.segment_id WHERE g.path=?1)",
         )
         .bind(&source).bind(&output).fetch_one(pool).await.map_err(io::Error::other)?;
         if shared {
@@ -159,6 +160,7 @@ struct Tracked {
     danmaku_path: Option<String>,
     pin_count: i64,
     rendering: bool,
+    editing: bool,
     retain_until: Option<i64>,
 }
 
@@ -170,7 +172,9 @@ async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Trac
                     FROM session_group_members gm JOIN stream_sessions gs ON gs.id = gm.group_session_id
                     WHERE gm.source_session_id = s.id), 0)) AS retain_until,
                 EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
-                        WHERE r.segment_id = g.id AND j.state IN ('queued','running')) AS rendering
+                        WHERE r.segment_id = g.id AND j.state IN ('queued','running')) AS rendering,
+                EXISTS (SELECT 1 FROM editor_sources r JOIN segments e ON e.id=r.segment_id
+                        WHERE e.path=g.path) AS editing
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.path = ? AND g.state IN ('recording', 'finished', 'missing', 'pending_delete')
          ORDER BY g.id DESC LIMIT 1",
@@ -200,6 +204,7 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
             continue;
         };
         let referenced = segment.rendering
+            || segment.editing
             || segment.pin_count > 0
             || segment.retain_until.is_some_and(|t| t > now);
         if referenced || retention.keep_for_ms > 0 {
@@ -517,6 +522,7 @@ pub async fn sweep_pending(pool: &ConnectionPool, now: i64) -> sqlx::Result<usiz
         "SELECT g.id, g.path, g.index_path, g.danmaku_path
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state = 'pending_delete' AND g.pin_count = 0
+           AND NOT EXISTS (SELECT 1 FROM editor_sources r JOIN segments e ON e.id=r.segment_id WHERE e.path=g.path)
            AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
                            WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
            AND (g.delete_after IS NULL OR g.delete_after <= ?1)
@@ -576,6 +582,7 @@ where
                      WHERE gm.source_session_id = s.id AND gs.retain_until > ?1)) AS referenced
          FROM segments g JOIN stream_sessions s ON s.id = g.session_id
          WHERE g.state IN ('finished', 'pending_delete')
+           AND NOT EXISTS (SELECT 1 FROM editor_sources r JOIN segments e ON e.id=r.segment_id WHERE e.path=g.path)
            AND NOT EXISTS (SELECT 1 FROM render_sources r JOIN render_jobs j ON j.id = r.job_id
                            WHERE r.segment_id = g.id AND j.state IN ('queued','running'))
          ORDER BY referenced, COALESCE(s.started_at, 0) + g.start_ms, g.id",

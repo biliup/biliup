@@ -1,0 +1,123 @@
+{
+  "tools": [
+    {
+      "name": "media_download",
+      "description": "Download a direct public HTTPS image, video, audio or font URL and add it to this project. Media uses the editor's regular import, save and turn undo; fonts use project fonts and are not timeline undo. At most 300 MiB per media file, 2 MiB per font, 20 transfers / 1 GiB per turn. Accepts direct files, not video web pages; ask for the source file or its direct URL when needed. Returns a durable job ID. Reuse job after a saved result or conflict; failed/cancelled transfers require explicit retry:true. A handled job never re-adds a removed/undone file. Use media_downloads to find previous results. Read mode cannot download.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "pattern": "^https://"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "job": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "retry": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "url"
+            ],
+            "not": {
+              "required": [
+                "job"
+              ]
+            }
+          },
+          {
+            "required": [
+              "job"
+            ],
+            "not": {
+              "required": [
+                "url"
+              ]
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "media_import",
+      "description": "Import an exact registered brand asset URL from brand_read or a recent:<id> handle from media_search into this project. Browser-local files/folders use the editor Media + picker. No arbitrary server paths. Uses regular project import/save/turn undo and durable job results. Fonts go to project fonts outside timeline undo. Use job to continue a retained result; retry:true explicitly restarts a failed transfer. A handled job never resurrects removed/undone media.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8192,
+            "pattern": "^(?:/v1/editor/projects/|recent:)"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "job": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "retry": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "path"
+            ],
+            "not": {
+              "required": [
+                "job"
+              ]
+            }
+          },
+          {
+            "required": [
+              "job"
+            ],
+            "not": {
+              "required": [
+                "path"
+              ]
+            }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "media_downloads",
+      "description": "Read up to 40 recent project media download/import jobs, including retained results not yet imported. Pass job for one result. Read-only; use media_download or media_import with its job ID to resume. Terminal jobs will not restart without explicit retry:true.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "job": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  ]
+}

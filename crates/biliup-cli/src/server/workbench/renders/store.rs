@@ -192,12 +192,27 @@ pub fn asset_ids(recipe: &RenderRecipe) -> std::collections::BTreeSet<i64> {
         .collect()
 }
 pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx::Result<JobRecord> {
+    insert_attempt(pool,spec,now,None).await.map(|(record,_)|record)
+}
+/// Returns whether this caller owns starting the newly created attempt.
+pub async fn insert_attempt(pool:&ConnectionPool,spec:&RenderSpec,now:i64,retry_of:Option<i64>)->sqlx::Result<(JobRecord,bool)>{
     let _lifecycle = retention::MEDIA_LIFECYCLE.read().await;
     let members = session_groups::timeline(pool, spec.session_id).await?;
-    let mut tx = pool.begin().await?;
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
+    if let Some(previous)=retry_of{
+        if let Some(row)=sqlx::query(&format!("SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE retry_of=?"))
+            .bind(previous).fetch_optional(&mut *tx).await?{
+            let record=job(&row)?;
+            tx.commit().await?;
+            return Ok((record,false));
+        }
+        let eligible:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM render_jobs WHERE id=? AND session_id=? AND state IN ('failed','cancelled'))")
+            .bind(previous).bind(spec.session_id).fetch_one(&mut *tx).await?;
+        if !eligible{return Err(sqlx::Error::Protocol("只有失败或取消的任务可以重试".into()));}
+    }
     // Hold a write transaction while checking all sources, so cleanup cannot race enqueue.
     let sql = format!(
-        "INSERT INTO render_jobs(session_id,clip_id,state,phase,spec_json,created_at,updated_at) VALUES(?,?,'queued','queued',?,?,?) RETURNING {COLS}"
+        "INSERT INTO render_jobs(session_id,clip_id,state,phase,spec_json,created_at,updated_at,retry_of) VALUES(?,?,'queued','queued',?,?,?,?) RETURNING {COLS}"
     );
     let row = sqlx::query(&sql)
         .bind(spec.session_id)
@@ -205,6 +220,7 @@ pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx:
         .bind(serde_json::to_string(spec).map_err(json_error)?)
         .bind(now)
         .bind(now)
+        .bind(retry_of)
         .fetch_one(&mut *tx)
         .await?;
     let record = job(&row)?;
@@ -274,7 +290,11 @@ pub async fn insert(pool: &ConnectionPool, spec: &RenderSpec, now: i64) -> sqlx:
     )
     .await?;
     tx.commit().await?;
-    Ok(record)
+    Ok((record,true))
+}
+pub async fn retry_for(pool:&ConnectionPool,previous:i64)->sqlx::Result<Option<JobRecord>>{
+    sqlx::query(&format!("SELECT {COLS},{SESSION_COLS} FROM render_jobs WHERE retry_of=?"))
+        .bind(previous).fetch_optional(pool).await?.as_ref().map(job).transpose()
 }
 pub async fn get(pool: &ConnectionPool, id: i64) -> sqlx::Result<Option<JobRecord>> {
     sqlx::query(&format!(

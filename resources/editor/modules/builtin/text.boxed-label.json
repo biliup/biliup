@@ -1,0 +1,36 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.boxed-label",
+  "kind": "text-style",
+  "name": "Boxed label",
+  "description": "A small label on a solid accent box.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.04,
+    "weight": 700,
+    "font": "DM Sans",
+    "tracking": 0.02,
+    "lineHeight": 1.1,
+    "color": "#0A0A0B",
+    "uppercase": true,
+    "x": 0.0625,
+    "y": 0.1,
+    "background": {
+      "color": "accent",
+      "opacity": 1,
+      "padding": 0.45,
+      "radius": 0.22,
+      "wrap": "box"
+    },
+    "text": "New"
+  }
+}

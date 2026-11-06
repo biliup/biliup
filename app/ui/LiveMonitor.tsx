@@ -145,7 +145,6 @@ export default function LiveMonitor() {
       <div className={styles.center}>
         <Empty
           title="当前没有正在录制的直播间"
-          description="开播并开始录制后，这里会以小窗形式同屏显示各路画面（stream-gears / mesio 下载器）"
         />
       </div>
     )
@@ -215,10 +214,6 @@ export default function LiveMonitor() {
           />
         </div>
       </div>
-      <Text type="tertiary" size="small" className={styles.hint}>
-        画面来自各直播间正在写盘的同一路流，默认静音；每路小窗占用该直播间的 1 个预览连接。
-        超出路数的直播间显示封面，点击可替换最早开始的一路；要打标记，点小窗右上角的放大按钮进预览页。
-      </Text>
       <div className={styles.grid}>
         {live.map((s) => {
           const info = infoByUrl.get(s.url)

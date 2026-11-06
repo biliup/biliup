@@ -1,0 +1,41 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.big-title",
+  "kind": "text-style",
+  "name": "Big title",
+  "description": "A large centred headline in DM Sans that zooms in.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.15,
+    "weight": 800,
+    "font": "DM Sans",
+    "tracking": -0.04,
+    "lineHeight": 0.98,
+    "color": "fg",
+    "align": "center",
+    "span": true,
+    "x": 0.0375,
+    "y": 0.36,
+    "text": "Your title",
+    "animation": {
+      "in": {
+        "module": "move.zoom",
+        "seconds": 0.6,
+        "params": {
+          "scale": 0.85,
+          "ease": "out",
+          "fade": true
+        }
+      }
+    }
+  }
+}

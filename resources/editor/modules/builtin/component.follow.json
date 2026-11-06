@@ -1,0 +1,119 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.follow",
+  "kind": "component",
+  "name": "Follow handle",
+  "description": "Your handle on a platform with its logo in the brand's colour (YouTube, Instagram, TikTok, X, LinkedIn and more), or a generic glyph for a website or email: the logo pops, the pill opens, the handle slides in.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "handle": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "The handle or address."
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 40,
+        "x-group": "Content",
+        "description": "A small line above it (\"Follow\", \"Find me on\"); empty = none."
+      },
+      "platform": {
+        "enum": [
+          "youtube",
+          "instagram",
+          "tiktok",
+          "x",
+          "facebook",
+          "threads",
+          "bluesky",
+          "mastodon",
+          "reddit",
+          "snapchat",
+          "pinterest",
+          "twitch",
+          "kick",
+          "discord",
+          "whatsapp",
+          "telegram",
+          "github",
+          "spotify",
+          "soundcloud",
+          "applepodcasts",
+          "vimeo",
+          "patreon",
+          "substack",
+          "medium",
+          "linkedin",
+          "video",
+          "photos",
+          "shorts",
+          "social",
+          "pro",
+          "live",
+          "web",
+          "mail",
+          "podcast"
+        ],
+        "x-group": "Content",
+        "description": "The platform: a brand id draws that platform's own logo in its colour (youtube, instagram, tiktok, x, facebook, threads, bluesky, mastodon, reddit, snapchat, pinterest, twitch, kick, discord, whatsapp, telegram, github, spotify, soundcloud, applepodcasts, vimeo, patreon, substack, medium; linkedin draws a briefcase in LinkedIn blue). Or a generic glyph: web (globe), mail, video (play), photos (camera), shorts (note), social (@), pro (briefcase), live (broadcast), podcast (microphone)."
+      },
+      "style": {
+        "enum": [
+          "pill",
+          "solid",
+          "minimal"
+        ],
+        "x-group": "Style",
+        "description": "A white pill, a pill in the colour, or just the glyph and words."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The glyph's circle (or the solid pill) for the generic platforms. A brand's logo always keeps its own colour, with the mark in white or black."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The pill's colour (pill style)."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour (pill style)."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 680,
+      "height": 140
+    },
+    "animated": true,
+    "defaults": {
+      "handle": "@yourname",
+      "label": "Follow",
+      "platform": "youtube",
+      "style": "pill"
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "at-sign"
+  }
+}

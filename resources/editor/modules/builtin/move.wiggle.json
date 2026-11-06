@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "move.wiggle",
+  "kind": "move",
+  "name": "Wiggle",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "description": "Text, as a loop: tilts left and right about its centre once per loop length, for as long as it shows.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 30,
+        "default": 4,
+        "description": "The largest tilt, in degrees."
+      }
+    }
+  }
+}

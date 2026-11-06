@@ -1,0 +1,38 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.vignette",
+  "kind": "effect",
+  "name": "Vignette",
+  "description": "Darker corners",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.5,
+        "description": "Amount"
+      },
+      "size": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.5,
+        "description": "Size"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "circle-dot"
+  }
+}

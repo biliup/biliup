@@ -61,25 +61,32 @@ body:
   - type: textarea
     id: config
     attributes:
-      label: 任务平台
-      description: 请复制WEBUI的任务平台内容并**脱敏**后放入文件上传, 或直接复制到下面模板中
+      label: 运行状态
+      description: 请打开 WEBUI 左侧「设置 → 运行状态 → 状态信息」（/runtime），复制页面中的原始 JSON，脱敏后上传文件或粘贴到下方。
       value: |
         <details>
         <summary>
-        任务平台
+        运行状态
         </summary>
 
-        ```bash
-        # 在这里填写你的配置文件
+        ```json
+        {}
         ```
 
         </details>
 
   - type: textarea
+    id: processing
+    attributes:
+      label: 压制与导出任务（相关问题请填写）
+      description: 请打开左侧「录制 → 压制与导出」（/outputs），填写对应任务的状态、进度和错误信息；自动后处理请注明 remux 或压制，手动任务请注明来源场次或剪辑工程。可附截图，请先脱敏。
+      placeholder: 任务类型、来源、发生时间、状态/进度、错误信息
+
+  - type: textarea
     id: log
     attributes:
       label: 报错日志以及其他描述（如果有）
-      description: 上传 `ds_update.log` 和 `upload.log` 文件, 或将文件内容复制到下面模板中
+      description: 请打开「设置 → 运行状态 → 实时日志」（/runtime/logs），切换到相关日志并保存；脱敏后上传文件，或将报错附近的内容复制到下面模板中。
       value: |
         <details>
         <summary>

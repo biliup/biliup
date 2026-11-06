@@ -1,0 +1,20 @@
+{
+  "tools": [{
+    "name": "screen_record",
+    "description": "Ask the user to record a browser-selected screen, window or tab and import the real take into this project's existing Media library as an edit of this turn. Always shows a recording card; even Auto requires a user click and the browser's display picker. source is only a suggestion, never a selected device. Optional microphone requires user permission. No Argent, host device bridge, silent recording, automatic app control or automatic timeline placement. A declined or timed-out request must not be repeated in this turn. Reuse a returned job to finish importing an already uploaded take; never record again just because project validation or saving failed.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "seconds": {"type": "number", "minimum": 1, "maximum": 300},
+        "source": {"type": "string", "maxLength": 200},
+        "withMic": {"type": "boolean"},
+        "job": {"type": "string", "minLength": 1, "maxLength": 100}
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {"required": ["seconds"], "not": {"required": ["job"]}},
+        {"required": ["job"], "not": {"anyOf": [{"required": ["seconds"]}, {"required": ["source"]}, {"required": ["withMic"]}]}}
+      ]
+    }
+  }]
+}

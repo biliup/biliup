@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.dip-to-black",
+  "kind": "transition",
+  "name": "Dip to black",
+  "description": "Fades the picture to black and back up at a cut on the main track; the sound dips with it. Needs no media handles.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 4,
+    "maxFrames": 90
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "moon"
+  }
+}

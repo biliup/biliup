@@ -109,7 +109,8 @@ impl Managed {
 
     fn message(&self) -> String {
         if self.local {
-            return "这是分派到本机的 Fleet 房间，请到「任务平台 › 节点管理 › 房间」修改".to_string();
+            return "这是分派到本机的 Fleet 房间，请到「任务平台 › 节点管理 › 房间」修改"
+                .to_string();
         }
         format!(
             "由控制面 {} 管理，请到控制面修改；本机只能查看",

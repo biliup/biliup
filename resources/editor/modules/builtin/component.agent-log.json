@@ -1,0 +1,89 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.agent-log",
+  "kind": "component",
+  "name": "Agent log",
+  "description": "One agent run beside its recording: the model's name, a clock of the run's own time, a token counter and the run's messages and tool calls scrolling in, all keyed to the run's transcript in source seconds. The recording is sped up `speed`× at one constant speed: at the item's first frame the source is at srcAt, then srcAt + seconds × speed. The clock counts from runStart and stops at durationMs, where doneLabel appears.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["model"],
+    "properties": {
+      "model": { "type": "string", "maxLength": 60, "description": "The big name at the top, e.g. the model." },
+      "title": { "type": "string", "maxLength": 120, "description": "The window's title bar (mono)." },
+      "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 100, "description": "Source seconds per second on screen (the recording's speed-up). Default 1." },
+      "srcAt": { "type": "number", "minimum": 0, "description": "Source seconds at the item's first frame. Default 0." },
+      "runStart": { "type": "number", "minimum": 0, "description": "Source seconds where the run's clock starts. Default 0." },
+      "durationMs": { "type": "number", "minimum": 0, "description": "The run's reported length: the clock stops there and doneLabel shows." },
+      "doneLabel": { "type": "string", "maxLength": 120, "description": "Shown in the accent colour once the clock stops, e.g. the result." },
+      "tokenLabel": { "type": "string", "maxLength": 80, "x-control": "multiline", "description": "Under the token count (a line break allowed)." },
+      "size": { "type": "number", "minimum": 8, "maximum": 48, "description": "The log's text size in px for a 470 px wide box (default 19)." },
+      "lines": {
+        "type": "array",
+        "maxItems": 400,
+        "description": "The log: each line appears at source second t. With tool, it's a tool call (the name in mono, then text); without, a message.",
+        "items": {
+          "type": "object",
+          "required": ["t", "text"],
+          "additionalProperties": false,
+          "properties": {
+            "t": { "type": "number", "minimum": 0 },
+            "tool": { "type": "string", "maxLength": 60 },
+            "text": { "type": "string", "maxLength": 300 }
+          }
+        }
+      },
+      "tokens": {
+        "type": "array",
+        "maxItems": 1000,
+        "description": "The running token count: cum from source second t (in time order).",
+        "items": {
+          "type": "object",
+          "required": ["t", "cum"],
+          "additionalProperties": false,
+          "properties": {
+            "t": { "type": "number", "minimum": 0 },
+            "cum": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    }
+  },
+  "component": {
+    "size": { "width": 470, "height": 739 },
+    "animated": true,
+    "defaults": {
+      "model": "Model",
+      "title": "claude -p",
+      "speed": 8,
+      "srcAt": 0,
+      "runStart": 1,
+      "durationMs": 60000,
+      "doneLabel": "Done",
+      "tokenLabel": "tokens",
+      "size": 19,
+      "lines": [
+        { "t": 2, "text": "I'll start by reading the screen." },
+        { "t": 3, "tool": "describe", "text": "read the screen" },
+        { "t": 9, "tool": "gesture-tap", "text": "(0.50, 0.21)" },
+        { "t": 30, "text": "All steps passed." }
+      ],
+      "tokens": [
+        { "t": 2, "cum": 12000 },
+        { "t": 9, "cum": 18500 },
+        { "t": 30, "cum": 41000 }
+      ]
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "scroll-text"
+  }
+}

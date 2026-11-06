@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react'
 import Artplayer from 'artplayer'
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku'
 import mpegts from 'mpegts.js'
+import {AbortableFetchLoader,destroyMpegts,type LoaderHooks} from '@/app/lib/mpegts'
 import type { DanmakuFeed, DanmakuFrame } from '@/app/lib/danmaku-feed'
 import { attachLiveBufferControl, type LiveBufferPolicy, RELAY_PROFILES, type StallInfo } from '@/app/lib/live-buffer'
 import type { PreviewLease } from '@/app/lib/preview-lease'
@@ -66,112 +67,6 @@ type DanmukuPlugin = ReturnType<ReturnType<typeof artplayerPluginDanmuku>>
 /** 把后端的 RGB 整数转成 CSS 颜色 */
 function rgbInt(color: number): string {
   return `#${(color & 0xffffff).toString(16).padStart(6, '0')}`
-}
-
-/**
- * mpegts.js 的直播拉流 loader：只做一件事——`abort()` 时**一定**中止 fetch。
- *
- * 自带的 FetchStreamLoader 在 Chrome 上处于 buffering 状态时不调 `AbortController.abort()`，
- * 而是等下一个 `read()` 回来再 `reader.cancel()`；解码出错后读取链已经断了，那一次永远等不到，
- * 拉流连接就留在服务端占着该路的预览许可直到刷新页面（真实 Twitch TS 房间连开 4 次就 429）。
- * 这里每次 `open()` 建一个 AbortController，`abort()` 直接调它，其余行为与原 loader 一致
- * （直播不需要 Range，`needStash` 同样为 true）。
- *
- * mpegts.js 把整份播放器配置传给 loader 的构造函数；配置里带了 `onResponse` 就在拿到响应头时回调一次
- * （DVR 回看靠它读 `X-Dvr-Start-Ms`，以及非 2xx 时服务端写的原因）。
- */
-class AbortableFetchLoader extends mpegts.BaseLoader {
-  private controller: AbortController | null = null
-  private received = 0
-  private onResponse: ((res: Response) => void) | null
-  _needStash = true
-
-  constructor(_seekHandler: unknown, config: unknown) {
-    super('abortable-fetch-loader')
-    this.onResponse = (config as LoaderHooks | null)?.onResponse ?? null
-  }
-
-  static isSupported() {
-    return typeof self.fetch === 'function' && typeof self.ReadableStream === 'function'
-  }
-
-  destroy() {
-    if (this.isWorking()) this.abort()
-    super.destroy()
-  }
-
-  open(dataSource: { url: string; withCredentials?: boolean }, range: { from: number; to: number }) {
-    const controller = new AbortController()
-    this.controller = controller
-    this.received = 0
-    this._status = mpegts.LoaderStatus.kConnecting
-    fetch(dataSource.url, {
-      method: 'GET',
-      mode: 'cors',
-      cache: 'no-store',
-      credentials: dataSource.withCredentials ? 'include' : 'same-origin',
-      signal: controller.signal,
-    })
-      .then(async (res) => {
-        if (controller.signal.aborted) return
-        this.onResponse?.(res)
-        if (!res.ok || !res.body) {
-          // 服务端的说明（如 429 是该直播间满了还是进程内满了）在正文里，带给上层原样显示
-          const body = res.ok ? '' : await res.text().catch(() => '')
-          if (controller.signal.aborted) return
-          this._status = mpegts.LoaderStatus.kError
-          // 类型声明里 onError 的第一个参数是 LoaderErrors 接口本身，实际是其中的字符串值
-          this.onError?.(mpegts.LoaderErrors.HTTP_STATUS_CODE_INVALID as unknown as mpegts.LoaderErrors, {
-            code: res.status,
-            msg: body.trim() || res.statusText,
-          })
-          return
-        }
-        const reader = res.body.getReader()
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (controller.signal.aborted) return
-          if (done) {
-            this._status = mpegts.LoaderStatus.kComplete
-            this.onComplete?.(range.from, range.from + this.received - 1)
-            return
-          }
-          this._status = mpegts.LoaderStatus.kBuffering
-          const chunk = value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
-          const byteStart = range.from + this.received
-          this.received += chunk.byteLength
-          this.onDataArrival?.(chunk, byteStart, this.received)
-        }
-      })
-      .catch((e: Error & { code?: number }) => {
-        if (controller.signal.aborted) return
-        this._status = mpegts.LoaderStatus.kError
-        // 服务端结束响应（掉队断开 / 换直链）走 EARLY_EOF，mpegts.js 会把 MSE 收尾成 ended
-        const earlyEof = e.name === 'TypeError' || e.code === 19
-        const kind = earlyEof ? mpegts.LoaderErrors.EARLY_EOF : mpegts.LoaderErrors.EXCEPTION
-        this.onError?.(kind as unknown as mpegts.LoaderErrors, { code: e.code ?? -1, msg: e.message })
-      })
-  }
-
-  abort() {
-    this._status = mpegts.LoaderStatus.kComplete
-    this.controller?.abort()
-    this.controller = null
-  }
-}
-
-/** 随 mpegts.js 配置传给 `AbortableFetchLoader` 的钩子 */
-export interface LoaderHooks {
-  onResponse?: (res: Response) => void
-}
-
-/** 销毁 mpegts.js 实例；`destroy()` 内部清 SourceBuffer 在元素出错后可能抛，拉流已由 loader 的 abort 保证断开。 */
-export function destroyMpegts(player: mpegts.Player) {
-  try {
-    player.destroy()
-  } catch (e) {
-    console.warn('[Player] mpegts.destroy 抛出异常（拉流已断开）', e)
-  }
 }
 
 /** 一条弹幕送进弹幕层：普通弹幕滚动，礼物 / 醒目留言 / 上舰置顶并描边。 */
@@ -610,7 +505,7 @@ function playWithMpegts(
     // 同源的 /live 走 same-origin 凭据，登录 cookie 照常带上（见 AbortableFetchLoader）
     { type, url, isLive, cors: true, withCredentials: false },
     // 直播：不攒 IO 缓冲、源缓冲区用完即清理（长时间观看不涨内存），缓冲深度按取流方式定
-    isLive ? mpegtsLiveConfig(transport) : {}
+    isLive ? mpegtsLiveConfig(transport) : { customLoader: AbortableFetchLoader, accurateSeek: true }
   )
   artWithMpegts.mpegts = player
   const detachDiagnostics = attachMpegtsDiagnostics(video, player, () => onEnded?.(), (message) => onError?.(message))

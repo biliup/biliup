@@ -1,0 +1,47 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.terminal",
+  "kind": "component",
+  "name": "Terminal",
+  "description": "A terminal window. Input lines type in character by character (speed characters a second, from frame typeFrom), output lines appear at once after the line before; at puts a line at a frame of its own (from the item's start).",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "title": { "type": "string", "maxLength": 120 },
+      "prompt": { "type": "string", "maxLength": 12, "description": "Shown before input lines (default \"$\")." },
+      "typeFrom": { "type": "integer", "minimum": 0, "description": "The frame typing starts (default 0)." },
+      "speed": { "type": "number", "exclusiveMinimum": 0, "maximum": 200, "description": "Characters typed a second (default 30)." },
+      "lines": {
+        "type": "array",
+        "maxItems": 40,
+        "items": {
+          "type": "object",
+          "required": ["text"],
+          "additionalProperties": false,
+          "properties": {
+            "text": { "type": "string", "maxLength": 300 },
+            "kind": { "enum": ["input", "output"], "description": "input types in after the prompt; output (default) appears at once." },
+            "at": { "type": "integer", "minimum": 0, "description": "The earliest frame it starts." }
+          }
+        }
+      }
+    }
+  },
+  "component": {
+    "size": { "width": 1000, "height": 620 },
+    "animated": true,
+    "defaults": { "title": "Terminal", "prompt": "$", "typeFrom": 0, "speed": 30, "lines": [{ "text": "npx your-tool init", "kind": "input" }, { "text": "✔ Ready in 1.2 s" }] }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "terminal"
+  }
+}

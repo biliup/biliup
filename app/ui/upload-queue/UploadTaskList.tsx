@@ -1,6 +1,8 @@
 'use client'
 import { useState } from 'react'
 import Link from 'next/link'
+import { recordingEditorHref } from '@/app/lib/workbench'
+import {formatSpan} from '@/app/lib/sessions'
 import { Button, Spin, Tag } from '@douyinfe/semi-ui'
 import {
   fetchUploadQueueTask, formatUploadBytes, formatUploadSpeed, uploadPhaseLabel,
@@ -14,9 +16,9 @@ function dateTime(value: number) {
   return new Date(value).toLocaleString('zh-CN')
 }
 
-function StateTag({ state }: { state: string }) {
+function StateTag({ state,phase }: { state: string;phase?:string|null }) {
   const meta = uploadStateMeta[state] ?? { label: uploadStateLabel(state), tone: 'grey' as const }
-  return <Tag size="small" color={meta.tone}>{meta.label}</Tag>
+  return <Tag size="small" color={meta.tone}>{state==='running'&&phase?uploadPhaseLabel(phase):meta.label}</Tag>
 }
 
 function ProgressBar({ confirmed, total }: { confirmed: number; total: number | null }) {
@@ -71,23 +73,28 @@ function TaskCard({ task }: { task: UploadQueueTask }) {
       <div className={styles.taskInfo}>
         <div className={styles.titleLine}>
           <strong title={task.title}>{task.title || '未命名任务'}</strong>
-          <StateTag state={task.state} />
+          <StateTag state={task.state} phase={task.phase}/>
           {task.source && <Tag size="small" color="violet" type="light">{uploadSourceLabels[task.source] ?? '其他来源'}</Tag>}
         </div>
         <div className={styles.metaLine}>
           {task.streamer_name && <span>{task.streamer_name}</span>}
           {task.template_name && <span>模板：{task.template_name}</span>}
-          {task.session_id != null && <Link href={`/replay?session=${encodeURIComponent(task.session_id)}`}>场次 #{task.session_id}</Link>}
+          {task.session_id != null && <Link href={recordingEditorHref(task.session_id)}>场次 #{task.session_id}</Link>}
           {task.bvid && <a href={`https://www.bilibili.com/video/${encodeURIComponent(task.bvid)}`} target="_blank" rel="noreferrer">稿件 {task.bvid}</a>}
         </div>
-        <div className={styles.progressLine}>
+        {task.processing?.state==='running'?<div className={styles.progressLine}>
+          <progress className={styles.progress} max={1} value={task.processing.total_ms?Math.max(0,Math.min(1,task.processing.processed_ms/task.processing.total_ms)):undefined} aria-label="后处理进度"/>
+          <span>{uploadPhaseLabel(task.processing.operation)} {formatSpan(task.processing.processed_ms)} / {task.processing.total_ms?formatSpan(task.processing.total_ms):'—'}</span>
+          <span className={styles.currentFile}>{task.processing.file}</span>
+        </div>:<div className={styles.progressLine}>
           <ProgressBar confirmed={task.bytes_confirmed} total={task.total_bytes} />
           <span>{progress}</span>
           {task.current_file && <span className={styles.currentFile} title={task.current_file}>当前：{task.current_file}</span>}
-        </div>
+        </div>}
         <div className={styles.metaLine}>
-          <span>速度 {formatUploadSpeed(task.speed_bytes_per_sec)}</span>
+          {task.phase==='uploading'&&<span>速度 {formatUploadSpeed(task.speed_bytes_per_sec)}</span>}
           {task.phase && <span>{uploadPhaseLabel(task.phase)}</span>}
+          {task.processing&&<Link href={`/outputs?task=${encodeURIComponent(task.id)}`}>后处理记录</Link>}
           <span>{task.files_succeeded} 成功 · {task.files_failed} 失败</span>
           {task.retries > 0 && <span>{task.retries} 次重试</span>}
           {task.next_retry_at != null && <span>下次重试：{dateTime(task.next_retry_at)}</span>}

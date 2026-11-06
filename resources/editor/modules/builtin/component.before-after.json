@@ -1,0 +1,80 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.before-after",
+  "kind": "component",
+  "name": "Before / after",
+  "description": "Labels for a side-by-side comparison, with a line down the middle.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "before": {
+        "type": "string",
+        "maxLength": 30,
+        "x-group": "Content",
+        "description": "The left label."
+      },
+      "after": {
+        "type": "string",
+        "maxLength": 30,
+        "x-group": "Content",
+        "description": "The right label."
+      },
+      "style": {
+        "enum": [
+          "pill",
+          "tape",
+          "plain"
+        ],
+        "x-group": "Style",
+        "description": "Pills, strips of tape, or plain words."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The right label's colour."
+      },
+      "position": {
+        "enum": [
+          "top",
+          "bottom"
+        ],
+        "x-group": "Layout",
+        "description": "Labels at the top or the bottom."
+      },
+      "divider": {
+        "type": "boolean",
+        "x-group": "Style",
+        "description": "A line down the middle."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 1720,
+      "height": 900
+    },
+    "animated": true,
+    "defaults": {
+      "before": "Before",
+      "after": "After",
+      "style": "pill",
+      "color": "#3DDC84",
+      "position": "top",
+      "divider": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "columns-2"
+  }
+}

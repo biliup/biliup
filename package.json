@@ -8,16 +8,19 @@
     "start": "next start",
     "lint": "eslint .",
     "prepare:jassub": "node scripts/prepare-jassub.mjs",
-    "predev": "npm run prepare:jassub",
-    "prebuild": "npm run prepare:jassub"
+    "predev": "npm run prepare:editor && npm run prepare:jassub",
+    "prebuild": "npm run prepare:editor && npm run prepare:jassub",
+    "prepare:editor": "node scripts/prepare-editor.mjs"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.103.0",
     "@douyinfe/semi-ui": "^2.103.0",
+    "ajv": "8.20.0",
     "artplayer": "^5.4.0",
     "artplayer-plugin-danmuku": "^5.3.0",
     "hls.js": "^1.7.3",
     "jassub": "2.5.18",
+    "lucide-react": "0.460.0",
     "mpegts.js": "^1.8.2",
     "next": "^16.3.5",
     "qrcode.react": "^4.2.0",
@@ -25,6 +28,7 @@
     "react-dom": "^19.3.0",
     "react-json-tree": "^0.20.0",
     "swr": "^2.5.1",
+    "typegpu": "0.12.6",
     "uplot": "^1.6.32"
   },
   "devDependencies": {

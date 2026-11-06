@@ -1,0 +1,62 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.shader",
+  "kind": "effect",
+  "name": "Shader effect",
+  "description": "A project GPU effect written with TypeGPU: the clip carries its WGSL, its params and their values, drawn with WebGPU in the preview and the export",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "required": ["shader", "name", "wgsl", "fields"],
+    "additionalProperties": false,
+    "properties": {
+      "shader": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$",
+        "maxLength": 120,
+        "description": "The effect's registered project.<name> identity."
+      },
+      "name": { "type": "string", "minLength": 1, "maxLength": 60 },
+      "wgsl": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16384,
+        "description": "The TypeGPU function resolved to WGSL: struct Params and fn effect(uv, t, size[, p]) -> vec4f. Filled in by Biliup from the effect's id; don't write it by hand."
+      },
+      "fields": {
+        "type": "array",
+        "maxItems": 16,
+        "items": {
+          "type": "object",
+          "required": ["key", "label", "type", "default"],
+          "additionalProperties": false,
+          "properties": {
+            "key": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9]{0,30}$" },
+            "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+            "type": { "enum": ["number", "color", "bool"] },
+            "min": { "type": "number" },
+            "max": { "type": "number" },
+            "step": { "type": "number", "exclusiveMinimum": 0 },
+            "default": { "type": ["number", "string", "boolean"] }
+          }
+        }
+      },
+      "values": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": { "type": ["number", "string", "boolean"] },
+        "description": "The params' values by key (numbers within their range, colours #rrggbb, switches true/false); missing ones are their defaults."
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "sparkles"
+  }
+}

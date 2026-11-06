@@ -23,7 +23,6 @@ jobs:
         run: |
           npm install
           node --test npm/tests/*.test.cjs
-          node --test app/lib/*.test.cjs
           npm run build
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -1,0 +1,17 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.cut",
+  "kind": "transition",
+  "name": "Cut",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "minus"
+  }
+}

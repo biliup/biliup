@@ -1,0 +1,45 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.glow",
+  "kind": "effect",
+  "name": "Glow",
+  "description": "Bright parts bloom",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.5,
+        "description": "Amount"
+      },
+      "threshold": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 0.95,
+        "default": 0.65,
+        "description": "Threshold"
+      },
+      "radius": {
+        "type": "number",
+        "minimum": 2,
+        "maximum": 60,
+        "default": 16,
+        "description": "Radius (canvas px)"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "sun"
+  }
+}

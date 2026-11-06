@@ -156,7 +156,7 @@ pub(crate) fn append_encoding_args(cmd: &mut Command, audio: AudioEncoding) {
 
 pub(crate) async fn validate_output(path: &Path, format: &str, require_aac: bool) -> AppResult<()> {
     if format != "flv" {
-        return validate_packet_timestamps(path).await;
+        return validate_packet_timestamps(path, require_aac).await;
     }
     let path = path.to_path_buf();
     let (encoding, packets) = tokio::task::spawn_blocking(move || flv_audio_packet_timeline(&path))
@@ -174,7 +174,7 @@ pub(crate) async fn validate_output(path: &Path, format: &str, require_aac: bool
 /// FFmpeg's stream-copy framecrc muxer exposes original packet PTS for containers
 /// other than FLV. Use the existing FFmpeg installation, without requiring
 /// ffprobe or decoding/reencoding a second time. Consume output incrementally.
-async fn validate_packet_timestamps(path: &Path) -> AppResult<()> {
+async fn validate_packet_timestamps(path: &Path, require_aac: bool) -> AppResult<()> {
     let mut cmd = tools::ffmpeg_command();
     cmd.args([
         "-nostdin",
@@ -203,7 +203,7 @@ async fn validate_packet_timestamps(path: &Path) -> AppResult<()> {
         while let Some(line) = lines.next_line().await? {
             if let Some(codec) = line.strip_prefix("#codec_id ") {
                 if let Some((stream, codec)) = codec.split_once(':') {
-                    if codec.trim() == "aac" {
+                    if !require_aac || codec.trim() == "aac" {
                         aac_streams.insert(stream.trim().parse::<usize>().unwrap_or(usize::MAX));
                     }
                 }

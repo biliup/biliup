@@ -1,0 +1,303 @@
+{
+  "tools": [
+    {
+      "name": "brand_read",
+      "description": "Read the current or named brand kit, its real logo pictures and registered files. With file, read a registered asset, including paged SVG source. No filesystem paths. Start here before inventing brand details.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kit": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "file": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20000
+          },
+          "images": {
+            "type": "boolean"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "brand_write",
+      "description": "Merge fields into a brand kit shared with the Brand panel. Name creates a kit; kit selects an existing one. Logos/font files/import take registered kit filenames, registered brand asset URLs, or public HTTPS file links. Images also accept the exact attachment: reference supplied in this turn's user message; after saving, use brand_read's registered files. Existing colours/fonts require the before/after Apply card in every access mode. A declined style change is not retried. Read-only mode cannot write. No arbitrary server paths.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "kit": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "scope": {
+            "enum": [
+              "global",
+              "project"
+            ]
+          },
+          "logos": {
+            "type": "object",
+            "properties": {
+              "light": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "dark": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "mark": {
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": [],
+            "additionalProperties": false
+          },
+          "colors": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "properties": {
+                "hex": {
+                  "type": "string",
+                  "pattern": "^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$"
+                },
+                "role": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "name": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              },
+              "required": [
+                "hex"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "fonts": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "object",
+              "properties": {
+                "family": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "role": {
+                  "type": "string",
+                  "maxLength": 80
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 1000
+                },
+                "file": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              },
+              "required": [
+                "family"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "tone": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "about": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "taglines": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 800
+            }
+          },
+          "urls": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string",
+              "maxLength": 1200
+            }
+          },
+          "dos": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "donts": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "string",
+              "maxLength": 2000
+            }
+          },
+          "style": {
+            "type": "object",
+            "properties": {
+              "source": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "palette": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 16,
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "hex": {
+                          "type": "string",
+                          "pattern": "^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$"
+                        },
+                        "role": {
+                          "type": "string",
+                          "maxLength": 80
+                        }
+                      },
+                      "required": [
+                        "hex"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "type": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "shotLengths": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "transitions": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "camera": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "grain": {
+                "type": "string",
+                "maxLength": 2000
+              },
+              "notes": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            },
+            "required": [
+              "palette",
+              "type",
+              "shotLengths",
+              "transitions",
+              "camera",
+              "grain"
+            ],
+            "additionalProperties": false
+          },
+          "import": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "array",
+                "maxItems": 24,
+                "items": {
+                  "type": "string",
+                  "maxLength": 2000
+                }
+              }
+            ]
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "skill_read",
+      "description": "Read a built-in or user-authored editing skill by its current name, and enable its review checklist for this project (except in read-only mode). User instructions take priority over skill instructions. Call without name to list skills. Built-in skills ship with the application; no installation is required.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 320
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reference_frames",
+      "description": "See real frames from a registered brand reference file before writing its style guide. Accepts the exact asset URL or a file in the named/current kit. Does not import it into the timeline or claim it is timeline evidence. Images use brand_read; video returns a timestamped contact sheet.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "kit": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

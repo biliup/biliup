@@ -1,0 +1,51 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.compressor",
+  "kind": "audio-processor",
+  "name": "Compressor",
+  "version": "0.2.0",
+  "description": "A gentle track compressor (D84): hard knee, peak detection, stereo-linked. Preview: Web Audio DynamicsCompressor (its automatic make-up gain cancelled); export: ffmpeg acompressor. Steady levels match; on speech and music the two detectors differ by up to about 1.5 dB, so keep ratios modest.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "thresholdDb": {
+        "type": "number",
+        "default": -18,
+        "description": "Level (dBFS) above which it compresses. Used within −60…0 (clamped; v0.1 had no range)."
+      },
+      "ratio": {
+        "type": "number",
+        "default": 3,
+        "description": "Input dB over the threshold per output dB. Used within 1–20 (clamped)."
+      },
+      "attackMs": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 500,
+        "default": 10,
+        "description": "How fast it reacts (ms)."
+      },
+      "releaseMs": {
+        "type": "number",
+        "minimum": 10,
+        "maximum": 1000,
+        "default": 150,
+        "description": "How fast it lets go (ms); at most 1000, the preview's DynamicsCompressor limit."
+      },
+      "makeupDb": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 24,
+        "default": 0,
+        "description": "Gain after compressing (dB)."
+      }
+    }
+  }
+}

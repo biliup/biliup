@@ -1,11 +1,13 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import {useSearchParams} from 'next/navigation'
+import Link from 'next/link'
 import { Button, Spin } from '@douyinfe/semi-ui'
 import { IconCloudStroked } from '@douyinfe/semi-icons'
 import PageHeader from '../components/PageHeader'
 import { useMe } from '@/app/lib/use-me'
 import {
-  fetchUploadQueue, formatUploadSpeed, type UploadQueuePage,
+  fetchUploadQueue, fetchUploadQueueTask, formatUploadSpeed, type UploadQueuePage,
 } from '@/app/lib/upload-queue'
 import { UploadTaskList } from '@/app/ui/upload-queue/UploadTaskList'
 import styles from '@/app/ui/upload-queue/upload-queue.module.scss'
@@ -14,6 +16,10 @@ import dc from '@/app/ui/data-card.module.scss'
 const PAGE_SIZE = 25
 
 export default function UploadQueuePage() {
+  return <Suspense><UploadQueueContent/></Suspense>
+}
+function UploadQueueContent() {
+  const params=useSearchParams(),focusedTask=params.get('task')
   const { can } = useMe()
   const canView = can('file.view')
   const [source, setSource] = useState('')
@@ -24,19 +30,26 @@ export default function UploadQueuePage() {
   const [connectionError, setConnectionError] = useState('')
   const [visible, setVisible] = useState(true)
   const hasLoaded = useRef(false)
+  const request = useRef(0)
 
   const load = useCallback(async (initial = false) => {
     if (!canView) return
+    const current=++request.current
     if (initial && !hasLoaded.current) setLoading(true)
     try {
-      const next = await fetchUploadQueue({ source, state, limit: PAGE_SIZE, offset })
+      const next = focusedTask
+        ? {tasks:[await fetchUploadQueueTask(focusedTask)],total:1,summary:{uploading:0,queued:0,attention:0,speed_bytes_per_sec:0}}
+        : await fetchUploadQueue({ source, state, limit: PAGE_SIZE, offset })
+      if(current!==request.current)return
       setData(next)
       hasLoaded.current = true
       setConnectionError('')
     } catch (error) {
+      if(current!==request.current)return
       setConnectionError(error instanceof Error ? error.message : String(error))
-    } finally { setLoading(false) }
-  }, [canView, source, state, offset])
+    } finally { if(current===request.current)setLoading(false) }
+  }, [canView, source, state, offset,focusedTask])
+  useEffect(()=>{hasLoaded.current=false;setData(null);setConnectionError('');return()=>{request.current++}},[focusedTask,canView,source,state,offset])
 
   useEffect(() => {
     const onVisibility = () => setVisible(document.visibilityState === 'visible')
@@ -66,12 +79,12 @@ export default function UploadQueuePage() {
     <PageHeader icon={<IconCloudStroked size="large" />} title="上传队列" />
     <div className={dc.content}>
       {!canView ? <div className={styles.notice}>需要“文件查看”权限才能查看上传队列。</div> : <>
-        <section className={styles.summary} aria-label="上传队列概况">
+        {!focusedTask&&<section className={styles.summary} aria-label="上传队列概况">
           <SummaryCard label="上传中" value={summary.uploading} detail="正在传输的任务" tone="blue" />
           <SummaryCard label="等待中" value={summary.queued} detail="等待调度或新分段" tone="grey" />
           <SummaryCard label="需要关注" value={summary.attention} detail="失败、中断或结果待确认" tone="orange" />
           <SummaryCard label="总上传速度" value={formatUploadSpeed(summary.speed_bytes_per_sec)} detail="所有上传任务合计" tone="green" />
-        </section>
+        </section>}
 
         {connectionError && <div className={`${styles.notice} ${styles.connectionNotice}`} role="status">
           <strong>队列连接中断</strong><span>{connectionError}。保留上次成功读取的数据，页面会继续重试。</span>
@@ -83,7 +96,7 @@ export default function UploadQueuePage() {
 
         <section className={styles.panel}>
           <div className={styles.toolbar}>
-            <label>来源<select value={source} onChange={event => changeSource(event.target.value)}>
+            {focusedTask?<Link href="/upload-queue">全部上传任务</Link>:<><label>来源<select value={source} onChange={event => changeSource(event.target.value)}>
               <option value="">全部来源</option><option value="automatic">自动投稿</option><option value="manual">手动投稿</option>
               <option value="clip">切片发布</option><option value="sync">边录边传</option><option value="ha">HA 投稿</option>
               <option value="ha_append">HA 追加投稿</option><option value="ha_resume">HA 补投</option>
@@ -95,7 +108,7 @@ export default function UploadQueuePage() {
               <option value="unknown">结果未知</option><option value="cancelled">已取消</option><option value="paused">已暂停</option>
               <option value="skipped">未投稿</option>
             </select></label>
-            <span className={styles.polling}>{visible ? '每秒更新' : '切回页面后继续更新'}</span>
+            </>}<span className={styles.polling}>{visible ? '每秒更新' : '切回页面后继续更新'}</span>
           </div>
 
           {!data && loading ? <div className={styles.loading}><Spin /><span>正在读取上传队列…</span></div>
@@ -104,11 +117,11 @@ export default function UploadQueuePage() {
                 : connectionError ? <div className={styles.empty}>暂时无法读取上传队列。</div>
                   : <div className={styles.loading}><Spin /></div>}
 
-          <footer className={styles.pager}>
+          {!focusedTask&&<footer className={styles.pager}>
             <span>共 {total} 项 · {tasks.length ? `${offset + 1}–${Math.min(offset + tasks.length, total)}` : '0'}</span>
             <div><Button size="small" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>上一页</Button>
               <Button size="small" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)}>下一页</Button></div>
-          </footer>
+          </footer>}
         </section>
       </>}
     </div>

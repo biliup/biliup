@@ -1,5 +1,7 @@
 'use client'
 import { useState } from 'react'
+import Link from 'next/link'
+import { recordingEditorHref } from '@/app/lib/workbench'
 import { Button, Progress, Toast } from '@douyinfe/semi-ui'
 import { apiResourceUrl, renderJobAction, type RenderJob } from '@/app/lib/renders'
 import RevealFileButton from '@/app/ui/RevealFileButton'
@@ -51,7 +53,7 @@ export default function RenderJobList({ jobs, canEdit, canDownload }: {
           <span className={`${styles.jobState} ${styles[`state_${job.state}`]}`}>{stateLabels[job.state]}</span>
         </div>
         <div className={styles.jobSubheading}>
-          <a href={`/replay?session=${job.session_id}`}>打开场次</a>
+          <Link href={recordingEditorHref(job.session_id)}>打开场次</Link>
           <span>{job.clip_id ? `切片 #${job.clip_id}` : '整场'}</span>
           <span>{job.phase}</span>
         </div>

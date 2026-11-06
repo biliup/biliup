@@ -1,0 +1,49 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.device-frame",
+  "kind": "component",
+  "name": "Device frame",
+  "description": "A phone or browser frame with a transparent screen. The footage is a separate clip on the track under it, its box on the frame's screen (component.screens gives the screen rect per device, in the size's pixels). timeline_edit's insert_device_frame inserts both, aligned.",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "device": {
+        "enum": ["phone", "android", "browser"],
+        "description": "phone: rounded phone with a camera pill; android: punch-hole phone; browser: a browser window."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "description": "The frame's colour (a theme token or CSS colour). Default near-black."
+      },
+      "url": {
+        "type": "string",
+        "maxLength": 200,
+        "description": "browser only: the address shown in the bar."
+      }
+    },
+    "required": ["device"]
+  },
+  "component": {
+    "size": { "width": 420, "height": 880 },
+    "defaults": { "device": "phone" },
+    "screens": {
+      "phone": { "size": { "width": 420, "height": 880 }, "screen": { "x": 14, "y": 14, "width": 392, "height": 852, "radius": 52 } },
+      "android": { "size": { "width": 420, "height": 900 }, "screen": { "x": 12, "y": 12, "width": 396, "height": 876, "radius": 34 } },
+      "browser": { "size": { "width": 1280, "height": 820 }, "screen": { "x": 0, "y": 44, "width": 1280, "height": 776, "radius": 16 } }
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "smartphone"
+  }
+}

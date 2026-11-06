@@ -33,5 +33,6 @@ export default defineConfig([
     // 独立的 Vite/Tauri 子项目与 Rust 产物，不属于 Next 前端
     'tauri-app/**',
     'target/**',
+    'third_party/**',
   ]),
 ])

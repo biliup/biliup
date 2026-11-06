@@ -424,6 +424,14 @@ where
                 Ok(replaced) => replaced,
                 Err(error) => {
                     error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
+                    if let Some(task) = TaskObservation::current() {
+                        task.file(
+                            &original.file_name().unwrap_or_default().to_string_lossy(),
+                            original_bytes,
+                        )
+                        .finish(Some(&format!("分段后处理失败：{error}")));
+                        task.phase("waiting_segment");
+                    }
                     continue;
                 }
             };
@@ -602,6 +610,23 @@ pub(crate) async fn upload_single_file_with_progress(
     context: &UploadContext,
     progress: impl Fn(usize) -> bool + Send + Sync,
 ) -> AppResult<Video> {
+    upload_observed_file(file_path,context,progress,true).await
+}
+
+/// Completed renders already have their final audio; uploading must not rewrite that artifact.
+pub(crate) async fn upload_prepared_file_with_progress(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) -> bool + Send + Sync,
+) -> AppResult<Video> {
+    upload_observed_file(file_path,context,progress,false).await
+}
+async fn upload_observed_file(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) -> bool + Send + Sync,
+    repair_audio: bool,
+) -> AppResult<Video> {
     let name = file_path.file_name().unwrap_or_default().to_string_lossy();
     let observation = TaskObservation::current().map(|task| {
         task.file(
@@ -611,7 +636,7 @@ pub(crate) async fn upload_single_file_with_progress(
                 .map(|metadata| metadata.len()),
         )
     });
-    let result = upload_file_inner(file_path, context, &progress, observation.as_ref()).await;
+    let result = upload_file_inner(file_path, context, &progress, observation.as_ref(),repair_audio).await;
     if let Some(observation) = observation {
         observation.finish(
             result
@@ -655,11 +680,12 @@ async fn upload_file_inner(
     context: &UploadContext,
     progress: &(impl Fn(usize) -> bool + Send + Sync),
     observation: Option<&FileObservation>,
+    repair_audio: bool,
 ) -> AppResult<Video> {
     if crate::server::common::processing::masking::is_unmasked(file_path) {
         return Err(AppError::Custom("未遮挡录像禁止上传，请先完成画面遮挡".into()).into());
     }
-    prepare_upload_audio(file_path).await?;
+    if repair_audio { prepare_upload_audio(file_path).await?; }
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -2024,15 +2050,15 @@ pub(crate) fn observe_context(
     let template = ctx
         .upload_config()
         .as_ref()
-        .filter(|template| !template.is_noop_uploader())?;
+        .filter(|template| !template.is_noop_uploader());
     ctx.upload_observations().map(|registry| {
         registry.register(NewTask {
-            source,
+            source: if template.is_some() { source } else { "processing" },
             scheduler_group: group,
             title: &ctx.streamer_info().title,
             streamer_name: Some(&ctx.live_streamer().remark),
             session_id: Some(ctx.id()),
-            template_name: Some(&template.template_name),
+            template_name: template.map(|template| template.template_name.as_str()),
             fifo,
         })
     })

@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.push-down",
+  "kind": "transition",
+  "name": "Push down",
+  "description": "The next clip slides in from above, pushing this one out the bottom.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 4,
+    "maxFrames": 30
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "move"
+  }
+}

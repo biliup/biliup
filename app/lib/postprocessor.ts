@@ -1,5 +1,5 @@
 /**
- * 后处理步骤的双向转换:表单形态 {cmd, value} ↔ 后端 HookStep 形态。
+ * 后处理步骤的双向转换：表单形态 {cmd, value} 与后端 HookStep 形态。
  *
  * 后端 HookStep 是 #[serde(untagged)] 枚举(声明顺序即匹配顺序):
  *   Run { run: string } | Move { mv: string } | Webhook { webhook: string }

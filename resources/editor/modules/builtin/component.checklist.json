@@ -1,0 +1,127 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.checklist",
+  "kind": "component",
+  "name": "Checklist",
+  "description": "A card of items that appear and tick one after another.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "A heading over the items; empty = none."
+      },
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 10,
+        "x-group": "Content",
+        "description": "The items, top to bottom.",
+        "items": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "todo": {
+              "type": "boolean",
+              "description": "Left unticked."
+            }
+          }
+        }
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The ticks' colour."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The card's colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour."
+      },
+      "strike": {
+        "type": "boolean",
+        "x-group": "Style",
+        "description": "Strike through an item once it's ticked."
+      },
+      "start": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 30,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "When the first item ticks."
+      },
+      "step": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 10,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "Time between items."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 760,
+      "height": 480
+    },
+    "animated": true,
+    "defaults": {
+      "title": "Today's plan",
+      "items": [
+        {
+          "text": "Plan the shots"
+        },
+        {
+          "text": "Record the voice-over"
+        },
+        {
+          "text": "Cut to the beat"
+        },
+        {
+          "text": "Add captions",
+          "todo": true
+        }
+      ],
+      "color": "#3DDC84",
+      "background": "#0A0A0BCC",
+      "text": "#FFFFFF",
+      "strike": false,
+      "start": 0.4,
+      "step": 0.6
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "list-checks"
+  }
+}

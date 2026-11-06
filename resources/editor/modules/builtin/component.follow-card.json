@@ -1,0 +1,131 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.follow-card",
+  "kind": "component",
+  "name": "Follow card",
+  "description": "A card that asks people to follow: your logo or avatar (else the platform's own logo in its colour), a line like \"Follow for more\", your handle and a Follow button. For the end of a video or over it.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "handle": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "The handle or address."
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "A line above the handle (\"Follow for more\"); empty = none."
+      },
+      "button": {
+        "type": "string",
+        "maxLength": 24,
+        "x-group": "Content",
+        "description": "The button's word (\"Follow\", \"Subscribe\"); empty = no button."
+      },
+      "platform": {
+        "enum": [
+          "youtube",
+          "instagram",
+          "tiktok",
+          "x",
+          "facebook",
+          "threads",
+          "bluesky",
+          "mastodon",
+          "reddit",
+          "snapchat",
+          "pinterest",
+          "twitch",
+          "kick",
+          "discord",
+          "whatsapp",
+          "telegram",
+          "github",
+          "spotify",
+          "soundcloud",
+          "applepodcasts",
+          "vimeo",
+          "patreon",
+          "substack",
+          "medium",
+          "linkedin",
+          "video",
+          "photos",
+          "shorts",
+          "social",
+          "pro",
+          "live",
+          "web",
+          "mail",
+          "podcast"
+        ],
+        "x-group": "Content",
+        "description": "The platform: a brand id draws that platform's own logo in its colour (a badge on your logo, or the card's picture when there's no logo); web, mail and the other generic kinds draw a glyph. The button takes the platform's colour."
+      },
+      "logo": {
+        "type": "object",
+        "required": [
+          "media"
+        ],
+        "properties": {
+          "media": {
+            "type": "string"
+          }
+        },
+        "x-group": "Content",
+        "description": "Your logo or avatar (an image); none = the platform's logo."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The glyph and button colour for the generic platforms (and with no platform). A brand's logo and button always keep its own colour."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The card's colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 900,
+      "height": 260
+    },
+    "animated": true,
+    "defaults": {
+      "handle": "@yourname",
+      "title": "Follow for more",
+      "button": "Follow",
+      "platform": "youtube",
+      "background": "#FFFFFF",
+      "text": "#0A0A0B"
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "user-plus"
+  }
+}

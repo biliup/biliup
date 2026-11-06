@@ -1,0 +1,87 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.quote",
+  "kind": "component",
+  "name": "Quote card",
+  "description": "A quote with who said it, on a card that rises in. The words get smaller to fit.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "quote": {
+        "type": "string",
+        "maxLength": 280,
+        "x-group": "Content",
+        "description": "The quote.",
+        "x-control": "multiline"
+      },
+      "author": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "Who said it."
+      },
+      "role": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "Who they are; empty = none."
+      },
+      "style": {
+        "enum": [
+          "card",
+          "bold",
+          "minimal"
+        ],
+        "x-group": "Style",
+        "description": "A white card, a card in the accent colour, or words over the picture with an accent bar."
+      },
+      "accent": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The quote mark's (and bar's) colour."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The card's colour (empty = the style's)."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour (empty = the style's)."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 960,
+      "height": 440
+    },
+    "animated": true,
+    "defaults": {
+      "quote": "The best camera is the one you have with you.",
+      "author": "Jane Doe",
+      "role": "Photographer",
+      "style": "card",
+      "accent": "accent"
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "quote"
+  }
+}

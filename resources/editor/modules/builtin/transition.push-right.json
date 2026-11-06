@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.push-right",
+  "kind": "transition",
+  "name": "Push right",
+  "description": "The next clip slides in from the left, pushing this one out to the right.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 4,
+    "maxFrames": 30
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "move"
+  }
+}

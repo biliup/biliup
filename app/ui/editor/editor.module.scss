@@ -1,0 +1,18 @@
+.library, .editor { display: grid; gap: 18px; padding: 20px 0; }
+.projects { display: grid; gap: 12px; }
+.project { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px; border: 1px solid var(--semi-color-border); border-radius: 10px; }
+.project p { margin: 8px 0 0; color: var(--semi-color-text-2); font-size: 12px; }
+.name { font-size: 18px; font-weight: 600; max-width: 300px; }
+.editor input, .editor textarea { color: var(--semi-color-text-0); background: var(--semi-color-fill-0); border: 1px solid var(--semi-color-border); border-radius: 6px; padding: 6px 8px; }
+.editor input[type=number] { width: 100px; }
+.editor label { display: inline-flex; gap: 8px; align-items: center; }
+.timeline { overflow-x: auto; border: 1px solid var(--semi-color-border); border-radius: 10px; }
+.track { display: flex; width: max-content; min-width: 100%; border-bottom: 1px solid var(--semi-color-border); }
+.track:last-child { border-bottom: 0; }
+.trackName { position: sticky; left: 0; z-index: 2; width: 150px; flex-shrink: 0; padding: 12px; display: grid; gap: 8px; background: var(--semi-color-bg-1); box-shadow: 1px 0 var(--semi-color-border); }
+.lane { position: relative; height: 90px; flex: 1; background: var(--semi-color-fill-0); }
+.clip { position: absolute; top: 14px; height: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding: 8px; cursor: pointer; border: 1px solid var(--semi-color-primary); border-radius: 5px; color: var(--semi-color-text-0); background: var(--semi-color-primary-light-default); min-width: 2px; }
+.clip[aria-pressed=true] { outline: 2px solid var(--semi-color-primary); outline-offset: -3px; }
+.text { background: var(--semi-color-warning-light-default); border-color: var(--semi-color-warning); }
+.cursor { position: absolute; z-index: 1; top: 0; bottom: 0; border-left: 2px solid var(--semi-color-danger); pointer-events: none; }
+.inspector { display: grid; gap: 16px; padding: 18px; border: 1px solid var(--semi-color-border); border-radius: 10px; }

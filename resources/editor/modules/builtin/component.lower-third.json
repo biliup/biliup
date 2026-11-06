@@ -1,0 +1,84 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.lower-third",
+  "kind": "component",
+  "name": "Lower third",
+  "description": "A name and a title that slide in at the bottom of the frame, in one of six looks.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "type": "string",
+        "maxLength": 120,
+        "x-group": "Content",
+        "description": "The big line."
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 160,
+        "x-group": "Content",
+        "description": "The small line under it."
+      },
+      "style": {
+        "enum": [
+          "bar",
+          "pill",
+          "underline",
+          "card",
+          "split",
+          "minimal"
+        ],
+        "x-group": "Style",
+        "description": "The look: a dark panel with a bar, a pill with an initial, an underline, a light card, a split block, or plain words."
+      },
+      "accent": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The bar's colour."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The panel's colour (empty = the style's: dark for bar, pill and split, white for card)."
+      },
+      "slide": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 3,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "How long the slide in takes."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 900,
+      "height": 200
+    },
+    "animated": true,
+    "defaults": {
+      "name": "Jane Doe",
+      "title": "Product designer",
+      "accent": "accent",
+      "slide": 0.5,
+      "style": "bar"
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "panel-bottom"
+  }
+}

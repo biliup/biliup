@@ -697,8 +697,12 @@ impl Reconciler {
             // 没有配对账本（plan 为空）时期望状态自带权威，暂停照常落地；有账本时只有严格新于
             // 本机记录的版本（fresh_rooms）才动暂停：等戳的重复下发是本机已上报的旧事的回音，
             // 本机刚改的暂停还没被扫描排进队列时，它们不能把暂停位翻回去。
-            let fresh = plan.as_ref().is_none_or(|plan| plan.fresh_rooms.contains(&room.id));
-            let adopt = plan.as_ref().and_then(|plan| plan.adopt_rooms.get(&room.id).copied());
+            let fresh = plan
+                .as_ref()
+                .is_none_or(|plan| plan.fresh_rooms.contains(&room.id));
+            let adopt = plan
+                .as_ref()
+                .and_then(|plan| plan.adopt_rooms.get(&room.id).copied());
             if let Err(error) = self.upsert_room(&room, compare, fresh, adopt).await {
                 errors.insert(room.id, error);
             }

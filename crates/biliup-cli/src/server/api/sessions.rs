@@ -119,6 +119,7 @@ pub struct SessionListQuery {
     pub page: Option<u32>,
     pub page_size: Option<u32>,
     pub include_sources: Option<bool>,
+    pub q: Option<String>,
 }
 
 /// `GET /v1/sessions?streamer_id=&page=&page_size=`
@@ -132,12 +133,17 @@ pub async fn list_sessions(
         .unwrap_or(DEFAULT_PAGE_SIZE)
         .clamp(1, MAX_PAGE_SIZE);
     let offset = (page as i64 - 1) * page_size as i64;
-    match store::list_sessions_including_sources(
+    let search = query.q.as_deref().unwrap_or("").trim();
+    if search.chars().count() > 256 {
+        return (StatusCode::BAD_REQUEST, "搜索内容过长").into_response();
+    }
+    match store::search_sessions(
         &pool,
         query.streamer_id,
         page_size as i64,
         offset,
         query.include_sources.unwrap_or(false),
+        search,
     )
     .await
     {
@@ -204,19 +210,7 @@ pub struct SessionDetail {
 /// 盘上没有关键帧就是 0（还不能播）；有就一定大于 0。缓存覆盖的字节还没全部落盘时，盘上最后一个关键帧
 /// 之后那一截按字节在它和缓存末尾之间线性估计，只用来画可播范围，起播位置仍然落在盘上的关键帧。
 /// `index` 是 [`segment_index`] 的结果，里面的关键帧已经只剩落了盘的。
-fn readable_ms(index: &crate::server::workbench::index::KeyframeIndex, on_disk: u64) -> i64 {
-    let Some(last) = index.keyframes.last() else {
-        return 0;
-    };
-    if index.source_len <= on_disk {
-        return i64::from(index.duration_ms);
-    }
-    let t = u128::from(last.t_ms);
-    let span_ms = u128::from(index.duration_ms).saturating_sub(t);
-    let done = u128::from(on_disk.saturating_sub(last.offset));
-    let span = u128::from(index.source_len - last.offset);
-    (t + (span_ms * done).div_ceil(span)) as i64
-}
+use crate::server::workbench::readable_ms;
 
 async fn segment_view(row: SegmentRow) -> SegmentView {
     let path = std::path::PathBuf::from(&row.path);
@@ -333,6 +327,11 @@ pub async fn delete_session(
         Ok(DeleteSessionOutcome::GroupMember) => (
             StatusCode::CONFLICT,
             "场次属于合并场次，请先删除合并场次以保留来源录像",
+        )
+            .into_response(),
+        Ok(DeleteSessionOutcome::EditorReferenced) => (
+            StatusCode::CONFLICT,
+            "场次被剪辑工程或其历史版本引用，请先删除相关工程",
         )
             .into_response(),
         Err(error) => internal(error),

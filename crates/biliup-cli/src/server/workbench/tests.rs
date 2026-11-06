@@ -1020,7 +1020,11 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
     let root = tempfile::tempdir().unwrap();
     let dir = root.path();
     let inside = dir.join("c.flv").to_string_lossy().into_owned();
-    let outside = dir.join("elsewhere").join("d.flv").to_string_lossy().into_owned();
+    let outside = dir
+        .join("elsewhere")
+        .join("d.flv")
+        .to_string_lossy()
+        .into_owned();
     let by_name = store::segment_files_in_dir(
         vec![
             file(1, "a.flv", 0),
@@ -1153,4 +1157,29 @@ async fn session_totals_count_segments_waiting_for_deletion() {
     let detail: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(detail["segment_count"], 2);
     assert_eq!(detail["duration_ms"], 120_000);
+}
+
+#[tokio::test]
+async fn recording_search_matches_files_and_merged_sources_before_pagination() {
+    let (_dir, pool) = setup().await;
+    let mut ids = Vec::new();
+    for (at, title, path) in [(10_000, "first", "alpha%_clip.mp4"), (30_000, "second", "BETA.mp4")] {
+        let id = store::open_session(&pool, 1, &info(title, at), at, 0).await.unwrap().id;
+        store::set_started_at(&pool, id, at).await.unwrap();
+        let segment = store::insert_segment(&pool, id, path, "mp4", 0, 0).await.unwrap();
+        sqlx::query("UPDATE segments SET end_ms=1000,state='finished' WHERE id=?").bind(segment).execute(&pool).await.unwrap();
+        store::close_session(&pool, id, at+1000).await.unwrap();
+        ids.push(id);
+    }
+    let (rows,total)=store::search_sessions(&pool,None,1,0,false,"alpha%_").await.unwrap();
+    assert_eq!(total,1);
+    assert_eq!(rows[0].id,ids[0]);
+    assert_eq!(store::search_sessions(&pool,None,1,1,false,"alpha%_").await.unwrap().0.len(),0);
+    assert_eq!(store::search_sessions(&pool,None,1,0,false,"beta.mp4").await.unwrap().0[0].id,ids[1]);
+    let group=super::session_groups::create(&pool,&ids).await.unwrap();
+    let (rows,total)=store::search_sessions(&pool,None,20,0,false,"alpha%_").await.unwrap();
+    assert_eq!(total,1);
+    assert_eq!(rows[0].id,group);
+    assert_eq!(store::search_sessions(&pool,None,20,0,true,"alpha%_").await.unwrap().1,2);
+    assert_eq!(store::search_sessions(&pool,None,20,0,false,"not-a-file").await.unwrap().1,0);
 }

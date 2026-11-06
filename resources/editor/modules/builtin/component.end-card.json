@@ -1,0 +1,42 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.end-card",
+  "kind": "component",
+  "name": "End card",
+  "description": "The closing card: a logo, a title, the install command in a code chip and the URL, centred. Hold it 2–3 s at the end.",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "logo": {
+        "type": "object",
+        "required": ["media"],
+        "additionalProperties": false,
+        "properties": {
+          "media": { "type": "string" }
+        },
+        "description": "An image media item (PNG or SVG) shown on top."
+      },
+      "title": { "type": "string", "maxLength": 200, "description": "One line under the logo. Markup: [[accent]], **bold**." },
+      "code": { "type": "string", "maxLength": 200, "description": "A command in a mono chip, e.g. npx your-tool init." },
+      "url": { "type": "string", "maxLength": 200 },
+      "background": { "type": "string", "minLength": 1, "x-control": "color", "description": "Fills the box (a theme token or CSS colour); leave it out to show what's under the card." }
+    }
+  },
+  "component": {
+    "size": { "width": 1920, "height": 1080 },
+    "fullFrame": true,
+    "defaults": { "title": "Try it today", "code": "npx your-tool init", "url": "your-site.com", "background": "bg" }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "badge-check"
+  }
+}

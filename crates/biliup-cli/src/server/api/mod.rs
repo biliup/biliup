@@ -1,5 +1,6 @@
 /// 业务路由的访问控制（登录 + 权限点）
 pub mod access;
+pub mod outputs;
 pub mod activity_events;
 /// 认证相关API
 pub mod auth;
@@ -17,6 +18,7 @@ pub mod clips;
 pub mod danmaku_density;
 /// 斗鱼Cookie验证
 pub mod douyu_validation;
+pub mod editor;
 /// 通用API端点
 pub mod endpoints;
 pub mod files;

@@ -1,0 +1,33 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "move.blur",
+  "kind": "move",
+  "name": "Blur in",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "description": "Text: comes into focus from a blur while fading in (in), or blurs away while fading out (out).",
+  "params": {
+    "type": "object",
+    "properties": {
+      "ease": {
+        "enum": [
+          "linear",
+          "in",
+          "out",
+          "inOut",
+          "spring",
+          "spring.snap",
+          "spring.settle",
+          "spring.land",
+          "spring.bounce"
+        ],
+        "description": "Optional: reshapes the motion (not the fade): linear, in, out, inOut (cubic) or a spring (spring.snap, spring.settle or spring, spring.land, spring.bounce: fitted to the move's duration, may overshoot) (D192). Without it the move keeps its own curve."
+      }
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "generate.veo",
+  "kind": "generator",
+  "name": "Veo",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "process"
+  },
+  "capabilities": [
+    "network",
+    "api-key",
+    "media:write"
+  ],
+  "generator": {
+    "media": "video",
+    "provider": "google",
+    "model": "veo-3.1-generate-preview"
+  },
+  "ui": {
+    "panel": "generate"
+  }
+}

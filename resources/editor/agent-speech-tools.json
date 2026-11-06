@@ -1,0 +1,291 @@
+{
+  "attribution": "Uncut, MIT; licenses/uncut/LICENSE",
+  "tools": [
+    {
+      "name": "transcript_read",
+      "description": "What's said in a media file, transcribed on this server with whisper.cpp (language detected; pass language to force one): text lines with word indices and frames, or each word with its frames; fillers and pauses (at least 0.3 s, aligned to the silences when the loudness analysis is cached) are marked and listed. Pass media, or item (any clip or sound on any track: its speech is read, a take's microphone for its camera or screen). Paged: pass from = next.from for more. The first call transcribes (the first downloads the selected speech model if needed; whisper-cli must be installed on the server) and waits up to a minute; if it answers running, call again with the same arguments. Cached after.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string",
+            "description": "A media id from project_read (or pass item)."
+          },
+          "item": {
+            "type": "string",
+            "description": "An item id on any track instead of media: the transcript of the file its speech is (its own sound, or its take's microphone)."
+          },
+          "range": {
+            "$ref": "#/$defs/range",
+            "description": "Only words overlapping these project frames of the media [start, end)."
+          },
+          "format": {
+            "enum": [
+              "text",
+              "words"
+            ],
+            "description": "text (default): one line per sentence, 'w<first word index> [start–end] words', {fillers} and (pause n s) inline. words: each word with start and end frames."
+          },
+          "from": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "The first word index to list (next.from of the previous page)."
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^(auto|[a-z]{2,3})$",
+            "description": "The spoken language as a code (en, pl, ...), or auto (default: detect). A cached transcript in another language is redone."
+          }
+        },
+        "$defs": {
+          "range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "returns": "{ media, item?, state, cached, language, model, seconds, words (total), segments, shown: { from, to }, text (format text) | list: [{ i, text, start, end, unsure?, filler? }] (format words), fillers: [{ i, n, text, start, end, kind: hesitation | maybe }], pauses: [{ start, end, startSeconds, endSeconds, after, edge?, silent? }], next?: { from } } or { transcript: { state: running | queued, progress, stage? } } (frames are project frames of the media)"
+    },
+    {
+      "name": "beat_grid",
+      "description": "The beat grid of timeline music after trimming, speed changes and looping: source and playback tempo, beats, downbeats (bar starts), strongest hits and each played drop (where the music gets busier). All event positions are timeline frames within the requested range; drops is empty on an even track. With snap, return the nearest beat and downbeat for each frame, using the full range even when output lists are truncated.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "type": "string",
+            "description": "An audio item (default: the longest music on the timeline)."
+          },
+          "snap": {
+            "type": "array",
+            "maxItems": 60,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      },
+      "returns": "{ item, bpm, timelineBpm, confidence, beatFrames, beatCount, downbeatCount, beats, downbeats, hits: [{ frame, strength }], dropCount, drops: [{ frame, cycle, rise }], snaps?: [{ frame, beat?, off?, downbeat? }], truncated?, note }"
+    },
+    {
+      "name": "transcript_edit",
+      "description": "Cut by text: remove words (ranges of transcript_read's word ids), pauses (at least min seconds) and/or hesitation fillers (um, uh, yyy, eee; never the 'maybe' ones) of a media file from every main-track clip that uses it (or whose linked microphone does), as one edit on your turn (Undo turn reverts it). Respects each clip's in, length and speed; the main track closes up, items on other tracks don't move. With item it cuts that item and what belongs to it instead (including linked or grouped speech). Cuts snap to frames and keep a couple of frames next to the words that stay; adjacent cuts merge; words no longer in the edit are skipped with a note. dryRun returns the plan without changing anything. Gets the transcript like transcript_read (it may have to be made first: if it answers running, call again).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string",
+            "description": "A media id from project_read; may be left out when exactly one media with sound is on the main track, or when item is given."
+          },
+          "item": {
+            "type": "string",
+            "description": "Cut this item (any track) and what belongs to it instead of every main clip of the media; word ids are its speech's transcript_read ids (transcript_read with the same item)."
+          },
+          "remove": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Word ranges to cut, both ends included, e.g. [{\"from\": \"w12\", \"to\": \"w20\"}, {\"from\": \"w31\"}].",
+            "items": {
+              "type": "object",
+              "required": [
+                "from"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "from": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ],
+                  "description": "The first word: \"w12\" (or 12)."
+                },
+                "to": {
+                  "type": [
+                    "string",
+                    "integer"
+                  ],
+                  "description": "The last word (default: from)."
+                },
+                "clip": {
+                  "type": "string",
+                  "description": "Restrict this range to a timeline clip, or a scoped speech item. Must belong to item when item is also supplied."
+                },
+                "cycle": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Only this pass through a looped source; requires clip. Zero is the source's first pass. The number is based on unwrapped source time, so a trimmed or split piece can start in a later cycle. Without cycle the range cuts every occurrence in scope. Non-looping media uses zero."
+                }
+              }
+            }
+          },
+          "pauses": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "min": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 60,
+                "description": "Pauses at least this many seconds long (default 0.5). A little quiet stays next to each word."
+              }
+            }
+          },
+          "fillers": {
+            "type": "boolean",
+            "description": "true: also cut the hesitation fillers (English and Polish)."
+          },
+          "dryRun": {
+            "type": "boolean",
+            "description": "true: only say what would be cut and the new length."
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^(auto|[a-z]{2,3})$",
+            "description": "The spoken language as a code (en, pl, ...), or auto (default: detect). A cached transcript in another language is redone."
+          }
+        }
+      },
+      "returns": "{ media, item?, applied, removed: [{ cycle, words?, text, pauses?, fillers?, mediaFrames: { start, end }, frames, seconds, clips }], framesRemoved, secondsSaved, revision, duration, seconds, durationBefore, notes? } (one removed entry per timeline occurrence; frames: the edit's, mediaFrames: project frames within the source file)"
+    },
+    {
+      "name": "captions_make",
+      "description": "Captions from a media file's transcript: a captions item on its own text track that follows the main-track clips using the media (or their linked microphone; item: any clip or sound, including linked or grouped speech): later cuts, trims and transcript_edit removals keep it in sync. Words are grouped into cards (1-2 lines, broken at pauses and sentence ends). mode line shows a card at a time, word also accents the speaking word (karaoke), single shows one word at a time. If the media already has captions they're remade from the transcript (corrections kept when the words are the same). Gets the transcript like transcript_read (if it answers running, call again). Fix words, force card starts or change settings afterwards with timeline_edit's edit_captions op; restyle with update_item style (as on text).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string",
+            "description": "A media id from project_read; may be left out when exactly one media with sound is on the main track, or when item is given."
+          },
+          "item": {
+            "type": "string",
+            "description": "An item id on any track instead of media: captions of its speech (its own sound, or its take's microphone)."
+          },
+          "mode": {
+            "enum": [
+              "line",
+              "word",
+              "single"
+            ],
+            "description": "line: a card at a time; word: the card with the speaking word accented; single: one word at a time. An explicit mode overrides the captionStyle's suggested mode. Omitted: use that suggestion when present, otherwise keep the existing mode when remaking, or line for new captions."
+          },
+          "look": {
+            "type": "string",
+            "description": "A text-style module id, mutually exclusive with captionStyle. modules_list kind text-style lists them. With neither style option, preserve existing styling when remaking, or use text.caption for new captions. Restyling preserves an existing caption's position."
+          },
+          "captionStyle": {
+            "enum": ["box", "outline", "karaoke", "highlight", "word-box", "big-yellow", "minimal", "card"],
+            "description": "A native caption preset instead of look. Applies to both new and remade captions, preserving existing positioning and word corrections. karaoke, highlight and word-box suggest word mode; big-yellow suggests single mode. Other presets leave the mode unchanged unless mode is supplied."
+          },
+          "lines": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "How words are grouped (defaults: maxChars what fits the canvas at the look's size, at most 32; maxLines 2, maxSeconds 3, pause 0.3).",
+            "properties": {
+              "maxChars": {
+                "type": "integer",
+                "minimum": 4,
+                "maximum": 200
+              },
+              "maxLines": {
+                "enum": [
+                  1,
+                  2
+                ]
+              },
+              "maxSeconds": {
+                "type": "number",
+                "minimum": 0.1,
+                "maximum": 30
+              },
+              "maxWords": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000
+              },
+              "pause": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10
+              }
+            }
+          },
+          "hideFillers": {
+            "type": "boolean",
+            "description": "Leave hesitations (um, uh, yyy) out of the captions."
+          },
+          "language": {
+            "type": "string",
+            "pattern": "^(auto|[a-z]{2,3})$",
+            "description": "The spoken language as a code (en, pl, ...), or auto (default: detect). A cached transcript in another language is redone."
+          }
+        }
+      },
+      "returns": "{ media, item, remade, mode, words, cards: [{ from, to, words: 'w12–w18', text }] (the first 40; frames of the edit), cardCount, revision, notes? }"
+    },
+    {
+      "name": "subtitles_export",
+      "description": "Export all captions and imported subtitle tracks after timeline cuts as an SRT or WebVTT download. Does not render video. The file is stored with this project and a download button appears on this assistant turn; no server filesystem path is accepted. Refused when there are no cues or the filename exists unless overwrite is true.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "enum": [
+              "srt",
+              "vtt"
+            ],
+            "description": "srt (default) or vtt; taken from path's extension when it has one."
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 180,
+            "description": "A filename only, e.g. talk.srt. Defaults to the project name and format. Absolute paths, separators and parent directories are refused."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Replace an earlier assistant subtitle download with this filename in this project."
+          }
+        }
+      },
+      "returns": "{ path, format, cues, first: [{ from, to, time, text }] (the first 5; frames of the edit), note }"
+    }
+  ]
+}

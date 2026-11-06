@@ -12,9 +12,11 @@
 
 pub mod clips;
 pub mod dvr;
+pub mod editor;
 pub mod index;
 pub mod live;
 pub mod markers;
+pub(crate) mod output_publish;
 pub mod recorder;
 pub mod renders;
 pub mod retention;
@@ -47,6 +49,22 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// Readable duration of an indexed growing recording, bounded by flushed bytes.
+/// The detail API and editor snapshots must agree on this boundary.
+pub(crate) fn readable_ms(index: &index::KeyframeIndex, on_disk: u64) -> i64 {
+    let Some(last) = index.keyframes.last() else {
+        return 0;
+    };
+    if index.source_len <= on_disk {
+        return i64::from(index.duration_ms);
+    }
+    let t = u128::from(last.t_ms);
+    let span_ms = u128::from(index.duration_ms).saturating_sub(t);
+    let done = u128::from(on_disk.saturating_sub(last.offset));
+    let span = u128::from(index.source_len - last.offset);
+    (t + (span_ms * done).div_ceil(span)) as i64
+}
 
 /// [`locate`] 的结果：从 `path` 先读 `[0, header_len)` 再从 `offset` 起读，
 /// 得到的就是一路从关键帧开始的可播放流。

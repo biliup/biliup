@@ -1,0 +1,27 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "generate.svg",
+  "kind": "generator",
+  "name": "SVG and HTML",
+  "version": "0.1.0",
+  "description": "SVG pictures and HTML animations rendered by the shared isolated Chromium worker, using supplied markup or the configured text model.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "process"
+  },
+  "capabilities": [
+    "media:write",
+    "network",
+    "api-key"
+  ],
+  "generator": {
+    "media": "image",
+    "provider": "configured",
+    "model": "configured"
+  },
+  "ui": {
+    "panel": "generate"
+  }
+}

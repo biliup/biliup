@@ -106,7 +106,7 @@ export async function deleteAsset(session: number, id: number) {
 }
 export async function createRender(session: number, clipId?: number, recipe?: RenderRecipe): Promise<RenderJob> {
   const job = await sendJson<RenderJob>(jobsUrl(session), 'POST', { clip_id: clipId ?? null, ...(recipe ? { recipe } : {}) })
-  void mutate(jobsUrl(session)); return job
+  void mutate(jobsUrl(session));void mutate(key=>typeof key==='string'&&key.startsWith('/v1/renders?')); return job
 }
 export async function renderJobAction(session: number, id: number, action: 'cancel' | 'retry') {
   await send(`/v1/renders/${id}/${action}`, { method: 'POST' })

@@ -1,0 +1,35 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.outline",
+  "kind": "text-style",
+  "name": "Outline",
+  "description": "Huge outlined letters with no fill.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.18,
+    "weight": 900,
+    "font": "DM Sans",
+    "tracking": -0.03,
+    "lineHeight": 0.95,
+    "color": "transparent",
+    "align": "center",
+    "uppercase": true,
+    "span": true,
+    "x": 0.0375,
+    "y": 0.34,
+    "stroke": {
+      "width": 0.025,
+      "color": "fg"
+    },
+    "text": "Outline"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.zoom-pulse",
+  "kind": "effect",
+  "name": "Zoom pulse",
+  "description": "Zooms in and out on a beat",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0.02,
+        "maximum": 0.4,
+        "default": 0.08,
+        "description": "Amount"
+      },
+      "period": {
+        "type": "number",
+        "minimum": 0.25,
+        "maximum": 4,
+        "default": 1,
+        "description": "Period (s)"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "zoom-in"
+  }
+}

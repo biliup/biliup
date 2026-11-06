@@ -68,7 +68,9 @@ pub async fn get_streamers_endpoint(
 ) -> Result<Json<Vec<LiveStreamerResponse>>, Response> {
     let live_streamers = get_all_streamer(&pool).await.map_err(report_to_response)?;
     let workers = managers.get_rooms().await;
-    Ok(Json(streamer_responses(&caller, &pool, &config, live_streamers, &workers).await))
+    Ok(Json(
+        streamer_responses(&caller, &pool, &config, live_streamers, &workers).await,
+    ))
 }
 
 pub(super) async fn streamer_responses(
@@ -189,9 +191,7 @@ pub async fn post_streamers_endpoint(
     }
     validate_streamer_mosaic(&payload.override_cfg)?;
     match add_streamer(&service_register, payload).await {
-        Ok(live_streamers) => {
-            Ok(Json(live_streamers))
-        }
+        Ok(live_streamers) => Ok(Json(live_streamers)),
         Err(AddStreamerError::UnsupportedUrl) => {
             Err((StatusCode::BAD_REQUEST, "Not supported url").into_response())
         }

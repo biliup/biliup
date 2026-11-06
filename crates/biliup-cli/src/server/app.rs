@@ -140,6 +140,9 @@ fn development_cors() -> CorsLayer {
         .expose_headers([
             http::HeaderName::from_static("x-dvr-start-ms"),
             http::HeaderName::from_static("x-dvr-segment-id"),
+            http::HeaderName::from_static("x-biliup-full"),
+            http::HeaderName::from_static("x-biliup-filmstrip-layout"),
+            http::HeaderName::from_static("x-editor-frame"),
         ])
         .allow_origin(["http://localhost:3000".parse::<HeaderValue>().unwrap()])
         .allow_credentials(true)

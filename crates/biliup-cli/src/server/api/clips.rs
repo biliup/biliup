@@ -603,6 +603,8 @@ pub enum DownloadFormat {
 pub struct DownloadQuery {
     #[serde(default)]
     pub format: DownloadFormat,
+    #[serde(default)]
+    pub inline: bool,
 }
 
 /// 下载时的文件名：标题（去掉文件名里不能用的字符）或 `切片-<id>`，加扩展名。
@@ -666,7 +668,8 @@ pub async fn download_clip(
         .to_ascii_lowercase();
     let name = download_name(&clip, &extension);
     let disposition = format!(
-        "attachment; filename=\"clip-{cid}.{extension}\"; filename*=UTF-8''{}",
+        "{}; filename=\"clip-{cid}.{extension}\"; filename*=UTF-8''{}",
+        if query.inline { "inline" } else { "attachment" },
         urlencoding::encode(&name)
     );
     let mut response = match ServeFile::new(&path).oneshot(request).await {

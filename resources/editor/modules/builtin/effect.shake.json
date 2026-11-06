@@ -1,0 +1,38 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.shake",
+  "kind": "effect",
+  "name": "Shake",
+  "description": "Handheld camera shake",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 80,
+        "default": 12,
+        "description": "Amount (canvas px)"
+      },
+      "speed": {
+        "type": "number",
+        "minimum": 0.5,
+        "maximum": 8,
+        "default": 3,
+        "description": "Speed (Hz)"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "vibrate"
+  }
+}

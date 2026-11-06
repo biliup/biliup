@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react'
 import useSWR, { mutate } from 'swr'
 import { fetcher } from './api-streamer'
-import { type Clip, refresh as refreshClip, send, usePolled } from './clips'
+import { send, usePolled } from './clips'
 import { formatSpan } from './sessions'
 import { ACTIVE_AUTO_CLIP_POLL_MS, sessionJobRefreshInterval } from './auto-clip-poll'
 
@@ -115,6 +115,15 @@ export interface Suggestion {
   /** 只有待处理的有：过了这个时刻（建出来 72 小时）就过期 */
   expires_at: number | null
 }
+
+export interface EditorSuggestionUse {
+  suggestionId:number
+  projectId:number|null
+  projectName:string|null
+  revision:number
+  items:string[]
+}
+export interface SuggestionList {suggestions:Suggestion[];editor_uses:EditorSuggestionUse[]}
 
 export const AUTO_CLIP_STATUS_KEY = '/v1/auto-clip/status'
 export const sessionAutoClipUrl = (sessionId: number) => `/v1/sessions/${sessionId}/auto-clip`
@@ -231,7 +240,7 @@ const suggestionsRefresh = (data?: { suggestions: Suggestion[] }) =>
 
 /** 场次的候选列表；`sessionId` 为 null 时不请求 */
 export function useSuggestions(sessionId: number | null) {
-  return usePolled<{ suggestions: Suggestion[] }>(
+  return usePolled<SuggestionList>(
     sessionId === null ? null : suggestionsUrl(sessionId),
     suggestionsRefresh,
     { revalidateOnFocus: false }
@@ -283,21 +292,6 @@ export async function startAutoClip(sessionId: number, reuseTranscript: boolean)
 export async function cancelAutoClip(sessionId: number): Promise<void> {
   await send(sessionAutoClipUrl(sessionId), { method: 'DELETE' })
   await Promise.all([mutate(sessionAutoClipUrl(sessionId)), mutate(sessionJobKey(sessionId))])
-}
-
-/** 接受候选：按给的入点、出点（不给就用候选自己的）建切片草稿 */
-export async function acceptSuggestion(
-  s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>,
-  body: { in_ms?: number; out_ms?: number; title?: string } = {}
-): Promise<{ suggestion: Suggestion; clip: Clip }> {
-  const result = await postJson<{ suggestion: Suggestion; clip: Clip }>(
-    `${suggestionsUrl(s.view_session_id ?? s.session_id)}/${s.id}/accept`,
-    body
-  )
-  refreshClip(result.clip)
-  void mutate(suggestionsUrl(s.session_id))
-  if (s.view_session_id != null && s.view_session_id !== s.session_id) void mutate(suggestionsUrl(s.view_session_id))
-  return result
 }
 
 export async function dismissSuggestion(s: Pick<Suggestion, 'id' | 'session_id' | 'view_session_id'>): Promise<Suggestion> {

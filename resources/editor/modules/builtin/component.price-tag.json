@@ -1,0 +1,80 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.price-tag",
+  "kind": "component",
+  "name": "Price tag",
+  "description": "A price (and the old one struck through) on a hang tag that swings in, a pill or a burst.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "price": {
+        "type": "string",
+        "maxLength": 16,
+        "x-group": "Content",
+        "description": "The price."
+      },
+      "was": {
+        "type": "string",
+        "maxLength": 16,
+        "x-group": "Content",
+        "description": "The old price, struck through; empty = none."
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 16,
+        "x-group": "Content",
+        "description": "A small word over it (\"SALE\"); empty = none."
+      },
+      "style": {
+        "enum": [
+          "tag",
+          "pill",
+          "burst"
+        ],
+        "x-group": "Style",
+        "description": "A hang tag, a pill or a starburst."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The tag's colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 460,
+      "height": 270
+    },
+    "animated": true,
+    "defaults": {
+      "price": "$29",
+      "was": "$49",
+      "label": "SALE",
+      "style": "tag",
+      "color": "#FF3B30",
+      "text": "#FFFFFF"
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "tag"
+  }
+}

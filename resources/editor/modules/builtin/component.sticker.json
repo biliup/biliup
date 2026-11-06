@@ -1,0 +1,148 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.sticker",
+  "kind": "component",
+  "name": "Sticker",
+  "description": "An emoji, or a drawn sticker from Biliup's set (badges, bubbles, arrows, hand-drawn marks, social glyphs), that pops or draws in and can keep moving.",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "emoji": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16,
+        "x-group": "Content",
+        "description": "The emoji."
+      },
+      "art": {
+        "enum": [
+          "burst",
+          "arrow",
+          "heart",
+          "bubble",
+          "new",
+          "sparkle",
+          "check",
+          "circle-hand",
+          "underline",
+          "underline-double",
+          "highlight",
+          "box-hand",
+          "strike",
+          "cross-out",
+          "squiggle",
+          "arrow-hand",
+          "arrow-loop",
+          "arrow-down",
+          "arrow-block",
+          "tick",
+          "x-hand",
+          "emphasis",
+          "question",
+          "star",
+          "boom",
+          "starburst",
+          "twinkles",
+          "lightning",
+          "cross",
+          "blob",
+          "confetti",
+          "speech",
+          "thought",
+          "shout",
+          "tip",
+          "chat",
+          "sale",
+          "hot",
+          "free",
+          "live",
+          "seal",
+          "ribbon",
+          "before",
+          "after",
+          "soon",
+          "like",
+          "love",
+          "bell",
+          "play",
+          "comment",
+          "share",
+          "save",
+          "follow",
+          "views",
+          "cursor"
+        ],
+        "x-group": "Content",
+        "description": "A drawn sticker from Biliup's set (instead of the emoji)."
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 24,
+        "x-group": "Content",
+        "description": "The words on a drawn sticker that carries them (a badge, a bubble, a burst); empty = its own."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "A drawn sticker's main colour (empty = its own)."
+      },
+      "tilt": {
+        "type": "number",
+        "minimum": -45,
+        "maximum": 45,
+        "x-unit": "°",
+        "x-group": "Layout",
+        "description": "A tilt."
+      },
+      "enter": {
+        "enum": [
+          "pop",
+          "draw",
+          "slide",
+          "fade",
+          "none"
+        ],
+        "x-group": "Motion",
+        "description": "How it comes in: pop (scales up with a bounce), draw (its strokes draw on), slide (rises in), fade, or none."
+      },
+      "loop": {
+        "enum": [
+          "none",
+          "wiggle",
+          "float",
+          "pulse",
+          "spin"
+        ],
+        "x-group": "Motion",
+        "description": "How it keeps moving once it's in."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 300,
+      "height": 300
+    },
+    "animated": true,
+    "defaults": {
+      "emoji": "🔥",
+      "enter": "pop",
+      "loop": "none",
+      "tilt": -8
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "sticker"
+  }
+}

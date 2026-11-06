@@ -1,0 +1,78 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.shape",
+  "kind": "component",
+  "name": "Shape",
+  "description": "A rectangle, circle, line or arrow filling its box. Lines and arrows run left to right across the box's middle; size the box to shape them.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "rectangle",
+          "circle",
+          "line",
+          "arrow",
+          "star",
+          "triangle"
+        ],
+        "x-group": "Content",
+        "description": "The shape."
+      },
+      "fill": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The fill colour (a line's or arrow's colour when it has no stroke colour)."
+      },
+      "stroke": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The outline colour (a line's or arrow's colour)."
+      },
+      "strokeWidth": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 80,
+        "x-unit": "px",
+        "x-group": "Style",
+        "description": "The outline's width (a line's thickness; 0 = no outline, a line 12 px)."
+      },
+      "radius": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 400,
+        "x-unit": "px",
+        "x-group": "Style",
+        "description": "A rectangle's corner radius."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 400,
+      "height": 400
+    },
+    "defaults": {
+      "kind": "rectangle",
+      "fill": "accent",
+      "strokeWidth": 0,
+      "radius": 24
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "shapes"
+  }
+}

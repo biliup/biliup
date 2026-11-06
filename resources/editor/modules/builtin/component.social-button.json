@@ -1,0 +1,82 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.social-button",
+  "kind": "component",
+  "name": "Social button",
+  "description": "A like, bell, follow, share, comment or save button that pops in and gets pressed (filled, with a little burst), optionally by a pointer.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "like",
+          "bell",
+          "follow",
+          "share",
+          "comment",
+          "save"
+        ],
+        "x-group": "Content",
+        "description": "Which button."
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 40,
+        "x-group": "Content",
+        "description": "The words (empty = the button's own: Like then Liked, Notify me then Notifications on…)."
+      },
+      "count": {
+        "type": "string",
+        "maxLength": 16,
+        "x-group": "Content",
+        "description": "A count after the words (\"1.2K\"); a whole number goes up by one when pressed."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The button's colour once pressed."
+      },
+      "pressAt": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 60,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "When it's pressed."
+      },
+      "cursor": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "A pointer glides in and clicks it."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 460,
+      "height": 150
+    },
+    "animated": true,
+    "defaults": {
+      "kind": "like",
+      "count": "1.2K",
+      "color": "#2F80FF",
+      "pressAt": 1,
+      "cursor": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "thumbs-up"
+  }
+}

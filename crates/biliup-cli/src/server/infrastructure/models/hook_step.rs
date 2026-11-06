@@ -236,14 +236,43 @@ impl HookStep {
     }
 
     async fn ffmpeg_remux_to_mp4(src: &Path, dst: &Path) -> AppResult<()> {
+        let mut observation=crate::server::common::upload_observation::TaskObservation::current()
+            .map(|task|task.begin_processing("remux",src));
+        let result=Self::ffmpeg_remux_observed(src,dst,observation.as_ref()).await;
+        if let Some(observation)=observation.as_mut(){
+            match &result{Ok(())=>observation.finish(Some(dst),None),Err(error)=>observation.finish(None,Some(&error.to_string()))}
+        }
+        result
+    }
+
+    async fn ffmpeg_remux_observed(src:&Path,dst:&Path,task:Option<&crate::server::common::upload_observation::ProcessingObservation>)->AppResult<()> {
         info!("remux ts→mp4: {} → {}", src.display(), dst.display());
-        let started = std::time::Instant::now();
-        let status = tools::ffmpeg_command()
+        use crate::server::common::processing::engine;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let duration = engine::probe(src, &cancel)
+            .await
+            .map_err(AppError::Custom)?
+            .duration_ms;
+        if let Some(task) = task {
+            task.progress(0, duration);
+        }
+        // Publish only a completed container; failed/interrupted writes must not be mistaken for reusable MP4s.
+        let temp = tempfile::Builder::new()
+            .prefix(".biliup-remux-")
+            .suffix(".mp4")
+            .tempfile_in(dst.parent().unwrap_or_else(|| Path::new(".")))
+            .map_err(|e| AppError::Custom(e.to_string()))?
+            .into_temp_path();
+        let mut command = tools::ffmpeg_command();
+        command
             .args([
                 "-hide_banner",
+                "-nostdin",
                 "-loglevel",
                 "warning",
                 "-y",
+                "-progress",
+                "pipe:1",
                 "-fflags",
                 "+genpts+igndts",
                 "-i",
@@ -259,39 +288,35 @@ impl HookStep {
                 "-avoid_negative_ts",
                 "make_zero",
             ])
-            .arg(dst)
-            .kill_on_drop(true)
-            .status()
+            .arg(&temp);
+        engine::run_process(
+            command,
+            &cancel,
+            Duration::from_secs(180),
+            |processed, _| {
+                if let Some(task) = task {
+                    task.progress(processed, duration);
+                }
+            },
+        )
+        .await
+        .map_err(AppError::Custom)?;
+        let meta = tokio::fs::metadata(&temp)
             .await
-            .change_context(AppError::Custom("failed to spawn ffmpeg".into()))?;
-        if !status.success() {
-            // Clean up partial output so a retry restarts cleanly.
-            let _ = tokio::fs::remove_file(dst).await;
-            bail!(AppError::Custom(format!(
-                "ffmpeg remux failed (status {:?}) for {}",
-                status,
-                src.display()
-            )));
-        }
-        let meta = tokio::fs::metadata(dst).await.change_context_lazy(|| {
-            AppError::Custom(format!("remux output missing: {}", dst.display()))
-        })?;
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         if meta.len() == 0 {
-            let _ = tokio::fs::remove_file(dst).await;
-            bail!(AppError::Custom(format!(
-                "ffmpeg produced empty mp4: {}",
-                dst.display()
-            )));
+            bail!(AppError::Custom("remux produced an empty MP4".into()));
+        }
+        temp.persist_noclobber(dst)
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        if let Some(task) = task {
+            task.progress(duration.unwrap_or(0), duration);
         }
         info!(
-            "remux done {} ({:.1} MiB) in {:.1}s",
+            "remux done {} ({:.1} MiB)",
             dst.display(),
-            meta.len() as f64 / 1048576.0,
-            started.elapsed().as_secs_f64()
+            meta.len() as f64 / 1048576.0
         );
-        // Suppress unused-import warning for Duration on platforms that don't
-        // need it (kept for future timeout work).
-        let _ = Duration::from_secs(0);
         Ok(())
     }
 

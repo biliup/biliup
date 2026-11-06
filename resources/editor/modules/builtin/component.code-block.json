@@ -1,0 +1,32 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.code-block",
+  "kind": "component",
+  "name": "Code block",
+  "description": "Monospace code on a dark card, sized to fit its box: one line makes a code chip (e.g. npx your-tool init). Lines starting with \"+ \" are additions (accent), \"- \" removals (dim, struck).",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "file": { "type": "string", "maxLength": 200, "description": "A file name over the code." },
+      "code": { "type": "string", "maxLength": 4000, "x-control": "multiline" },
+      "prompt": { "type": "boolean", "description": "Starts each line with a \"$ \" prompt." }
+    },
+    "required": ["code"]
+  },
+  "component": {
+    "size": { "width": 760, "height": 120 },
+    "defaults": { "code": "npx your-tool init", "prompt": true }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "code"
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.duck",
+  "kind": "audio-processor",
+  "name": "Duck under",
+  "version": "0.2.0",
+  "description": "Ducking (D85): the track goes down by amountDb while a key track (under) has speech, from the key media's measured loudness envelope mapped through the timeline. Precomputed: the same gain curve in the preview and the export, no live sidechain. Needs the key media's loudness analysis (run automatically when missing).",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "under": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Key track ids: this track ducks while any of them has speech. An empty list ducks nothing."
+      },
+      "amountDb": {
+        "type": "number",
+        "maximum": 0,
+        "default": -12,
+        "description": "How far it goes down (dB). Used down to −40 (deeper values are clamped; v0.1 had no lower bound)."
+      },
+      "attackMs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 2000,
+        "default": 250,
+        "description": "Fade-down length (ms); it starts this long before the speech, so the duck is down when the speech starts."
+      },
+      "releaseMs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 5000,
+        "default": 600,
+        "description": "Fade-up length (ms) after the speech ends."
+      },
+      "thresholdDb": {
+        "type": "number",
+        "minimum": -80,
+        "maximum": 0,
+        "description": "Key level (dBFS of the key media) that counts as speech; absent = automatic (the speech level less 25 dB, at least 10 dB over the noise floor)."
+      }
+    },
+    "required": [
+      "under"
+    ]
+  }
+}

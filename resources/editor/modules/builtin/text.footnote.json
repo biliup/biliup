@@ -1,0 +1,28 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.footnote",
+  "kind": "text-style",
+  "name": "Footnote",
+  "description": "A small muted note at the bottom.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.03,
+    "weight": 400,
+    "font": "sans",
+    "tracking": 0,
+    "lineHeight": 1.25,
+    "color": "mute",
+    "x": 0.0625,
+    "y": 0.9,
+    "text": "Footnote"
+  }
+}

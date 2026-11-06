@@ -1,0 +1,27 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.denoise",
+  "kind": "audio-processor",
+  "name": "Noise removal",
+  "version": "0.2.0",
+  "description": "Noise removal (D88, D246): FFT noise reduction on the track, starting from the noise floor measured in the track media's loudness analysis (a fixed floor per track, −40 dBFS when unmeasured). The export runs ffmpeg afftdn; the preview runs a spectral denoiser fitted to it, so it is heard while editing.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.5,
+        "description": "0 = light (6 dB of reduction) … 1 = strong (30 dB)."
+      }
+    }
+  }
+}

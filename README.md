@@ -31,6 +31,15 @@
 
 论坛：[BBS](https://bbs.biliup.rs)
 
+## 🖥️ UI 展示
+
+<table>
+  <tr>
+    <td width="50%"><img src=".github/resource/webui-overview.png" alt="biliup WebUI 概览：系统状态、直播录制与最近事件" /></td>
+    <td width="50%"><img src=".github/resource/webui-editor.jpg" alt="biliup 剪辑台：素材、画面预览、字幕和多轨时间轴" /></td>
+  </tr>
+</table>
+
 ## 📺 支持平台
 
 内置 19 个直播平台解析，未匹配的地址会交给通用适配器（依赖本机的 yt-dlp / Streamlink）尝试处理。

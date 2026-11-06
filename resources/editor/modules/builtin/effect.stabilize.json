@@ -1,0 +1,24 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.stabilize",
+  "kind": "effect",
+  "name": "Stabilize",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "smoothness": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1
+      }
+    }
+  }
+}

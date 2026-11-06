@@ -1,0 +1,1298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:biliup:editor:project:1",
+  "title": "Biliup project (project.json)",
+  "description": "Pure project state. Times are integer frames at canvas.fps. Edit attribution and history live in history.db, analysis in .cache/.",
+  "type": "object",
+  "required": [
+    "format",
+    "name",
+    "canvas",
+    "media",
+    "tracks"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "biliup.timeline/1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "canvas": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "fps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 8192
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 8192
+        },
+        "fps": {
+          "enum": [
+            23.976,
+            24,
+            25,
+            29.97,
+            30,
+            50,
+            59.94,
+            60
+          ]
+        },
+        "background": {
+          "$ref": "#/$defs/color"
+        },
+        "matchFirstClip": {
+          "type": "boolean"
+        }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "colors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "fonts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "margin": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "media": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/media"
+      }
+    },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/track"
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "start",
+          "end"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "name": {
+            "type": "string"
+          },
+          "start": {
+            "$ref": "#/$defs/frame"
+          },
+          "end": {
+            "$ref": "#/$defs/frame"
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "description": "Issue #118: stretches of the timeline the user marked. locked: nothing playing in [start, end) may move or change (core refuses any edit that would, the user's ripple and the agent's alike); redo: not OK yet, for the agent to redo (note says what's wrong).",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "start",
+          "end",
+          "state"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/id"
+          },
+          "start": {
+            "$ref": "#/$defs/frame"
+          },
+          "end": {
+            "$ref": "#/$defs/frame"
+          },
+          "state": {
+            "enum": [
+              "locked",
+              "redo"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "frame"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "frame": {
+            "$ref": "#/$defs/frame"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "master": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "gainDb": {
+          "type": "number",
+          "minimum": -60,
+          "maximum": 12,
+          "description": "Master volume in dB, applied after the tracks are summed; -60 is silence (D83)."
+        },
+        "loudness": {
+          "type": "object",
+          "required": [
+            "targetLufs"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "targetLufs": {
+              "type": "number",
+              "minimum": -30,
+              "maximum": -5
+            }
+          }
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleUse"
+          }
+        }
+      }
+    },
+    "motionBlur": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "D291: motion blur in the export (graphics): on is its default (absent: on for Standard and High, off for Draft; the Export dialog decides in the end); samples sub-frames are averaged per frame over shutter degrees of the frame interval. The preview draws no blur.",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "samples": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 16
+        },
+        "shutter": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 360
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "description": "Taste checks (D90): disabled lists the rule ids (core checks.ts) the project turned off. Other keys are kept for later.",
+      "properties": {
+        "disabled": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "moduleId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(\\.[a-z0-9]+(-[a-z0-9]+)*)+$"
+    },
+    "frame": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "frames": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "color": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A theme colour token (e.g. fg) or a CSS colour."
+    },
+    "mediaRef": {
+      "type": "object",
+      "required": [
+        "media"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "media": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "description": "How a component prop points at a media item, so validators and relinking can find it."
+    },
+    "moduleUse": {
+      "type": "object",
+      "required": [
+        "module"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "$ref": "#/$defs/moduleId"
+        },
+        "params": {
+          "type": "object"
+        },
+        "bypass": {
+          "type": "boolean"
+        }
+      }
+    },
+    "timedModule": {
+      "type": "object",
+      "required": [
+        "module",
+        "duration"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "$ref": "#/$defs/moduleId"
+        },
+        "duration": {
+          "$ref": "#/$defs/frames"
+        },
+        "params": {
+          "type": "object"
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "image",
+            "audio"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative to the project folder, or absolute. Media is referenced, not copied, unless collected into media/."
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "module"
+          ],
+          "description": "Where the media came from: a capture source, a generator or an import. Lets Biliup re-shoot or regenerate it.",
+          "properties": {
+            "module": {
+              "$ref": "#/$defs/moduleId"
+            },
+            "device": {
+              "type": "string",
+              "description": "Capture sources: the device it was recorded on (an Argent device id)."
+            },
+            "flow": {
+              "type": "string",
+              "description": "Capture sources: the flow replayed while recording, relative to the project folder (flows/login.yaml), so it can be re-shot."
+            },
+            "prompt": {
+              "type": "string",
+              "description": "Generators (D31, D99): the prompt it was made from, shown in Media › Generated (Again, Edit prompt)."
+            },
+            "model": {
+              "type": "string",
+              "description": "Generators: the model that made it (gpt-image-2, veo-3.1-generate-preview, eleven_text_to_sound_v2, claude)."
+            },
+            "kind": {
+              "enum": [
+                "image",
+                "video",
+                "audio"
+              ],
+              "description": "Generators: what was asked for."
+            },
+            "size": {
+              "type": "string",
+              "description": "Generators: the size asked for (1536x1024, 16:9, canvas)."
+            },
+            "seconds": {
+              "type": "number",
+              "description": "Generators: the length asked for, in seconds."
+            },
+            "libraryId": {
+              "type": "string",
+              "description": "D134, sound library (module library.openverse, library.freesound, library.bundled, or library.folder for a file of the user's own sound folders, D208, with origin and folder): the sound's id there (openverse:<id>, freesound:<id>, sfx:<id>, folder:<id>)."
+            },
+            "title": {
+              "type": "string",
+              "description": "Sound library: the sound's title."
+            },
+            "creator": {
+              "type": "string",
+              "description": "Sound library: who made it."
+            },
+            "creatorUrl": {
+              "type": "string"
+            },
+            "landingUrl": {
+              "type": "string",
+              "description": "Sound library: the sound's page."
+            },
+            "provider": {
+              "type": "string",
+              "description": "Sound library: where the file is hosted (freesound, wikimedia_audio, ...)."
+            },
+            "fileUrl": {
+              "type": "string",
+              "description": "Sound library: the URL the file was downloaded from."
+            },
+            "license": {
+              "enum": [
+                "cc0",
+                "by"
+              ],
+              "description": "Sound library: CC0 (no credit needed) or CC BY (credit needed)."
+            },
+            "licenseVersion": {
+              "type": "string"
+            },
+            "licenseUrl": {
+              "type": "string"
+            },
+            "attribution": {
+              "type": "string",
+              "description": "Sound library: the credit line."
+            },
+            "sha256": {
+              "type": "string",
+              "description": "Sound library: the downloaded file's SHA-256."
+            },
+            "downloaded": {
+              "type": "string",
+              "description": "Sound library: when it was downloaded (ISO 8601)."
+            },
+            "url": {
+              "type": "string",
+              "description": "D259, Import from link (module import.link): the link it was imported from (with title, kind, quality and tool yt-dlp)."
+            },
+            "quality": {
+              "type": "string",
+              "description": "Import from link: the video's height cap asked for (best, 2160, 1440, 1080, 720, 480)."
+            },
+            "tool": {
+              "type": "string",
+              "description": "Import from link: what downloaded it (yt-dlp, the user's own)."
+            }
+          }
+        },
+        "probe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "frames": {
+              "$ref": "#/$defs/frames",
+              "description": "Length in project frames."
+            },
+            "fps": {
+              "type": "number"
+            },
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "hasAudio": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "track": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "enum": [
+            "video",
+            "text",
+            "audio"
+          ]
+        },
+        "role": {
+          "const": "main",
+          "description": "The magnetic track. Its items have no start; they play back to back."
+        },
+        "purpose": {
+          "const": "subtitles",
+          "description": "Marks a text track's text items as exportable subtitles. Track names are editable labels and do not determine this purpose."
+        },
+        "name": {
+          "type": "string"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "mixer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "gainDb": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12
+            },
+            "pan": {
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "-1 left, 0 centre, 1 right (D83: the near side stays at 0 dB and the far side fades, never a boost; a balance for stereo)."
+            },
+            "mute": {
+              "type": "boolean"
+            },
+            "solo": {
+              "type": "boolean",
+              "description": "If any track is soloed, only soloed tracks sound, in the preview and the export. Mute wins over solo."
+            },
+            "effects": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/moduleUse"
+              }
+            }
+          }
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/item"
+          }
+        }
+      }
+    },
+    "transform": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        },
+        "w": {
+          "type": "number"
+        },
+        "h": {
+          "type": "number"
+        },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Clips: zooms the picture about the box's centre; the box clips it (D75)."
+        },
+        "rotate": {
+          "type": "number"
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "fit": {
+          "enum": [
+            "contain",
+            "cover",
+            "fill"
+          ],
+          "description": "Clips: how the picture sits in the box at scale 1 (default contain)."
+        },
+        "radius": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Clips: corner radius of the box in canvas pixels."
+        }
+      },
+      "description": "Text: x, y = the box's top-left, w its width (canvas pixels), rotate in degrees about the box's centre and opacity 0-1 (D129). Clips (D75): x, y, w, h = the box in canvas pixels (no w and h = the whole canvas; one of them = the other from the media's aspect; no x / y = centred), fit, scale, opacity and radius."
+    },
+    "keyframe": {
+      "type": "object",
+      "required": [
+        "frame"
+      ],
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/frame",
+          "description": "Frames from the item's start."
+        },
+        "ease": {
+          "enum": [
+            "linear",
+            "in",
+            "out",
+            "inOut",
+            "spring",
+            "spring.snap",
+            "spring.settle",
+            "spring.land",
+            "spring.bounce"
+          ],
+          "description": "Shapes the motion from this key to the next one that sets the same property (default linear; in, out and inOut are cubic). A spring (D192: spring.snap, spring.settle or spring, spring.land, spring.bounce) runs in real time from this key toward the next key's value and settles on its own time, overshoot included; a later key retargets it smoothly."
+        },
+        "x": {
+          "type": "number",
+          "description": "Clips: the box's left edge in canvas pixels."
+        },
+        "y": {
+          "type": "number",
+          "description": "Clips: the box's top edge in canvas pixels."
+        },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Clips: the picture's zoom in the box."
+        },
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "itemBase": {
+      "type": "object",
+      "required": [
+        "id",
+        "type",
+        "duration"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "type": {
+          "enum": [
+            "clip",
+            "component",
+            "graphic",
+            "text",
+            "captions",
+            "audio",
+            "danmaku"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/frame",
+          "description": "Required on free tracks, forbidden on the main track (D215: the main track takes clips, components, graphics and text, in order; D224: `gap` leaves space before one)."
+        },
+        "gap": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Main track only (D224): empty frames before the item, after the one before it (or frame 0). Absent = 0, back to back. Black and silent in the video; a transition can't cross it."
+        },
+        "duration": {
+          "$ref": "#/$defs/frames"
+        },
+        "locked": {
+          "type": "boolean"
+        },
+        "motionBlur": {
+          "type": "boolean",
+          "description": "D291: false keeps this item sharp in an export with motion blur on (graphics, for now)."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "D157: items with the same group move, trim and delete together on the timeline (a kicker and its title); Ungroup removes it."
+        },
+        "transform": {
+          "$ref": "#/$defs/transform"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/keyframe"
+          }
+        },
+        "transitionIn": {
+          "$ref": "#/$defs/timedModule",
+          "description": "Main track only: the transition from the previous item into this one."
+        },
+        "animation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "in": {
+              "$ref": "#/$defs/timedModule"
+            },
+            "out": {
+              "$ref": "#/$defs/timedModule"
+            },
+            "loop": {
+              "$ref": "#/$defs/timedModule"
+            }
+          }
+        },
+        "effects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/moduleUse"
+          }
+        }
+      }
+    },
+    "item": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/itemBase"
+        }
+      ],
+      "unevaluatedProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "const": "clip"
+            },
+            "media": {
+              "$ref": "#/$defs/id"
+            },
+            "in": {
+              "$ref": "#/$defs/frame"
+            },
+            "speed": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Playback rate of the media (D125): 2 plays twice as fast, so the clip covers twice the media frames per timeline frame."
+            },
+            "keepPitch": {
+              "type": "boolean",
+              "description": "D125: false lets a sped-up or slowed-down sound change pitch (like tape); absent or true keeps the pitch."
+            },
+            "mute": {
+              "type": "boolean",
+              "description": "D123: the clip's own sound is off (Detach audio sets it; its sound then lives on an audio item). Absent = it plays its media's sound."
+            },
+            "linkedTo": {
+              "$ref": "#/$defs/id",
+              "description": "D215: a clip off the main track that follows a main clip (a take's other picture, Put on Main sets it): its start, length, speed, splits and cuts, its in point moved by as much as that clip's (its own offset kept); it goes when that clip goes. Moving, trimming or splitting it unlinks it."
+            },
+            "loop": {
+              "type": "boolean",
+              "description": "The media starts over from its beginning when the clip runs past its end."
+            },
+            "hold": {
+              "type": "boolean",
+              "description": "Holds the media's last frame on screen when the clip runs past its end (a freeze), instead of ending the picture; loop wins when both are set. Silent past the media's end; a transition out of the held stretch can only be a dip to black."
+            },
+            "gainDb": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12,
+              "description": "Volume of the clip's own sound in dB; -60 is silence."
+            },
+            "fadeIn": {
+              "$ref": "#/$defs/frame"
+            },
+            "fadeOut": {
+              "$ref": "#/$defs/frame"
+            },
+            "gainKeys": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "frame",
+                  "db"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "frame": {
+                    "$ref": "#/$defs/frame"
+                  },
+                  "db": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "media"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "component"
+            },
+            "component": {
+              "$ref": "#/$defs/moduleId"
+            },
+            "media": {
+              "$ref": "#/$defs/id",
+              "description": "The component's main footage, e.g. the recording inside a device frame."
+            },
+            "in": {
+              "$ref": "#/$defs/frame"
+            },
+            "props": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "component"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "graphic"
+            },
+            "src": {
+              "type": "string",
+              "pattern": "^graphics/[A-Za-z0-9][A-Za-z0-9._-]{0,80}\\.html$",
+              "description": "Agent-written HTML/CSS exposing render(t), in the project's graphics/ folder."
+            },
+            "in": {
+              "$ref": "#/$defs/frame",
+              "description": "Frames of the graphic before what this item shows (a trimmed start, a split's second half): render(t) gets t from there."
+            },
+            "props": {
+              "type": "object"
+            }
+          },
+          "required": [
+            "src"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "description": "Markup: **bold**, [[accent]], `mono`, \\n for a line break."
+            },
+            "style": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "preset": {
+                  "$ref": "#/$defs/moduleId"
+                },
+                "font": {
+                  "type": "string"
+                },
+                "size": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": 100,
+                  "maximum": 900
+                },
+                "tracking": {
+                  "type": "number"
+                },
+                "lineHeight": {
+                  "type": "number"
+                },
+                "color": {
+                  "$ref": "#/$defs/color"
+                },
+                "align": {
+                  "enum": [
+                    "left",
+                    "center",
+                    "right"
+                  ]
+                },
+                "uppercase": {
+                  "type": "boolean"
+                },
+                "case": {
+                  "enum": [
+                    "lower",
+                    "title"
+                  ],
+                  "description": "D129: lower case or title case (capitalised words); wins over uppercase."
+                },
+                "italic": {
+                  "type": "boolean",
+                  "description": "D129: slanted text."
+                },
+                "stroke": {
+                  "description": "An outline (D80): width in canvas px (without a width it is ignored; other keys are kept but not drawn, so files saved before D80 still open). false = none, even when the preset's look has one; absent = the look's.",
+                  "oneOf": [
+                    {
+                      "const": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "width": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "color": {
+                          "$ref": "#/$defs/color"
+                        }
+                      }
+                    }
+                  ]
+                },
+                "shadow": {
+                  "description": "A drop shadow (D80): x, y, blur in canvas px, opacity 0-1 ({} counts as absent; unknown keys are kept, not drawn). false = none; absent = the look's (the six styles from before D80 draw a soft shadow).",
+                  "oneOf": [
+                    {
+                      "const": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "blur": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "color": {
+                          "$ref": "#/$defs/color"
+                        },
+                        "opacity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      }
+                    }
+                  ]
+                },
+                "background": {
+                  "description": "A box behind the text (D80): wrap box = one box around the text box, lines = one behind each line; padding (the sides; top and bottom get half) and radius in canvas px, opacity 0-1. false = none; absent = the look's.",
+                  "oneOf": [
+                    {
+                      "const": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "color": {
+                          "$ref": "#/$defs/color"
+                        },
+                        "opacity": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "padding": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "radius": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "wrap": {
+                          "enum": [
+                            "box",
+                            "lines"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "required": [
+            "text"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "captions"
+            },
+            "source": {
+              "$ref": "#/$defs/id",
+              "description": "Media whose speech the captions show: they follow the main-track clips that play it (D82; a main clip's linked microphone too, D215), or with anyTrack every item that plays it."
+            },
+            "style": {
+              "type": "object",
+              "description": "A text style (preset = a text-style look, size, weight, colour, stroke, shadow, background...), as on text items. Captions also take (D166): accent (the speaking word's colour, the karaoke fill), karaoke (true: every word said so far on the line is filled), accentBox (a colour: a box behind the speaking word) and captionStyle (the caption style preset it came from)."
+            },
+            "mode": {
+              "enum": [
+                "line",
+                "word",
+                "single"
+              ],
+              "description": "line: a card of 1-2 lines at a time; word: the card with the speaking word accented (karaoke); single: one word at a time. Default line."
+            },
+            "words": {
+              "type": "array",
+              "description": "D82: a snapshot of the source's transcript taken when the captions were made: each word's text and where it's heard, in seconds of the media file. Index = transcript_read's word id. Without it nothing is drawn.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "text",
+                  "start",
+                  "end"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "start": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "end": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "filler": {
+                    "type": "boolean",
+                    "description": "A hesitation (um, uh); hidden with hideFillers."
+                  }
+                }
+              }
+            },
+            "edits": {
+              "type": "array",
+              "description": "Text corrections on top of the words, keyed by word index (\"\" hides the word).",
+              "items": {
+                "type": "object",
+                "required": [
+                  "word",
+                  "text"
+                ],
+                "properties": {
+                  "word": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "breaks": {
+              "type": "array",
+              "description": "Word indices where a new card starts.",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "lines": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "How words are grouped into cards (defaults: 32 characters per line, 2 lines, 3 s, a new card after a 0.3 s pause).",
+              "properties": {
+                "maxChars": {
+                  "type": "integer",
+                  "minimum": 4,
+                  "maximum": 200
+                },
+                "maxLines": {
+                  "enum": [
+                    1,
+                    2
+                  ]
+                },
+                "maxSeconds": {
+                  "type": "number",
+                  "minimum": 0.1,
+                  "maximum": 30
+                },
+                "maxWords": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1000
+                },
+                "pause": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 10
+                }
+              }
+            },
+            "hideFillers": {
+              "type": "boolean",
+              "description": "Leave hesitations (um, uh, yyy) out of the captions."
+            },
+            "coversMain": {
+              "type": "boolean",
+              "description": "Draw wherever the source plays on the main track, whatever start and duration say (Make captions sets it); without it the captions draw only inside [start, start + duration)."
+            },
+            "anyTrack": {
+              "type": "boolean",
+              "description": "D215: follow every clip or sound that plays the source on any track (each at its own start), not only the main track's clips; Make captions sets it for media that isn't heard through the main track (a take's microphone on a Voiceover track). Absent = through the main track only."
+            }
+          },
+          "required": [
+            "source"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "audio"
+            },
+            "media": {
+              "$ref": "#/$defs/id"
+            },
+            "in": {
+              "$ref": "#/$defs/frame"
+            },
+            "speed": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Playback rate (D125), as on clips."
+            },
+            "keepPitch": {
+              "type": "boolean",
+              "description": "D125: false lets the pitch follow the speed; absent or true keeps it."
+            },
+            "mute": {
+              "type": "boolean",
+              "description": "D123: silent (the item stays on the timeline)."
+            },
+            "linkedTo": {
+              "$ref": "#/$defs/id",
+              "description": "D123: the clip this sound was detached from (D215: or the picture of its take on the main track, Put on Main sets it). While set, it follows that clip's start, length, speed, splits and cuts, its in point moved by as much as the clip's (a detached sound: the same in point; a take's microphone: its own offset kept), and goes when the clip goes; moving, trimming or splitting the sound itself unlinks it."
+            },
+            "gainDb": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12,
+              "description": "Volume in dB; -60 is silence."
+            },
+            "fadeIn": {
+              "$ref": "#/$defs/frame"
+            },
+            "fadeOut": {
+              "$ref": "#/$defs/frame"
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "gainKeys": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "frame",
+                  "db"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "frame": {
+                    "$ref": "#/$defs/frame"
+                  },
+                  "db": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          },
+          "required": [
+            "media"
+          ]
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "danmaku"
+            },
+            "media": {
+              "$ref": "#/$defs/id"
+            },
+            "in": {
+              "$ref": "#/$defs/frame"
+            },
+            "speed": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Playback rate of the media (D125): 2 plays twice as fast, so the clip covers twice the media frames per timeline frame."
+            },
+            "keepPitch": {
+              "type": "boolean",
+              "description": "D125: false lets a sped-up or slowed-down sound change pitch (like tape); absent or true keeps the pitch."
+            },
+            "mute": {
+              "type": "boolean",
+              "description": "D123: the clip's own sound is off (Detach audio sets it; its sound then lives on an audio item). Absent = it plays its media's sound."
+            },
+            "linkedTo": {
+              "$ref": "#/$defs/id",
+              "description": "D215: a clip off the main track that follows a main clip (a take's other picture, Put on Main sets it): its start, length, speed, splits and cuts, its in point moved by as much as that clip's (its own offset kept); it goes when that clip goes. Moving, trimming or splitting it unlinks it."
+            },
+            "loop": {
+              "type": "boolean",
+              "description": "The media starts over from its beginning when the clip runs past its end."
+            },
+            "hold": {
+              "type": "boolean",
+              "description": "Holds the media's last frame on screen when the clip runs past its end (a freeze), instead of ending the picture; loop wins when both are set. Silent past the media's end; a transition out of the held stretch can only be a dip to black."
+            },
+            "gainDb": {
+              "type": "number",
+              "minimum": -60,
+              "maximum": 12,
+              "description": "Volume of the clip's own sound in dB; -60 is silence."
+            },
+            "fadeIn": {
+              "$ref": "#/$defs/frame"
+            },
+            "fadeOut": {
+              "$ref": "#/$defs/frame"
+            },
+            "gainKeys": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "frame",
+                  "db"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "frame": {
+                    "$ref": "#/$defs/frame"
+                  },
+                  "db": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "danmaku": {
+              "type": "object",
+              "required": [
+                "settings",
+                "width",
+                "height"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "settings": {
+                  "type": "object"
+                },
+                "width": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 8192
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 16,
+                  "maximum": 8192
+                }
+              }
+            }
+          },
+          "required": [
+            "media",
+            "danmaku"
+          ]
+        }
+      ]
+    }
+  }
+}

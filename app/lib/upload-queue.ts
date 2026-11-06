@@ -14,6 +14,19 @@ export interface UploadQueueFile {
   error: string | null
 }
 
+export interface ProcessingProgress {
+  id:number
+  operation:string
+  state:'running'|'ready'|'failed'|'interrupted'
+  file:string
+  processed_ms:number
+  total_ms:number|null
+  started_at:number
+  finished_at:number|null
+  output_file:string|null
+  error:string|null
+}
+
 export interface UploadQueueTask {
   id: string
   source: UploadSource | string
@@ -26,6 +39,8 @@ export interface UploadQueueTask {
   template_name: string | null
   state: UploadState | string
   phase: string | null
+  processing?: ProcessingProgress | null
+  processing_history?: ProcessingProgress[]
   current_file: string | null
   bytes_confirmed: number
   total_bytes: number | null
@@ -78,6 +93,7 @@ export const uploadStateMeta: Record<string, { label: string; tone: 'blue' | 'gr
 
 export const uploadPhaseLabels: Record<string, string> = {
   waiting_slot: '等待上传位置', waiting_segment: '等待新分段', processing: '处理中',
+  remux: '转封装', rendering: '自动压制',
   initializing: '初始化', uploading: '上传中', retrying: '重试中', submitting: '提交稿件', finished: '已结束',
 }
 

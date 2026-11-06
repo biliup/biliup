@@ -1,0 +1,37 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.caption",
+  "kind": "text-style",
+  "name": "Caption",
+  "description": "Subtitle-style lines, each on its own dark box, centred near the bottom.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.045,
+    "weight": 600,
+    "font": "DM Sans",
+    "tracking": -0.01,
+    "lineHeight": 1.4,
+    "color": "#FFFFFF",
+    "align": "center",
+    "span": true,
+    "x": 0.0375,
+    "y": 0.8,
+    "background": {
+      "color": "#000000",
+      "opacity": 0.7,
+      "padding": 0.32,
+      "radius": 0.18,
+      "wrap": "lines"
+    },
+    "text": "Your caption goes here"
+  }
+}

@@ -1,0 +1,23 @@
+//! Editor assistant. Provider calls, planning and commits share the existing editor services.
+pub(crate) mod planner;
+pub(crate) mod plan;
+pub(crate) mod cards;
+pub(crate) mod service;
+pub(crate) mod store;
+pub(crate) mod views;
+pub(crate) mod review;
+mod motion;
+mod analysis;
+mod speech;
+mod subtitles;
+mod create;
+mod shaders;
+mod brand;
+mod brand_reference;
+mod research;
+mod web_search;
+pub(crate) mod capture;
+mod downloads;
+mod exports;
+mod library;
+mod cleanup;

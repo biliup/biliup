@@ -1,0 +1,35 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.quote",
+  "kind": "text-style",
+  "name": "Quote",
+  "description": "A quiet quote across the middle.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.065,
+    "weight": 400,
+    "font": "DM Sans",
+    "tracking": -0.02,
+    "lineHeight": 1.18,
+    "color": "fg",
+    "x": 0.12,
+    "w": 0.76,
+    "y": 0.38,
+    "text": "“Say the one thing that matters, then stop.”",
+    "animation": {
+      "in": {
+        "module": "move.fade",
+        "seconds": 0.5
+      }
+    }
+  }
+}

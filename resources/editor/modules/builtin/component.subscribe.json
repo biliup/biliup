@@ -1,0 +1,76 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.subscribe",
+  "kind": "component",
+  "name": "Subscribe button",
+  "description": "A subscribe button that gets pressed at `pressAt` seconds and turns into the done label.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "Before the press."
+      },
+      "done": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "After the press."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The button's colour before the press."
+      },
+      "bell": {
+        "type": "boolean",
+        "x-group": "Content",
+        "description": "A bell next to it after the press."
+      },
+      "pressAt": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 60,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "When it's pressed."
+      },
+      "cursor": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "A pointer glides in and clicks it."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 560,
+      "height": 140
+    },
+    "animated": true,
+    "defaults": {
+      "label": "Subscribe",
+      "done": "Subscribed",
+      "color": "#FF0033",
+      "bell": true,
+      "pressAt": 1,
+      "cursor": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "bell"
+  }
+}

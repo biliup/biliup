@@ -1,0 +1,73 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.progress-bar",
+  "kind": "component",
+  "name": "Progress bar",
+  "description": "A bar that fills to value %, or from empty to full over the item's length (animate).",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "value": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "x-unit": "%",
+        "x-group": "Content",
+        "description": "How full it is (the end value when animated)."
+      },
+      "animate": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "Fill from empty over the item's length."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The filled part."
+      },
+      "track": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The empty part."
+      },
+      "radius": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "x-unit": "px",
+        "x-group": "Style",
+        "description": "Corner radius."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 1200,
+      "height": 24
+    },
+    "animated": true,
+    "defaults": {
+      "value": 100,
+      "animate": true,
+      "color": "accent",
+      "track": "#FFFFFF33",
+      "radius": 12
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "loader"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.stroke-title",
+  "kind": "text-style",
+  "name": "Stroked title",
+  "description": "A white title with a thick black edge, readable on any footage.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.11,
+    "weight": 800,
+    "font": "DM Sans",
+    "tracking": -0.02,
+    "lineHeight": 1.02,
+    "color": "#FFFFFF",
+    "align": "center",
+    "span": true,
+    "x": 0.0375,
+    "y": 0.4,
+    "stroke": {
+      "width": 0.08,
+      "color": "#000000"
+    },
+    "text": "Your title"
+  }
+}

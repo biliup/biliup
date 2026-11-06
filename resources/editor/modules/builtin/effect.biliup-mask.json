@@ -1,0 +1,62 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.biliup-mask",
+  "kind": "effect",
+  "name": "Mask",
+  "description": "Mask the source picture before transforms and effects. Time ranges are milliseconds from the timeline clip's start; an empty list covers the whole clip.",
+  "version": "1.0.0",
+  "author": "biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": { "type": "native" },
+  "params": {
+    "type": "object",
+    "required": ["regions"],
+    "additionalProperties": false,
+    "properties": {
+      "regions": {
+        "type": "array",
+        "maxItems": 32,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "effect_type", "x", "y", "width", "height", "strength", "color", "opacity", "lock_aspect", "intervals"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "effect_type": { "enum": ["mosaic", "blur", "smooth_blur", "solid", "image"] },
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "minimum": 0.001, "maximum": 1 },
+            "height": { "type": "number", "minimum": 0.001, "maximum": 1 },
+            "strength": { "type": "number", "minimum": 1, "maximum": 100 },
+            "color": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+            "opacity": { "type": "number", "minimum": 0, "maximum": 1 },
+            "lock_aspect": { "type": "boolean" },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["media"],
+              "properties": { "media": { "type": "string", "minLength": 1 } }
+            },
+            "intervals": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["from_ms", "to_ms"],
+                "properties": {
+                  "from_ms": { "type": "integer", "minimum": 0 },
+                  "to_ms": { "type": "integer", "minimum": 1 }
+                }
+              }
+            }
+          },
+          "if": { "properties": { "effect_type": { "const": "image" } } },
+          "then": { "required": ["image"] }
+        }
+      }
+    }
+  },
+  "ui": { "panel": "effects", "icon": "grid" }
+}

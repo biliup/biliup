@@ -1,0 +1,110 @@
+{
+  "attribution": "Uncut, MIT; see licenses/uncut/LICENSE",
+  "tools": [
+    {
+      "name": "media_analyze",
+      "description": "Analyse a media file. 'loudness' (also 'silence'): integrated loudness (LUFS), loudness range, true peak and the silences (below -40 dB for at least 0.3 s). 'video' (also 'shots', 'motion', 'stability'): cuts, frozen stretches and, per second, stability (no camera shake), sharpness, exposure and a cleanScore 0-1, with the best stretch inside one shot. Frames in the answer are usable as in. Waits up to a minute; if it answers running, call again with the same arguments. Cached by content: asking twice is free. 'transcript': the speech transcribed on this server (a summary: language, word, filler and pause counts; transcript_read gives the words). 'beats' (also 'rhythm', 'onsets', 'tempo'): tempo (bpm), a confidence 0-1 and the beats in project frames of the media (the first ones, or those in range with the onsets there).",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "media"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string",
+            "description": "A media id from project_read."
+          },
+          "analyzers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "shots",
+                "motion",
+                "stability",
+                "video",
+                "loudness",
+                "beats",
+                "rhythm",
+                "onsets",
+                "tempo",
+                "silence",
+                "transcript",
+                "description"
+              ]
+            },
+            "description": "Which analyses (default: loudness with silences; name video or beats to get them; video takes longer). silence = loudness; shots, motion, stability = video; rhythm, onsets, tempo = beats."
+          },
+          "range": {
+            "$ref": "#/$defs/range",
+            "description": "Only list silences, cuts, frozen stretches, per-second scores, beats and onsets overlapping these project frames of the media [start, end). The measurement is always of the whole file."
+          }
+        },
+        "$defs": {
+          "range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "returns": "per analyzer (loudness, video, transcript, beats): { state: done | running | queued | failed | cancelled, ... }; loudness when done: { cached, hasAudio, seconds, integratedLufs, loudnessRangeLu, truePeakDbtp, silence: { thresholdDb, minSeconds, count, ranges: [{ start, end, startSeconds, endSeconds }] } }; video when done: { cached, hasVideo, seconds, sourceFps, cleanScore, stability, sharpness, exposure, frozen, measures: { shakePercent, panPerSecond, blur, brightness }, best: { start, end, startSeconds, endSeconds, cleanScore, ... }, shots, cuts: { threshold, count, list: [{ frame, seconds, score }] }, frozen: [{ start, end, startSeconds, endSeconds }], drops: [{ frame, seconds, missingSeconds }], stretches: [{ start, end, quality: good | fair | poor, cleanScore }], perSecond: { firstSecond, cleanScore: [], stability: [], sharpness: [], exposure: [], panPerSecond: [] } } (frames are project frames of the media); transcript when done: { cached, hasAudio, seconds, language, model, words, segments, fillers: { hesitation, maybe }, pauses, pauseSeconds, opening }; beats when done: { cached, hasAudio, seconds, bpm (null: no steady beat), confidence, beatCount, beatFrames, firstBeat: { frame, seconds }, lastBeat, beats: { frames: [], seconds: [], range?, count?, truncated? }, onsetCount, onsets?: { count, list: [{ frame, seconds, strength }] } (with range) }"
+    },
+    {
+      "name": "media_rank",
+      "description": "Rank video takes by how clean they are: cleanScore 0-1 from stability (no camera shake beyond smooth pans), sharpness (in focus) and exposure, with frozen stretches counted against it. Each take has its components and its best stretch (the cleanest window seconds inside one shot, in project frames usable as in). Runs or joins the video analysis (cached) and waits up to a minute; takes still being analysed come back under pending: call again with the same arguments.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            },
+            "description": "Media ids from project_read. Default: the media imported from folder, or all the project's video."
+          },
+          "folder": {
+            "type": "string",
+            "description": "An absolute folder path: rank the project's media whose files are in it (import them first with media_import). Not together with media."
+          },
+          "by": {
+            "enum": [
+              "clean",
+              "best",
+              "stability",
+              "sharpness",
+              "exposure"
+            ],
+            "description": "What to rank by: clean (default, the whole take's cleanScore), best (its best stretch's cleanScore), or one component."
+          },
+          "window": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 600,
+            "description": "Length of the best stretch in seconds (default 5)."
+          }
+        }
+      },
+      "returns": "{ by, ranked: [{ rank, media, name, cached, seconds, cleanScore, stability, sharpness, exposure, frozen, measures: { shakePercent, panPerSecond, blur, brightness }, shots, drops, best: { start, end, startSeconds, endSeconds, cleanScore, stability, sharpness, exposure, frozen } }], pending?: [{ media, state, progress }], failed?, skipped?, note }"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "core.screen",
+  "kind": "capture-source",
+  "name": "Screen",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "capabilities": [
+    "screen",
+    "media:write"
+  ],
+  "capture": {
+    "targets": [
+      "desktop-screen",
+      "desktop-window"
+    ]
+  },
+  "ui": {
+    "panel": "capture",
+    "icon": "monitor"
+  }
+}

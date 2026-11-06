@@ -1,0 +1,61 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.map-pin",
+  "kind": "component",
+  "name": "Map pin",
+  "description": "A pin that drops in with a bounce and a place's name under it; a ring pulses where it landed.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "type": "string",
+        "maxLength": 60,
+        "x-group": "Content",
+        "description": "The place."
+      },
+      "detail": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "A smaller line under it; empty = none."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The pin's colour."
+      },
+      "pulse": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "A ring pulses under the pin."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 440,
+      "height": 440
+    },
+    "animated": true,
+    "defaults": {
+      "label": "Lisbon",
+      "detail": "Day 3",
+      "color": "#FF3B30",
+      "pulse": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "map-pin"
+  }
+}

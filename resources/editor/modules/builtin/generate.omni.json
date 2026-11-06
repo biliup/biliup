@@ -1,0 +1,14 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "generate.omni",
+  "kind": "generator",
+  "name": "Gemini Omni Flash",
+  "version": "0.1.0",
+  "author": "biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": { "type": "process" },
+  "capabilities": ["network", "api-key", "media:write"],
+  "generator": { "media": "video", "provider": "google", "model": "gemini-omni-1.1-flash" },
+  "ui": { "panel": "generate" }
+}

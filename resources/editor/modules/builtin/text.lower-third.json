@@ -1,0 +1,28 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.lower-third",
+  "kind": "text-style",
+  "name": "Lower third",
+  "description": "A name or place near the bottom left.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.05,
+    "weight": 600,
+    "font": "sans",
+    "tracking": -0.01,
+    "lineHeight": 1.1,
+    "color": "fg",
+    "x": 0.0625,
+    "y": 0.8,
+    "text": "Lower third"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.rating",
+  "kind": "component",
+  "name": "Rating",
+  "description": "A row of stars filled to a value (halves too), filling one after another.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "value": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 10,
+        "x-group": "Content",
+        "description": "How many stars are filled (4.5 = four and a half)."
+      },
+      "stars": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10,
+        "x-group": "Content",
+        "description": "How many stars."
+      },
+      "label": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "A line under the stars; empty = none."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The filled stars' colour."
+      },
+      "empty": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The empty stars' colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The line's colour."
+      },
+      "animate": {
+        "type": "boolean",
+        "x-group": "Motion",
+        "description": "Fill the stars one after another."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 640,
+      "height": 180
+    },
+    "animated": true,
+    "defaults": {
+      "value": 4.5,
+      "stars": 5,
+      "label": "4.5 out of 5",
+      "color": "#FFC531",
+      "empty": "#FFFFFF40",
+      "text": "#FFFFFF",
+      "animate": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "star"
+  }
+}
