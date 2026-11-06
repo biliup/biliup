@@ -12,7 +12,7 @@ permissions:
 jobs:
   rust:
     name: Rust tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,7 +27,12 @@ jobs:
           npm run build
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
+      # target/ 不再跨运行搬运，避免旧测试二进制/测试残留被复用；只有 master 写入缓存
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/master' }}
       # 媒体测试必须使用真实 FFmpeg 和与预览共用的中文字体；XML -> ASS 使用内置 Rust 转换器，
       # 不再安装外部转换器。de_DE 让逗号小数点 Locale 下的转换一致性测试真正运行。
       - name: Install media test tools
@@ -36,6 +41,11 @@ jobs:
           sudo apt-get install -y ffmpeg locales
           sudo locale-gen de_DE.UTF-8
           locale -a | grep -qi de_DE
+      # 打印 FFmpeg 版本：切片边界测试对版本敏感，保留此步骤便于后续排查环境差异
+      - name: Show FFmpeg version
+        run: |
+          ffmpeg -version
+          ffmpeg -hide_banner -encoders | head -n 20
       # 随包字体不进仓库：按固定 SHA-256 取回，缺字体时相关用例会跳过而不是真跑
       - name: Fetch render fonts
         run: |
@@ -52,7 +62,7 @@ jobs:
   # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）
   desktop-lockfile:
     name: Desktop Cargo.lock up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install stable toolchain

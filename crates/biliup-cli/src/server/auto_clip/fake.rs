@@ -345,7 +345,7 @@ async fn transcriptions(State(shared): State<Shared>, headers: HeaderMap, body: 
 /// 就回 413 并关闭连接——那样客户端拿到的是「你的主机中的软件中止了一个已建立的连接」
 /// （os error 10053），偶发地让自动切片的用例判成失败。
 fn oversized(body: &[u8]) -> Option<Response> {
-    const AXUM_DEFAULT_BODY_LIMIT: usize = 2 * 1024 * 1024;
+    const AXUM_DEFAULT_BODY_LIMIT: usize = 4 * 1024 * 1024;
     if body.len() > AXUM_DEFAULT_BODY_LIMIT {
         return Some(
             (
