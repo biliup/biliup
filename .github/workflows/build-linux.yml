@@ -2,7 +2,7 @@ name: Build Biliup Linux Binary
 
 on:
   push:
-    branches: [ "master", "main" ]
+    branches: [ "master", "dev" ]
   workflow_dispatch: # 允许你在网页上手动点击按钮触发编译
 
 jobs:
