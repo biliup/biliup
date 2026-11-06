@@ -3,7 +3,7 @@ name: Build Biliup Linux Binary
 on:
   push:
     branches: [ "master", "dev" ]
-  workflow_dispatch: # 允许你在网页上手动点击按钮触发编译
+  workflow_dispatch:
 
 jobs:
   build:
@@ -20,6 +20,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm' # 👈 开启 NPM 缓存，加速 npm install
+
+      # 👇 核心加速 1：缓存 Rust 的 Cargo 依赖和目标文件
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # 缓存 target 目录（这是最耗时的部分）
+          cache-targets: true
+          # 将缓存与当前系统绑定，避免冲突
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install system dependencies
         run: |
@@ -32,12 +42,11 @@ jobs:
           npm run build
 
       - name: Build Backend (Release Mode)
-        # 👇 核心：直接编译，不跑 cargo test
-        run: cargo build --release --bin biliup
+        # 👇 核心加速 2：增加 --locked，确保依赖版本不会意外漂移，利用缓存
+        run: cargo build --release --locked --bin biliup
 
       - name: Upload Linux Binary
         uses: actions/upload-artifact@v4
         with:
           name: biliup-linux-binary
-          # 👇 只把最终生成的二进制文件打包
           path: target/release/biliup
