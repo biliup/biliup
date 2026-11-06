@@ -884,7 +884,15 @@ fn lines(chunk: &Chunk, spans: &[Span], transcript: &Transcript) -> Vec<Line> {
             .map(|segment| {
                 let from = (segment.start * 1000.0).round() as i64;
                 let to = (segment.end * 1000.0).round() as i64;
-                line(at(from), at((to - 1).max(from)) + 1, &segment.text)
+                // 一句话跨越拼接点时不把 to 映射到下一个区间：chunk 把不连续的语音
+                // 区间拼接在一起，跨拼接点的一句话若按原逻辑换算，to 会落到下一个
+                // 区间，覆盖中间的大段静音，让候选校验把静音误判为有语音。
+                let to_clamped = audio::to_segment_ms_clamped(spans, from, (to - 1).max(from));
+                line(
+                    at(from),
+                    chunk.segment_start_ms + to_clamped + 1,
+                    &segment.text,
+                )
             })
             .collect(),
         None => match (spans.first(), spans.last()) {
