@@ -1,0 +1,43 @@
+name: Build Biliup Linux Binary
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  workflow_dispatch: # 允许你在网页上手动点击按钮触发编译
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev ffmpeg
+
+      - name: Build Frontend
+        run: |
+          npm install
+          npm run build
+
+      - name: Build Backend (Release Mode)
+        # 👇 核心：直接编译，不跑 cargo test
+        run: cargo build --release --bin biliup
+
+      - name: Upload Linux Binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: biliup-linux-binary
+          # 👇 只把最终生成的二进制文件打包
+          path: target/release/biliup
