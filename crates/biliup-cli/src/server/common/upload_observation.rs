@@ -180,7 +180,10 @@ pub struct ProcessingEntry {
     step: ProcessingProgress,
 }
 #[derive(Serialize)]
-pub struct ProcessingPage {tasks:Vec<ProcessingEntry>,total:i64}
+pub struct ProcessingPage {
+    tasks: Vec<ProcessingEntry>,
+    total: i64,
+}
 pub struct NewTask<'a> {
     pub source: &'a str,
     pub scheduler_group: &'a str,
@@ -277,10 +280,15 @@ impl UploadObservations {
                         .into(),
                     );
                     detail.task.updated_at = now();
-                    if let Some(progress)=detail.task.processing.as_mut().filter(|progress|progress.state=="running") {
-                        progress.state="interrupted".into();
-                        progress.finished_at=Some(now());
-                        progress.error=Some("服务重启，后处理已中断".into());
+                    if let Some(progress) = detail
+                        .task
+                        .processing
+                        .as_mut()
+                        .filter(|progress| progress.state == "running")
+                    {
+                        progress.state = "interrupted".into();
+                        progress.finished_at = Some(now());
+                        progress.error = Some("服务重启，后处理已中断".into());
                     }
                     for file in &mut detail.files {
                         if !terminal(&file.state) {
@@ -464,7 +472,8 @@ impl UploadObservations {
         limit: usize,
         offset: usize,
     ) -> QueueView {
-        let filter = "source != 'processing' AND (? IS NULL OR source=?) AND (? IS NULL OR state=?)";
+        let filter =
+            "source != 'processing' AND (? IS NULL OR source=?) AND (? IS NULL OR state=?)";
         let total = sqlx::query_scalar::<_, i64>(&format!(
             "SELECT COUNT(*) FROM upload_observation_tasks WHERE {filter}"
         ))
@@ -474,9 +483,7 @@ impl UploadObservations {
         .bind(state)
         .fetch_one(&self.pool)
         .await;
-        let summary = sqlx::query_as::<_, (i64,i64,i64)>(&format!(
-            "SELECT COALESCE(SUM(CASE WHEN state NOT IN ('succeeded','partial','failed','cancelled','interrupted','unknown','paused','skipped') AND json_extract(snapshot,'$.phase')='uploading' THEN 1 ELSE 0 END),0), COALESCE(SUM(state='queued'),0), COALESCE(SUM(state IN ('partial','failed','unknown','interrupted','paused')),0) FROM upload_observation_tasks WHERE source != 'processing'"
-        )).fetch_one(&self.pool).await;
+        let summary = sqlx::query_as::<_, (i64,i64,i64)>("SELECT COALESCE(SUM(CASE WHEN state NOT IN ('succeeded','partial','failed','cancelled','interrupted','unknown','paused','skipped') AND json_extract(snapshot,'$.phase')='uploading' THEN 1 ELSE 0 END),0), COALESCE(SUM(state='queued'),0), COALESCE(SUM(state IN ('partial','failed','unknown','interrupted','paused')),0) FROM upload_observation_tasks WHERE source != 'processing'").fetch_one(&self.pool).await;
         let snapshots: Result<Vec<String>, sqlx::Error> = sqlx::query_scalar(&format!(
             "SELECT snapshot FROM upload_observation_tasks WHERE {filter} ORDER BY CASE WHEN state IN ('succeeded','partial','failed','cancelled','interrupted','unknown','paused','skipped') THEN 1 ELSE 0 END, CASE WHEN state IN ('succeeded','partial','failed','cancelled','interrupted','unknown','paused','skipped') THEN updated_at END DESC, scheduler_group,task_order LIMIT ? OFFSET ?"
         )).bind(source).bind(source).bind(state).bind(state).bind(limit as i64).bind(offset as i64).fetch_all(&self.pool).await;
@@ -546,9 +553,15 @@ impl UploadObservations {
                     ELSE COALESCE(json_extract(t.snapshot,'$.processing_history'),'[]') END) j
         )";
         let filter = "(? IS NULL OR json_extract(step,'$.state')=?) AND (? IS NULL OR task_id=?)";
-        let total = sqlx::query_scalar(&format!("{steps} SELECT COUNT(*) FROM steps WHERE {filter}"))
-            .bind(state).bind(state).bind(task_id).bind(task_id)
-            .fetch_one(&self.pool).await?;
+        let total = sqlx::query_scalar(&format!(
+            "{steps} SELECT COUNT(*) FROM steps WHERE {filter}"
+        ))
+        .bind(state)
+        .bind(state)
+        .bind(task_id)
+        .bind(task_id)
+        .fetch_one(&self.pool)
+        .await?;
         let rows = sqlx::query_as::<_, (String, bool, String, Option<String>, Option<i64>, String)>(
             &format!("{steps} SELECT task_id,upload_task,title,streamer_name,session_id,step
                 FROM steps WHERE {filter}
@@ -558,10 +571,23 @@ impl UploadObservations {
         )
             .bind(state).bind(state).bind(task_id).bind(task_id)
             .bind(limit as i64).bind(offset as i64).fetch_all(&self.pool).await?;
-        let tasks = rows.into_iter().map(|(task_id, upload_task, title, streamer_name, session_id, step)| {
-            let step = serde_json::from_str(&step).map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
-            Ok(ProcessingEntry { task_id, upload_task, title, streamer_name, session_id, step })
-        }).collect::<Result<Vec<_>, sqlx::Error>>()?;
+        let tasks = rows
+            .into_iter()
+            .map(
+                |(task_id, upload_task, title, streamer_name, session_id, step)| {
+                    let step = serde_json::from_str(&step)
+                        .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+                    Ok(ProcessingEntry {
+                        task_id,
+                        upload_task,
+                        title,
+                        streamer_name,
+                        session_id,
+                        step,
+                    })
+                },
+            )
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
         Ok(ProcessingPage { tasks, total })
     }
 
@@ -759,8 +785,8 @@ impl TaskObservation {
             });
         }
     }
-    pub fn begin_processing(&self,operation:&str,file:&Path)->ProcessingObservation {
-        let mut id=0;
+    pub fn begin_processing(&self, operation: &str, file: &Path) -> ProcessingObservation {
+        let mut id = 0;
         if let Some(registry) = self.registry.upgrade() {
             registry.update(&self.id, |task| {
                 let view = &mut task.detail.task;
@@ -769,15 +795,16 @@ impl TaskObservation {
                 }
                 view.state = "running".into();
                 view.phase = operation.into();
-                if let Some(mut previous)=view.processing.take() {
-                    id=previous.id;
-                    if previous.state=="running" {
-                        previous.state="interrupted".into();previous.finished_at=Some(now());
-                        previous.error=Some("后处理未完成即开始了下一步骤".into());
+                if let Some(mut previous) = view.processing.take() {
+                    id = previous.id;
+                    if previous.state == "running" {
+                        previous.state = "interrupted".into();
+                        previous.finished_at = Some(now());
+                        previous.error = Some("后处理未完成即开始了下一步骤".into());
                     }
                     task.detail.processing_history.push(previous);
                 }
-                id+=1;
+                id += 1;
                 view.processing = Some(ProcessingProgress {
                     id,
                     operation: operation.into(),
@@ -789,11 +816,18 @@ impl TaskObservation {
                         .into_owned(),
                     processed_ms: 0,
                     total_ms: None,
-                    started_at:now(),finished_at:None,output_file:None,error:None,
+                    started_at: now(),
+                    finished_at: None,
+                    output_file: None,
+                    error: None,
                 });
             });
         }
-        ProcessingObservation {task:self.clone(),id,finished:false}
+        ProcessingObservation {
+            task: self.clone(),
+            id,
+            finished: false,
+        }
     }
     pub fn title(&self, title: &str) {
         if let Some(registry) = self.registry.upgrade() {
@@ -880,10 +914,23 @@ impl TaskObservation {
                 let view = &mut task.detail.task;
                 view.state = final_state.into();
                 view.phase = "finished".into();
-                if let Some(progress)=view.processing.as_mut().filter(|progress|progress.state=="running") {
-                    progress.state=if final_state=="failed"{"failed"}else{"interrupted"}.into();
-                    progress.finished_at=Some(now());
-                    progress.error=Some(error.map(scrub).unwrap_or_else(||"任务结束时后处理尚未完成".into()));
+                if let Some(progress) = view
+                    .processing
+                    .as_mut()
+                    .filter(|progress| progress.state == "running")
+                {
+                    progress.state = if final_state == "failed" {
+                        "failed"
+                    } else {
+                        "interrupted"
+                    }
+                    .into();
+                    progress.finished_at = Some(now());
+                    progress.error = Some(
+                        error
+                            .map(scrub)
+                            .unwrap_or_else(|| "任务结束时后处理尚未完成".into()),
+                    );
                 }
                 view.error = error.map(scrub);
                 view.bvid = bvid.map(str::to_owned).or_else(|| view.bvid.clone());
@@ -994,12 +1041,19 @@ impl ProcessingObservation {
         if let Some(registry) = self.task.registry.upgrade() {
             registry.update(&self.task.id, |task| {
                 let view = &mut task.detail.task;
-                if let Some(progress) = view.processing.as_mut()
+                if let Some(progress) = view
+                    .processing
+                    .as_mut()
                     .filter(|progress| progress.id == self.id && progress.state == "running")
                 {
                     work(progress);
                     if progress.state != "running" && view.phase == progress.operation {
-                        view.phase = if progress.state == "ready" { "processing" } else { "waiting_segment" }.into();
+                        view.phase = if progress.state == "ready" {
+                            "processing"
+                        } else {
+                            "waiting_segment"
+                        }
+                        .into();
                     }
                 }
             });
@@ -1019,8 +1073,12 @@ impl ProcessingObservation {
             progress.state = if error.is_some() { "failed" } else { "ready" }.into();
             progress.finished_at = Some(now());
             progress.error = error.map(scrub);
-            progress.output_file = output.and_then(Path::file_name).map(|name| name.to_string_lossy().into_owned());
-            if error.is_none() && let Some(total) = progress.total_ms {
+            progress.output_file = output
+                .and_then(Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned());
+            if error.is_none()
+                && let Some(total) = progress.total_ms
+            {
                 progress.processed_ms = total;
             }
         });

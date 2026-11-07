@@ -70,15 +70,15 @@ pub fn beats(value: &Value, existing: Option<&Value>) -> Result<Value, Error> {
     let rows = value.as_array().ok_or_else(|| invalid("分镜列表无效"))?;
     let mut plain = value.clone();
     for (i, row) in plain.as_array_mut().unwrap().iter_mut().enumerate() {
-        if let Some(still) = row.get("still").cloned() {
-            if still.is_string() {
-                if existing.and_then(|v| v.get(i)).and_then(|v| v.get("still")) != Some(&still) {
-                    return Err(invalid("分镜图片不属于当前提案"));
-                }
-                row.as_object_mut()
-                    .ok_or_else(|| invalid("分镜无效"))?
-                    .remove("still");
+        if let Some(still) = row.get("still").cloned()
+            && still.is_string()
+        {
+            if existing.and_then(|v| v.get(i)).and_then(|v| v.get("still")) != Some(&still) {
+                return Err(invalid("分镜图片不属于当前提案"));
             }
+            row.as_object_mut()
+                .ok_or_else(|| invalid("分镜无效"))?
+                .remove("still");
         }
     }
     validate("storyboard_propose", &json!({"summary":"","beats":plain}))?;

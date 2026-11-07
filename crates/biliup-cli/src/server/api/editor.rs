@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 pub mod agent;
-pub async fn shaders(State(pool):State<ConnectionPool>,Path(project):Path<i64>)->Response{
-    response(editor::shaders::list(&pool,project).await)
+pub async fn shaders(State(pool): State<ConnectionPool>, Path(project): Path<i64>) -> Response {
+    response(editor::shaders::list(&pool, project).await)
 }
 
 #[derive(Deserialize)]
@@ -28,74 +28,267 @@ fn export_response<T: serde::Serialize>(result: Result<T, String>) -> Response {
         Err(error) => (StatusCode::BAD_REQUEST, error).into_response(),
     }
 }
-pub async fn generators(State(jobs):State<Arc<RenderJobs>>)->Response {export_response(jobs.editor_generate.catalog().await)}
-pub async fn graphic_write(State(pool):State<ConnectionPool>,Path(project):Path<i64>,Json(input):Json<editor::graphics::Write>)->Response {response(editor::graphics::write(&pool,project,input).await)}
-pub async fn graphic_read(State(pool):State<ConnectionPool>,Path((project,name)):Path<(i64,String)>,Query(query):Query<GraphicQuery>)->Response {
-    let result=async{let mut graphic=editor::graphics::read(&pool,project,&format!("graphics/{name}")).await?;if !query.raw{graphic["html"]=json!(editor::graphics::resolve(graphic["html"].as_str().unwrap()).map_err(Error::Invalid)?)}Ok::<_,Error>(graphic)}.await;
+pub async fn generators(State(jobs): State<Arc<RenderJobs>>) -> Response {
+    export_response(jobs.editor_generate.catalog().await)
+}
+pub async fn graphic_write(
+    State(pool): State<ConnectionPool>,
+    Path(project): Path<i64>,
+    Json(input): Json<editor::graphics::Write>,
+) -> Response {
+    response(editor::graphics::write(&pool, project, input).await)
+}
+pub async fn graphic_read(
+    State(pool): State<ConnectionPool>,
+    Path((project, name)): Path<(i64, String)>,
+    Query(query): Query<GraphicQuery>,
+) -> Response {
+    let result = async {
+        let mut graphic =
+            editor::graphics::read(&pool, project, &format!("graphics/{name}")).await?;
+        if !query.raw {
+            graphic["html"] = json!(
+                editor::graphics::resolve(graphic["html"].as_str().unwrap())
+                    .map_err(Error::Invalid)?
+            )
+        }
+        Ok::<_, Error>(graphic)
+    }
+    .await;
     response(result)
 }
 #[derive(Deserialize)]
-pub struct GraphicQuery {#[serde(default)] raw:bool}
-pub async fn render_assets(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path(project):Path<i64>)->Response {response(editor::fonts::resources(&pool,jobs.root(),project).await)}
-pub async fn project_fonts(State(pool):State<ConnectionPool>,Path(project):Path<i64>)->Response {response(editor::project_fonts::list(&pool,project).await)}
-pub async fn proxies(State(jobs):State<Arc<RenderJobs>>,Path(project):Path<i64>)->Response {response(jobs.editor_proxies.list(project).await)}
-pub async fn recent_media(State(pool):State<ConnectionPool>,Path(project):Path<i64>,Query(query):Query<editor::recent_media::Query>)->Response {response(editor::recent_media::search(&pool,project,query).await)}
-pub async fn recent_import(State(pool):State<ConnectionPool>,Path((project,id)):Path<(i64,String)>)->Response {response(editor::recent_media::import(&pool,project,&id).await)}
-pub async fn recent_thumb(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path((project,id)):Path<(i64,String)>,request:axum::extract::Request)->Response {
-    let _lifecycle=crate::server::workbench::retention::MEDIA_LIFECYCLE.read().await;
-    match editor::recent_media::thumbnail_source(&pool,project,&id).await{
-        Ok((path,source))=>serve_media(&jobs,path,source,"thumb",request).await,
-        Err(error)=>response::<()>(Err(error)),
+pub struct GraphicQuery {
+    #[serde(default)]
+    raw: bool,
+}
+pub async fn render_assets(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(project): Path<i64>,
+) -> Response {
+    response(editor::fonts::resources(&pool, jobs.root(), project).await)
+}
+pub async fn project_fonts(
+    State(pool): State<ConnectionPool>,
+    Path(project): Path<i64>,
+) -> Response {
+    response(editor::project_fonts::list(&pool, project).await)
+}
+pub async fn proxies(State(jobs): State<Arc<RenderJobs>>, Path(project): Path<i64>) -> Response {
+    response(jobs.editor_proxies.list(project).await)
+}
+pub async fn recent_media(
+    State(pool): State<ConnectionPool>,
+    Path(project): Path<i64>,
+    Query(query): Query<editor::recent_media::Query>,
+) -> Response {
+    response(editor::recent_media::search(&pool, project, query).await)
+}
+pub async fn recent_import(
+    State(pool): State<ConnectionPool>,
+    Path((project, id)): Path<(i64, String)>,
+) -> Response {
+    response(editor::recent_media::import(&pool, project, &id).await)
+}
+pub async fn recent_thumb(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, id)): Path<(i64, String)>,
+    request: axum::extract::Request,
+) -> Response {
+    let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE
+        .read()
+        .await;
+    match editor::recent_media::thumbnail_source(&pool, project, &id).await {
+        Ok((path, source)) => serve_media(&jobs, path, source, "thumb", request).await,
+        Err(error) => response::<()>(Err(error)),
     }
 }
-pub async fn proxies_sync(State(jobs):State<Arc<RenderJobs>>,Path(project):Path<i64>)->Response {response(jobs.editor_proxies.sync(project).await)}
-pub async fn proxy_cancel(State(jobs):State<Arc<RenderJobs>>,Path((project,id)):Path<(i64,String)>)->Response {response(jobs.editor_proxies.cancel(project,&id).await)}
-pub async fn proxy_retry(State(jobs):State<Arc<RenderJobs>>,Path((project,id)):Path<(i64,String)>)->Response {response(jobs.editor_proxies.retry(project,&id).await)}
-pub async fn project_font_upload(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path(project):Path<i64>,Query(input):Query<editor::project_fonts::Upload>,bytes:axum::body::Bytes)->Response {response(editor::project_fonts::upload(&pool,jobs.root(),project,input,&bytes).await)}
+pub async fn proxies_sync(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(project): Path<i64>,
+) -> Response {
+    response(jobs.editor_proxies.sync(project).await)
+}
+pub async fn proxy_cancel(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, id)): Path<(i64, String)>,
+) -> Response {
+    response(jobs.editor_proxies.cancel(project, &id).await)
+}
+pub async fn proxy_retry(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, id)): Path<(i64, String)>,
+) -> Response {
+    response(jobs.editor_proxies.retry(project, &id).await)
+}
+pub async fn project_font_upload(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(project): Path<i64>,
+    Query(input): Query<editor::project_fonts::Upload>,
+    bytes: axum::body::Bytes,
+) -> Response {
+    response(editor::project_fonts::upload(&pool, jobs.root(), project, input, &bytes).await)
+}
 #[derive(Deserialize)]
-pub struct GraphicMediaQuery {path:String,#[serde(default)]t:f64,w:Option<u32>,h:Option<u32>,p:Option<String>}
-pub async fn graphic_media(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path((project,id)):Path<(i64,String)>,Query(query):Query<GraphicMediaQuery>)->Response {
-    let lifecycle=crate::server::workbench::retention::MEDIA_LIFECYCLE.read().await;
-    let result=async {
-        let ask=editor::graphic_media::Request{id,t:query.t,w:query.w,h:query.h};ask.validate().map_err(Error::Invalid)?;
-        let (entry,source)=editor::media::registered(&pool,project,&ask.id,Some(&query.path)).await?;
-        let kind=entry["kind"].as_str().ok_or(Error::NotFound)?;
-        let path=editor::media::source_path(&pool,&source).await?;
-        let cancel=tokio_util::sync::CancellationToken::new();let _cancel=cancel.clone().drop_guard();
-        let proxy=if query.p.as_deref()==Some("1")&&kind=="video"{jobs.editor_proxies.cached(project,&path,&source,None).await.ok()}else{None};
-        if let Some(proxy)=proxy {
-            let full=editor::graphic_media::PREVIEW.display_size(&path,&ask,&cancel).await.map_err(Error::Invalid)?;
+pub struct GraphicMediaQuery {
+    path: String,
+    #[serde(default)]
+    t: f64,
+    w: Option<u32>,
+    h: Option<u32>,
+    p: Option<String>,
+}
+pub async fn graphic_media(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, id)): Path<(i64, String)>,
+    Query(query): Query<GraphicMediaQuery>,
+) -> Response {
+    let lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE
+        .read()
+        .await;
+    let result = async {
+        let ask = editor::graphic_media::Request {
+            id,
+            t: query.t,
+            w: query.w,
+            h: query.h,
+        };
+        ask.validate().map_err(Error::Invalid)?;
+        let (entry, source) =
+            editor::media::registered(&pool, project, &ask.id, Some(&query.path)).await?;
+        let kind = entry["kind"].as_str().ok_or(Error::NotFound)?;
+        let path = editor::media::source_path(&pool, &source).await?;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let _cancel = cancel.clone().drop_guard();
+        let proxy = if query.p.as_deref() == Some("1") && kind == "video" {
+            jobs.editor_proxies
+                .cached(project, &path, &source, None)
+                .await
+                .ok()
+        } else {
+            None
+        };
+        if let Some(proxy) = proxy {
+            let full = editor::graphic_media::PREVIEW
+                .display_size(&path, &ask, &cancel)
+                .await
+                .map_err(Error::Invalid)?;
             // Proxy cache files are disposable. Keep the source lifecycle guard until any
             // fallback completes, but do not retain it in a decoder for a derived cache file.
-            if let Ok(picture)=editor::graphic_media::PREVIEW.picture(&proxy,kind,&ask,&cancel,None).await{return Ok((picture,Some(full)))}
+            if let Ok(picture) = editor::graphic_media::PREVIEW
+                .picture(&proxy, kind, &ask, &cancel, None)
+                .await
+            {
+                return Ok((picture, Some(full)));
+            }
         }
-        let picture=editor::graphic_media::PREVIEW.picture(&path,kind,&ask,&cancel,Some(lifecycle)).await.map_err(Error::Invalid)?;
-        Ok::<_,Error>((picture,None))
-    }.await;
-    match result {Ok((picture,full))=>{
-        let mut response=([(axum::http::header::CONTENT_TYPE,picture.mime),(axum::http::header::CACHE_CONTROL,"no-store"),(axum::http::header::X_CONTENT_TYPE_OPTIONS,"nosniff"),(axum::http::header::CONTENT_SECURITY_POLICY,"sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:")],(*picture.bytes).clone()).into_response();
-        if let Some(frame)=picture.frame{if let Ok(value)=frame.to_string().parse(){response.headers_mut().insert("x-editor-frame",value);}}
-        if let Some((width,height))=full{if let Ok(value)=format!("{width}x{height}").parse(){response.headers_mut().insert("x-biliup-full",value);}}response
-    },Err(error)=>response::<()>(Err(error))}
+        let picture = editor::graphic_media::PREVIEW
+            .picture(&path, kind, &ask, &cancel, Some(lifecycle))
+            .await
+            .map_err(Error::Invalid)?;
+        Ok::<_, Error>((picture, None))
+    }
+    .await;
+    match result {
+        Ok((picture, full)) => {
+            let mut response = (
+                [
+                    (axum::http::header::CONTENT_TYPE, picture.mime),
+                    (axum::http::header::CACHE_CONTROL, "no-store"),
+                    (axum::http::header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+                    (
+                        axum::http::header::CONTENT_SECURITY_POLICY,
+                        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+                    ),
+                ],
+                (*picture.bytes).clone(),
+            )
+                .into_response();
+            if let Some(frame) = picture.frame
+                && let Ok(value) = frame.to_string().parse()
+            {
+                response.headers_mut().insert("x-editor-frame", value);
+            }
+            if let Some((width, height)) = full
+                && let Ok(value) = format!("{width}x{height}").parse()
+            {
+                response.headers_mut().insert("x-biliup-full", value);
+            }
+            response
+        }
+        Err(error) => response::<()>(Err(error)),
+    }
 }
-pub async fn model_settings(State(pool):State<ConnectionPool>)->Response {export_response(editor::text_model::get(&pool).await)}
-pub async fn save_model_settings(State(pool):State<ConnectionPool>,Json(settings):Json<editor::text_model::Settings>)->Response {export_response(editor::text_model::save(&pool,settings).await)}
-pub async fn generation_jobs(State(jobs):State<Arc<RenderJobs>>,Path(id):Path<i64>)->Response {export_response(jobs.editor_generate.list(id).await)}
-pub async fn generation_start(State(jobs):State<Arc<RenderJobs>>,Path(id):Path<i64>,Json(req):Json<editor::generate::Request>)->Response {export_response(jobs.editor_generate.start(id,req).await.map(|id|json!({"jobId":id})))}
-pub async fn generation_cancel(State(jobs):State<Arc<RenderJobs>>,Path((project,job)):Path<(i64,String)>)->Response {export_response(jobs.editor_generate.cancel(project,&job).await)}
-pub async fn generation_result(State(jobs):State<Arc<RenderJobs>>,Path((project,job)):Path<(i64,String)>)->Response {export_response(jobs.editor_generate.result(project,&job).await)}
+pub async fn model_settings(State(pool): State<ConnectionPool>) -> Response {
+    export_response(editor::text_model::get(&pool).await)
+}
+pub async fn save_model_settings(
+    State(pool): State<ConnectionPool>,
+    Json(settings): Json<editor::text_model::Settings>,
+) -> Response {
+    export_response(editor::text_model::save(&pool, settings).await)
+}
+pub async fn generation_jobs(State(jobs): State<Arc<RenderJobs>>, Path(id): Path<i64>) -> Response {
+    export_response(jobs.editor_generate.list(id).await)
+}
+pub async fn generation_start(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(id): Path<i64>,
+    Json(req): Json<editor::generate::Request>,
+) -> Response {
+    export_response(
+        jobs.editor_generate
+            .start(id, req)
+            .await
+            .map(|id| json!({"jobId":id})),
+    )
+}
+pub async fn generation_cancel(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, job)): Path<(i64, String)>,
+) -> Response {
+    export_response(jobs.editor_generate.cancel(project, &job).await)
+}
+pub async fn generation_result(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, job)): Path<(i64, String)>,
+) -> Response {
+    export_response(jobs.editor_generate.result(project, &job).await)
+}
 pub async fn exports(State(jobs): State<Arc<RenderJobs>>, Path(id): Path<i64>) -> Response {
     export_response(jobs.editor_exports.list(id).await)
 }
 #[derive(Deserialize)]
-#[serde(rename_all="camelCase",deny_unknown_fields)]
-pub struct LoudnessRequest {revision:i64,target_lufs:f64}
-pub async fn export_loudness(State(jobs):State<Arc<RenderJobs>>,Path(id):Path<i64>,Json(input):Json<LoudnessRequest>)->Response{
-    let stream=jobs.editor_exports.estimate_stream(id,input.revision,input.target_lufs);
-    let mut response=axum::body::Body::from_stream(stream).into_response();
-    response.headers_mut().insert("content-type",axum::http::HeaderValue::from_static("application/x-ndjson; charset=utf-8"));
-    response.headers_mut().insert("cache-control",axum::http::HeaderValue::from_static("no-store"));
-    response.headers_mut().insert("x-accel-buffering",axum::http::HeaderValue::from_static("no"));
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LoudnessRequest {
+    revision: i64,
+    target_lufs: f64,
+}
+pub async fn export_loudness(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(id): Path<i64>,
+    Json(input): Json<LoudnessRequest>,
+) -> Response {
+    let stream = jobs
+        .editor_exports
+        .estimate_stream(id, input.revision, input.target_lufs);
+    let mut response = axum::body::Body::from_stream(stream).into_response();
+    response.headers_mut().insert(
+        "content-type",
+        axum::http::HeaderValue::from_static("application/x-ndjson; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        "cache-control",
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response.headers_mut().insert(
+        "x-accel-buffering",
+        axum::http::HeaderValue::from_static("no"),
+    );
     response
 }
 pub async fn export_create(
@@ -116,8 +309,16 @@ pub async fn export_cancel(
 ) -> Response {
     export_response(jobs.editor_exports.cancel(id, job).await)
 }
-pub async fn export_retry(State(jobs):State<Arc<RenderJobs>>,Path((project,job)):Path<(i64,i64)>)->Response{
-    export_response(jobs.editor_exports.retry(project,job).await.map(|job_id|json!({"jobId":job_id})))
+pub async fn export_retry(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, job)): Path<(i64, i64)>,
+) -> Response {
+    export_response(
+        jobs.editor_exports
+            .retry(project, job)
+            .await
+            .map(|job_id| json!({"jobId":job_id})),
+    )
 }
 #[derive(Deserialize)]
 pub struct ExportDownloadQuery {
@@ -222,16 +423,35 @@ pub struct BrandFileQuery {
 pub async fn brand_files(State(pool): State<ConnectionPool>, Path(project): Path<i64>) -> Response {
     response(editor::resources::files(&pool, project).await)
 }
-pub async fn brand_state(State(pool):State<ConnectionPool>,Path(project):Path<i64>)->Response{
-    response(editor::resources::brand::snapshot(&pool,project).await.map(|snapshot|snapshot.state))
+pub async fn brand_state(State(pool): State<ConnectionPool>, Path(project): Path<i64>) -> Response {
+    response(
+        editor::resources::brand::snapshot(&pool, project)
+            .await
+            .map(|snapshot| snapshot.state),
+    )
 }
 #[derive(Deserialize)]
-pub struct BrandImportRequest { url:String }
+pub struct BrandImportRequest {
+    url: String,
+}
 pub async fn brand_import(
-    State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,
-    Path((project,scope,kit)):Path<(i64,String,String)>,Json(input):Json<BrandImportRequest>,
-)->Response{
-    response(editor::resources::importer::download(&pool,jobs.root(),project,&scope,&kit,&input.url).await.map(|name|json!({"name":name})))
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, scope, kit)): Path<(i64, String, String)>,
+    Json(input): Json<BrandImportRequest>,
+) -> Response {
+    response(
+        editor::resources::importer::download(
+            &pool,
+            jobs.root(),
+            project,
+            &scope,
+            &kit,
+            &input.url,
+        )
+        .await
+        .map(|name| json!({"name":name})),
+    )
 }
 pub async fn brand_upload(
     State(pool): State<ConnectionPool>,
@@ -290,46 +510,156 @@ pub async fn resource_list(
 ) -> Response {
     response(editor::resources::list(&pool, project, &kind).await)
 }
-pub async fn sound_folders(State(pool):State<ConnectionPool>,Path(project):Path<i64>)->Response {
-    response(editor::sound_library::list(&pool,project).await)
+pub async fn sound_folders(
+    State(pool): State<ConnectionPool>,
+    Path(project): Path<i64>,
+) -> Response {
+    response(editor::sound_library::list(&pool, project).await)
 }
-pub async fn provider_keys(State(pool):State<ConnectionPool>)->Response {export_response(editor::keys::list(&pool).await)}
-pub async fn online_library_state(State(jobs):State<Arc<RenderJobs>>)->Response {export_response(jobs.editor_library.state().await)}
-pub async fn online_library_search(State(jobs):State<Arc<RenderJobs>>,Json(query):Json<editor::online_library::Query>)->Response {export_response(jobs.editor_library.search(query).await)}
-pub async fn online_library_add(State(jobs):State<Arc<RenderJobs>>,Path((project,source,id)):Path<(i64,String,String)>)->Response {export_response(jobs.editor_library.add(project,&source,&id).await)}
-pub async fn library_add(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path((project,id)):Path<(i64,String)>)->Response {
-    let cancel=tokio_util::sync::CancellationToken::new();let _cancel=cancel.clone().drop_guard();
-    let result=tokio::time::timeout(std::time::Duration::from_secs(300),editor::library::add(&pool,jobs.root(),&jobs.editor_library,project,&id,200*1024*1024,&cancel,|_,_|{})).await;
-    response(match result{Ok(value)=>value,Err(_)=>Err(editor::Error::Invalid("音源导入超时".into()))})
+pub async fn provider_keys(State(pool): State<ConnectionPool>) -> Response {
+    export_response(editor::keys::list(&pool).await)
 }
-pub async fn online_library_preview(State(jobs):State<Arc<RenderJobs>>,Path((source,id)):Path<(String,String)>,headers:axum::http::HeaderMap)->Response {
-    let remote=match jobs.editor_library.preview(&source,&id,headers.get("range").and_then(|h|h.to_str().ok())).await{Ok(value)=>value,Err(error)=>return export_response::<()>(Err(error))};
-    if !remote.status().is_success(){return StatusCode::from_u16(remote.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY).into_response()}
-    let mut response=Response::builder().status(remote.status().as_u16()).header("content-security-policy","default-src 'none'; sandbox").header("x-content-type-options","nosniff");
-    let mime=remote.headers().get("content-type").and_then(|h|h.to_str().ok()).filter(|mime|mime.starts_with("audio/")||mime.starts_with("application/ogg")).unwrap_or("application/octet-stream");
-    response=response.header("content-type",mime);
-    for name in ["content-range","accept-ranges"]{if let Some(value)=remote.headers().get(name){response=response.header(name,value)}}
-    response.body(axum::body::Body::from_stream(editor::public_http::stream(remote,50*1024*1024))).unwrap()
+pub async fn online_library_state(State(jobs): State<Arc<RenderJobs>>) -> Response {
+    export_response(jobs.editor_library.state().await)
+}
+pub async fn online_library_search(
+    State(jobs): State<Arc<RenderJobs>>,
+    Json(query): Json<editor::online_library::Query>,
+) -> Response {
+    export_response(jobs.editor_library.search(query).await)
+}
+pub async fn online_library_add(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, source, id)): Path<(i64, String, String)>,
+) -> Response {
+    export_response(jobs.editor_library.add(project, &source, &id).await)
+}
+pub async fn library_add(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((project, id)): Path<(i64, String)>,
+) -> Response {
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let _cancel = cancel.clone().drop_guard();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        editor::library::add(
+            editor::Storage {
+                pool: &pool,
+                root: jobs.root(),
+            },
+            &jobs.editor_library,
+            project,
+            &id,
+            200 * 1024 * 1024,
+            &cancel,
+            |_, _| {},
+        ),
+    )
+    .await;
+    response(match result {
+        Ok(value) => value,
+        Err(_) => Err(editor::Error::Invalid("音源导入超时".into())),
+    })
+}
+pub async fn online_library_preview(
+    State(jobs): State<Arc<RenderJobs>>,
+    Path((source, id)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let remote = match jobs
+        .editor_library
+        .preview(
+            &source,
+            &id,
+            headers.get("range").and_then(|h| h.to_str().ok()),
+        )
+        .await
+    {
+        Ok(value) => value,
+        Err(error) => return export_response::<()>(Err(error)),
+    };
+    if !remote.status().is_success() {
+        return StatusCode::from_u16(remote.status().as_u16())
+            .unwrap_or(StatusCode::BAD_GATEWAY)
+            .into_response();
+    }
+    let mut response = Response::builder()
+        .status(remote.status().as_u16())
+        .header("content-security-policy", "default-src 'none'; sandbox")
+        .header("x-content-type-options", "nosniff");
+    let mime = remote
+        .headers()
+        .get("content-type")
+        .and_then(|h| h.to_str().ok())
+        .filter(|mime| mime.starts_with("audio/") || mime.starts_with("application/ogg"))
+        .unwrap_or("application/octet-stream");
+    response = response.header("content-type", mime);
+    for name in ["content-range", "accept-ranges"] {
+        if let Some(value) = remote.headers().get(name) {
+            response = response.header(name, value)
+        }
+    }
+    response
+        .body(axum::body::Body::from_stream(editor::public_http::stream(
+            remote,
+            50 * 1024 * 1024,
+        )))
+        .unwrap()
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct KeyRequest{key:String}
-pub async fn save_provider_key(State(pool):State<ConnectionPool>,State(jobs):State<Arc<RenderJobs>>,Path(provider):Path<String>,Json(input):Json<KeyRequest>)->Response {
-    export_response(editor::keys::set(&pool,jobs.root(),&provider,&input.key).await)
+pub struct KeyRequest {
+    key: String,
 }
-pub async fn remove_provider_key(State(pool):State<ConnectionPool>,Path(provider):Path<String>)->Response {export_response(editor::keys::remove(&pool,&provider).await)}
-pub async fn save_sound_folder(State(pool):State<ConnectionPool>,Path(project):Path<i64>,Json(folder):Json<editor::sound_library::Folder>)->Response {
-    response(editor::sound_library::save(&pool,project,folder).await)
+pub async fn save_provider_key(
+    State(pool): State<ConnectionPool>,
+    State(jobs): State<Arc<RenderJobs>>,
+    Path(provider): Path<String>,
+    Json(input): Json<KeyRequest>,
+) -> Response {
+    export_response(editor::keys::set(&pool, jobs.root(), &provider, &input.key).await)
 }
-pub async fn delete_sound_folder(State(pool):State<ConnectionPool>,Path((project,id)):Path<(i64,String)>)->Response {
-    response(editor::sound_library::delete(&pool,project,&id).await)
+pub async fn remove_provider_key(
+    State(pool): State<ConnectionPool>,
+    Path(provider): Path<String>,
+) -> Response {
+    export_response(editor::keys::remove(&pool, &provider).await)
 }
-pub async fn library_sound(State(pool):State<ConnectionPool>,Path((project,id,kind)):Path<(i64,String,String)>,request:axum::extract::Request)->Response {
-    let (value,path)=match editor::sound_library::sound(&pool,project,&id).await {Ok(value)=>value,Err(error)=>return response::<()>(Err(error))};
-    if kind=="metadata" {return Json(value).into_response()}
-    if kind!="file" {return StatusCode::NOT_FOUND.into_response()}
-    match tower_http::services::ServeFile::new(path).oneshot(request).await {
-        Ok(response)=>response.into_response(),Err(error)=>(StatusCode::INTERNAL_SERVER_ERROR,error.to_string()).into_response()
+pub async fn save_sound_folder(
+    State(pool): State<ConnectionPool>,
+    Path(project): Path<i64>,
+    Json(folder): Json<editor::sound_library::Folder>,
+) -> Response {
+    response(editor::sound_library::save(&pool, project, folder).await)
+}
+pub async fn delete_sound_folder(
+    State(pool): State<ConnectionPool>,
+    Path((project, id)): Path<(i64, String)>,
+) -> Response {
+    response(editor::sound_library::delete(&pool, project, &id).await)
+}
+pub async fn library_sound(
+    State(pool): State<ConnectionPool>,
+    Path((project, id, kind)): Path<(i64, String, String)>,
+    request: axum::extract::Request,
+) -> Response {
+    let (value, path) = match editor::sound_library::sound(&pool, project, &id).await {
+        Ok(value) => value,
+        Err(error) => return response::<()>(Err(error)),
+    };
+    if kind == "metadata" {
+        return Json(value).into_response();
+    }
+    if kind != "file" {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match tower_http::services::ServeFile::new(path)
+        .oneshot(request)
+        .await
+    {
+        Ok(response) => response.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
 }
 pub async fn resource_save(
@@ -387,11 +717,19 @@ pub async fn transcription_select(
         None => (StatusCode::BAD_REQUEST, "请选择语音模型").into_response(),
     }
 }
-pub async fn setup_checks(State(pool):State<ConnectionPool>) -> Response {
-    let model=match editor::text_model::get(&pool).await {Ok(model)=>model,Err(error)=>return export_response::<()>(Err(error))};
-    let keys=match editor::keys::list(&pool).await {Ok(keys)=>keys,Err(error)=>return export_response::<()>(Err(error))};
-    let model_ready=keys.iter().any(|k|k["provider"]==model.provider&&k["set"]==true);
-    let browser=editor::export::available();
+pub async fn setup_checks(State(pool): State<ConnectionPool>) -> Response {
+    let model = match editor::text_model::get(&pool).await {
+        Ok(model) => model,
+        Err(error) => return export_response::<()>(Err(error)),
+    };
+    let keys = match editor::keys::list(&pool).await {
+        Ok(keys) => keys,
+        Err(error) => return export_response::<()>(Err(error)),
+    };
+    let model_ready = keys
+        .iter()
+        .any(|k| k["provider"] == model.provider && k["set"] == true);
+    let browser = editor::export::available();
     let whisper = editor::analysis::speech_models::binary();
     let ffmpeg = tokio::time::timeout(
         std::time::Duration::from_secs(8),
@@ -420,15 +758,37 @@ pub async fn analysis_start(
     Path(project): Path<i64>,
     Json(input): Json<AnalysisRequest>,
 ) -> Response {
-    if let Some(job)=input.restore_job{
-        if input.analyzers.is_some()||input.model.is_some(){return response::<Vec<Value>>(Err(editor::Error::Invalid("恢复分析不接受新的分析器参数".into())))}
-        return response(jobs.editor_analysis.retry_restore(project,&input.media_id,&input.version,&job).await)
+    if let Some(job) = input.restore_job {
+        if input.analyzers.is_some() || input.model.is_some() {
+            return response::<Vec<Value>>(Err(editor::Error::Invalid(
+                "恢复分析不接受新的分析器参数".into(),
+            )));
+        }
+        return response(
+            jobs.editor_analysis
+                .retry_restore(project, &input.media_id, &input.version, &job)
+                .await,
+        );
     }
-    let transcript=input.analyzers.as_ref().is_some_and(|items|items.iter().any(|item|item=="transcript"));
-    if transcript!=input.model.is_some(){return response::<Vec<Value>>(Err(editor::Error::Invalid("转写请求须指定当前语音模型，其他分析不接受语音模型".into())))}
+    let transcript = input
+        .analyzers
+        .as_ref()
+        .is_some_and(|items| items.iter().any(|item| item == "transcript"));
+    if transcript != input.model.is_some() {
+        return response::<Vec<Value>>(Err(editor::Error::Invalid(
+            "转写请求须指定当前语音模型，其他分析不接受语音模型".into(),
+        )));
+    }
     response(
         jobs.editor_analysis
-            .start_configured(project, input.media_id, input.analyzers, "auto", input.model.as_deref(), Some(&input.version))
+            .start_configured(
+                project,
+                input.media_id,
+                input.analyzers,
+                "auto",
+                input.model.as_deref(),
+                Some(&input.version),
+            )
             .await,
     )
 }
@@ -443,7 +803,11 @@ pub async fn analysis_cached(
     Path((project, media)): Path<(i64, String)>,
     Query(input): Query<AnalysisQuery>,
 ) -> Response {
-    if (input.analyzer=="transcript")!=input.model.is_some(){return response::<Value>(Err(editor::Error::Invalid("转写读取须指定当前语音模型，其他分析不接受语音模型".into())))}
+    if (input.analyzer == "transcript") != input.model.is_some() {
+        return response::<Value>(Err(editor::Error::Invalid(
+            "转写读取须指定当前语音模型，其他分析不接受语音模型".into(),
+        )));
+    }
     let omit = input
         .omit
         .unwrap_or_default()
@@ -453,7 +817,17 @@ pub async fn analysis_cached(
         .collect::<Vec<_>>();
     response(
         jobs.editor_analysis
-            .cached_version(project, &media, &input.analyzer, &omit,"auto",Some(&input.version),input.model.as_deref())
+            .cached_version(
+                project,
+                &media,
+                editor::analysis::CacheQuery {
+                    analyzer: &input.analyzer,
+                    requested_language: "auto",
+                    version: Some(&input.version),
+                    selected_model: input.model.as_deref(),
+                },
+                &omit,
+            )
             .await,
     )
 }
@@ -502,18 +876,45 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(req): Json<SaveRequest>,
 ) -> Response {
-    response(editor::save_user_results(&pool, (id, req.revision), req.document, &req.generated,req.history.as_ref(),req.suggestion.as_ref()).await)
+    response(
+        editor::save_user_results(
+            &pool,
+            (id, req.revision),
+            req.document,
+            &req.generated,
+            req.history.as_ref(),
+            req.suggestion.as_ref(),
+        )
+        .await,
+    )
 }
 #[derive(Deserialize)]
-pub struct HistoryQuery { before: Option<i64> }
-pub async fn history(State(pool):State<ConnectionPool>,Path(id):Path<i64>,Query(query):Query<HistoryQuery>)->Response{
-    response(editor::history::page(&pool,id,query.before).await)
+pub struct HistoryQuery {
+    before: Option<i64>,
+}
+pub async fn history(
+    State(pool): State<ConnectionPool>,
+    Path(id): Path<i64>,
+    Query(query): Query<HistoryQuery>,
+) -> Response {
+    response(editor::history::page(&pool, id, query.before).await)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HistoryStep {revision:i64,action:editor::history::cursor::Action,target:Option<i64>}
-pub async fn history_step(State(pool):State<ConnectionPool>,Path(id):Path<i64>,Json(request):Json<HistoryStep>)->Response{
-    response(editor::history::cursor::step(&pool,id,request.revision,request.action,request.target).await)
+pub struct HistoryStep {
+    revision: i64,
+    action: editor::history::cursor::Action,
+    target: Option<i64>,
+}
+pub async fn history_step(
+    State(pool): State<ConnectionPool>,
+    Path(id): Path<i64>,
+    Json(request): Json<HistoryStep>,
+) -> Response {
+    response(
+        editor::history::cursor::step(&pool, id, request.revision, request.action, request.target)
+            .await,
+    )
 }
 #[derive(Deserialize)]
 pub struct RevisionQuery {
@@ -526,7 +927,11 @@ pub async fn delete(
     Query(req): Query<RevisionQuery>,
 ) -> Response {
     match editor::delete(&pool, id, req.revision).await {
-        Ok(()) => {jobs.editor_agent.forget(id);jobs.editor_proxies.forget(id).await;StatusCode::NO_CONTENT.into_response()},
+        Ok(()) => {
+            jobs.editor_agent.forget(id);
+            jobs.editor_proxies.forget(id).await;
+            StatusCode::NO_CONTENT.into_response()
+        }
         Err(error) => response::<()>(Err(error)),
     }
 }
@@ -542,29 +947,52 @@ pub async fn revisions(State(pool): State<ConnectionPool>, Path(id): Path<i64>) 
 }
 
 #[derive(Deserialize)]
-pub struct MediaQuery {v:Option<String>,path:Option<String>}
+pub struct MediaQuery {
+    v: Option<String>,
+    path: Option<String>,
+}
 pub async fn media(
     State(pool): State<ConnectionPool>,
     State(jobs): State<std::sync::Arc<crate::server::workbench::renders::jobs::RenderJobs>>,
     Path((id, media, kind)): Path<(i64, String, String)>,
-    Query(query):Query<MediaQuery>,
+    Query(query): Query<MediaQuery>,
     request: axum::extract::Request,
 ) -> Response {
     let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE
         .read()
         .await;
-    if kind=="proxy" {
-        return match jobs.editor_proxies.file(id,&media,query.v.as_deref()).await {
-            Ok(path)=>match tower_http::services::ServeFile::new(path).oneshot(request).await {
-                Ok(value)=>{let mut response=value.into_response();response.headers_mut().insert(axum::http::header::CACHE_CONTROL,axum::http::HeaderValue::from_static("private, no-cache"));response.headers_mut().insert(axum::http::header::X_CONTENT_TYPE_OPTIONS,axum::http::HeaderValue::from_static("nosniff"));response},
-                Err(_)=>StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-            },Err(error)=>response::<()>(Err(error)),
-        }
+    if kind == "proxy" {
+        return match jobs
+            .editor_proxies
+            .file(id, &media, query.v.as_deref())
+            .await
+        {
+            Ok(path) => match tower_http::services::ServeFile::new(path)
+                .oneshot(request)
+                .await
+            {
+                Ok(value) => {
+                    let mut response = value.into_response();
+                    response.headers_mut().insert(
+                        axum::http::header::CACHE_CONTROL,
+                        axum::http::HeaderValue::from_static("private, no-cache"),
+                    );
+                    response.headers_mut().insert(
+                        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+                        axum::http::HeaderValue::from_static("nosniff"),
+                    );
+                    response
+                }
+                Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            },
+            Err(error) => response::<()>(Err(error)),
+        };
     }
-    let (path, source) = match editor::media::version(&pool, id, &media,query.path.as_deref()).await {
-        Ok(value) => value,
-        Err(error) => return response::<()>(Err(error)),
-    };
+    let (path, source) =
+        match editor::media::version(&pool, id, &media, query.path.as_deref()).await {
+            Ok(value) => value,
+            Err(error) => return response::<()>(Err(error)),
+        };
     serve_media(&jobs, path, source, &kind, request).await
 }
 
@@ -580,14 +1008,22 @@ pub async fn session_media(
     match editor::media::session_source(&pool, id, &media).await {
         Ok((path, source)) if kind == "probe" => {
             let source = editor::MediaSource::Recording(source);
-            let result = tokio::time::timeout(std::time::Duration::from_secs(90), editor::media::probe(&pool, &path, &source, 30.)).await;
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(90),
+                editor::media::probe(&pool, &path, &source, 30.),
+            )
+            .await;
             match result {
                 Ok(Ok(probe)) => Json(probe).into_response(),
                 Ok(Err(error)) => {
                     tracing::warn!(%error, session=id, media, "读取导入录像画布失败");
-                    response::<()>(Err(Error::Invalid("无法读取录像信息，请检查文件与 FFmpeg 后重试导入".into())))
+                    response::<()>(Err(Error::Invalid(
+                        "无法读取录像信息，请检查文件与 FFmpeg 后重试导入".into(),
+                    )))
                 }
-                Err(_) => response::<()>(Err(Error::Invalid("录像信息读取超时，请稍后重试导入".into()))),
+                Err(_) => response::<()>(Err(Error::Invalid(
+                    "录像信息读取超时，请稍后重试导入".into(),
+                ))),
             }
         }
         Ok((path, source)) => {
@@ -649,17 +1085,20 @@ async fn serve_media(
         Ok(value) => {
             let mut value = value.into_response();
             value.headers_mut().insert(axum::http::header::CONTENT_SECURITY_POLICY,axum::http::HeaderValue::from_static("sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:"));
-            value.headers_mut().insert(axum::http::header::X_CONTENT_TYPE_OPTIONS,axum::http::HeaderValue::from_static("nosniff"));
+            value.headers_mut().insert(
+                axum::http::header::X_CONTENT_TYPE_OPTIONS,
+                axum::http::HeaderValue::from_static("nosniff"),
+            );
             value.headers_mut().insert(
                 axum::http::header::CACHE_CONTROL,
                 axum::http::HeaderValue::from_static("private, max-age=60"),
             );
-            if let Some(layout) = layout {
-                if let Ok(header) = layout.to_string().parse() {
-                    value
-                        .headers_mut()
-                        .insert("x-biliup-filmstrip-layout", header);
-                }
+            if let Some(layout) = layout
+                && let Ok(header) = layout.to_string().parse()
+            {
+                value
+                    .headers_mut()
+                    .insert("x-biliup-filmstrip-layout", header);
             }
             value
         }
@@ -674,19 +1113,40 @@ async fn serve_media(
 pub struct ImportQuery {
     name: String,
     capture: Option<String>,
-    agent_capture:Option<String>,
-    capture_source:Option<String>,
+    agent_capture: Option<String>,
+    capture_source: Option<String>,
 }
 pub async fn import_media(
     State(pool): State<ConnectionPool>,
     State(jobs): State<Arc<RenderJobs>>,
     Path(id): Path<i64>,
     Query(query): Query<ImportQuery>,
-    caller:crate::server::api::access::Caller,
+    caller: crate::server::api::access::Caller,
     body: axum::body::Body,
 ) -> Response {
-    if let Some(capture)=query.agent_capture{
-        return response(jobs.editor_agent.upload_screen(id,&capture,&query.name,query.capture_source.as_deref(),&caller,body).await)
+    if let Some(capture) = query.agent_capture {
+        return response(
+            jobs.editor_agent
+                .upload_screen(
+                    id,
+                    &capture,
+                    &query.name,
+                    query.capture_source.as_deref(),
+                    &caller,
+                    body,
+                )
+                .await,
+        );
     }
-    export_response(editor::imports::upload(&pool, jobs.root(), id, &query.name, query.capture.as_deref(), body).await)
+    export_response(
+        editor::imports::upload(
+            &pool,
+            jobs.root(),
+            id,
+            &query.name,
+            query.capture.as_deref(),
+            body,
+        )
+        .await,
+    )
 }

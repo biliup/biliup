@@ -108,13 +108,15 @@ impl Service {
         if name == "reference_frames" {
             return self
                 .brand_reference(
-                    project,
-                    turn,
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
                     saved.summary.revision,
                     context,
                     state,
                     args,
-                    cancel,
                 )
                 .await;
         }
@@ -149,10 +151,12 @@ impl Service {
                     &self.pool,
                     project,
                     turn,
-                    saved.summary.revision,
-                    &snapshot.stamp,
-                    None,
-                    Some(active),
+                    editor::resources::brand::Update {
+                        revision: saved.summary.revision,
+                        expected: &snapshot.stamp,
+                        kit: None,
+                        active: Some(active),
+                    },
                     cancel,
                 )
                 .await?;
@@ -222,14 +226,16 @@ impl Service {
                     }
                     let picture = self
                         .brand_picture(
-                            project,
-                            turn,
+                            super::Turn {
+                                project,
+                                id: turn,
+                                cancel,
+                            },
                             saved.summary.revision,
                             scope,
                             id,
                             &file,
                             &slot,
-                            cancel,
                         )
                         .await;
                     match picture {
@@ -270,8 +276,8 @@ impl Service {
             .ok_or_else(|| invalid("品牌范围无效"))?
             .to_string();
         let write_decision = format!(
-            "brand-write:{}",
-            format!("{:x}", Sha256::digest(format!("{}:{args}", snapshot.stamp)))
+            "brand-write:{:x}",
+            Sha256::digest(format!("{}:{args}", snapshot.stamp))
         );
         if context.create_decisions.get(&write_decision) == Some(&false) {
             return Ok(json!({"saved":false,"reason":"用户未批准品牌写入；不要重试此请求"}));
@@ -314,7 +320,14 @@ impl Service {
         let mut guessed = vec![];
         for source in sources {
             let file = self
-                .brand_bring(project, &id, &scope, source.as_str().unwrap(), context, cancel)
+                .brand_bring(
+                    project,
+                    &id,
+                    &scope,
+                    source.as_str().unwrap(),
+                    context,
+                    cancel,
+                )
                 .await?;
             if !font(&file) && mime(&file).is_none() {
                 return Err(invalid("品牌批量导入只接受图片和字体"));
@@ -338,10 +351,7 @@ impl Service {
         if changes.as_array().is_some_and(|v| !v.is_empty()) {
             // A denied colour/font replacement stays denied for this kit throughout the turn.
             let key = format!("brand-style:{scope}:{id}");
-            let decision = format!(
-                "{key}:{}",
-                format!("{:x}", Sha256::digest(changes.to_string()))
-            );
+            let decision = format!("{key}:{:x}", Sha256::digest(changes.to_string()));
             let allow = if context.create_decisions.get(&key) == Some(&false) {
                 false
             } else if let Some(allowed) = context.create_decisions.get(&decision) {
@@ -437,10 +447,12 @@ impl Service {
             &self.pool,
             project,
             turn,
-            saved.summary.revision,
-            &snapshot.stamp,
-            Some(kit.clone()),
-            activate.then_some(active),
+            editor::resources::brand::Update {
+                revision: saved.summary.revision,
+                expected: &snapshot.stamp,
+                kit: Some(kit.clone()),
+                active: activate.then_some(active),
+            },
             cancel,
         )
         .await?;
@@ -451,15 +463,18 @@ impl Service {
 
     pub(super) async fn brand_picture(
         &self,
-        project: i64,
-        turn: &str,
+        invocation: super::Turn<'_>,
         revision: i64,
         scope: &str,
         kit: &str,
         name: &str,
         slot: &str,
-        cancel: &CancellationToken,
     ) -> Result<(Image, String), Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = invocation;
         let mime = mime(name).ok_or_else(|| invalid("不是图片文件"))?;
         let path =
             editor::resources::file(&self.pool, &self.root, project, scope, kit, name).await?;
@@ -509,9 +524,14 @@ impl Service {
                     "image/gif" => "gif",
                     _ => return Err(invalid("附件图片类型无效")),
                 };
-                let bytes = STANDARD.decode(&image.data).map_err(|_| invalid("附件图片编码无效"))?;
+                let bytes = STANDARD
+                    .decode(&image.data)
+                    .map_err(|_| invalid("附件图片编码无效"))?;
                 let name = format!("reference-{}.{}", &source[11..23], extension);
-                return editor::resources::add_file(&self.pool, &self.root, project, scope, kit, &name, &bytes).await;
+                return editor::resources::add_file(
+                    &self.pool, &self.root, project, scope, kit, &name, &bytes,
+                )
+                .await;
             }
             if source.starts_with("https://") {
                 return editor::resources::importer::download(

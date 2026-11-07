@@ -198,13 +198,15 @@ impl Service {
         let mut result = tokio::select! {_=cancel.cancelled()=>return Err(invalid("助手已停止搜索")),result=tokio::time::timeout(Duration::from_secs(50),work)=>result.map_err(|_|invalid("网页搜索超时"))??};
         let (source, created) = research::save_source(
             &self.pool,
-            project,
-            turn,
+            super::Turn {
+                project,
+                id: turn,
+                cancel,
+            },
             url.as_str(),
             url.as_str(),
             MIME,
             &result,
-            cancel,
         )
         .await?;
         result["source"] = json!(source);

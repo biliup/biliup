@@ -160,8 +160,8 @@ fn desktop_available() -> bool {
             fn ProcessIdToSessionId(process_id: u32, session_id: *mut u32) -> i32;
         }
         let mut session_id = 0;
-        return unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id) != 0 }
-            && session_id > 0;
+        (unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id) != 0 }
+            && session_id > 0)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {

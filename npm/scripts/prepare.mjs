@@ -22,7 +22,6 @@ const TARGETS = [
   { dir: 'linux-x64-musl', build: 'x86_64-linux-musl', format: 'elf', arch: 'x86_64' },
   { dir: 'linux-arm64-gnu', build: 'aarch64-linux', format: 'elf', arch: 'aarch64' },
   { dir: 'linux-arm-gnueabi', build: 'arm-linux', format: 'elf', arch: 'arm' },
-  { dir: 'darwin-x64', build: 'x86_64-macos', format: 'macho', arch: 'x86_64' },
   { dir: 'darwin-arm64', build: 'aarch64-macos', format: 'macho', arch: 'arm64' },
   { dir: 'win32-x64', build: 'x86_64-windows', format: 'pe', arch: 'x86_64' },
 ]

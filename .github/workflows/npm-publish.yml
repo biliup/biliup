@@ -53,7 +53,7 @@ jobs:
       - name: Smoke test (linux x64)
         run: npm/scripts/smoke-test.sh npm/dist linux-x64-gnu
 
-      # 先发 7 个 @biliup/<平台> 子包，最后发根包 @biliup/cli；registry 上已有的版本跳过，失败后可直接重跑
+      # 先发各平台子包，最后发根包 @biliup/cli；registry 上已有的版本跳过，失败后可直接重跑
       # 优先使用 OIDC；NPM_TOKEN 仅作为可选回退，不要求预先配置 secret。
       - name: Publish
         if: env.DRY_RUN != 'true'

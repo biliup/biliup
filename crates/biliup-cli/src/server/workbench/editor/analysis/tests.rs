@@ -5,10 +5,10 @@ async fn settled(jobs: &Jobs, project: i64) -> Value {
     tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             let all = jobs.list(project).await.unwrap();
-            if let Some(job) = all.first() {
-                if !active(job) {
-                    return job.clone();
-                }
+            if let Some(job) = all.first()
+                && !active(job)
+            {
+                return job.clone();
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }

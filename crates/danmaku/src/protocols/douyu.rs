@@ -123,12 +123,12 @@ impl Douyu {
             let body_start = start + 12;
             let body_end = start + 4 + length - 1; // -1 for null terminator
 
-            if body_end > body_start && body_end <= data.len() {
-                if let Ok(text) = std::str::from_utf8(&data[body_start..body_end]) {
-                    if let Some(event) = Self::parse_stt_message(text) {
-                        events.push(event);
-                    }
-                }
+            if body_end > body_start
+                && body_end <= data.len()
+                && let Ok(text) = std::str::from_utf8(&data[body_start..body_end])
+                && let Some(event) = Self::parse_stt_message(text)
+            {
+                events.push(event);
             }
 
             start += 4 + length;
@@ -157,10 +157,10 @@ impl Douyu {
                 if !name.is_empty() {
                     chat = chat.with_name(name);
                 }
-                if let Some(uid_str) = msg.get_str("uid") {
-                    if let Ok(uid) = uid_str.parse::<u64>() {
-                        chat = chat.with_uid(uid);
-                    }
+                if let Some(uid_str) = msg.get_str("uid")
+                    && let Ok(uid) = uid_str.parse::<u64>()
+                {
+                    chat = chat.with_uid(uid);
                 }
 
                 Some(DanmakuEvent::Chat(chat))

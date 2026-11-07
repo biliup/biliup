@@ -111,18 +111,18 @@ impl Log {
             if let Some(value) = line.strip_prefix("LRA:") {
                 self.range = number(value);
             }
-        } else if self.section == 3 {
-            if let Some(value) = line.strip_prefix("Peak:") {
-                self.peak = number(value);
-            }
+        } else if self.section == 3
+            && let Some(value) = line.strip_prefix("Peak:")
+        {
+            self.peak = number(value);
         }
     }
     fn finish(mut self, seconds: f64, envelope: Value) -> Value {
-        if let Some(start) = self.open {
-            if seconds > start {
-                self.ranges
-                    .push(json!({"start":rounded(start),"end":rounded(seconds)}));
-            }
+        if let Some(start) = self.open
+            && seconds > start
+        {
+            self.ranges
+                .push(json!({"start":rounded(start),"end":rounded(seconds)}));
         }
         json!({"hasAudio":true,"seconds":rounded(seconds),"integratedLufs":self.integrated,"loudnessRangeLu":self.range,"truePeakDbtp":self.peak,
             "silence":{"thresholdDb":-40,"minSeconds":0.3,"ranges":self.ranges},"envelope":envelope})

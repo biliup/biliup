@@ -57,7 +57,7 @@ pub fn estimate(env: &[f32], cancel: &CancellationToken) -> Result<Option<(f64, 
     let mean = env.iter().map(|v| *v as f64).sum::<f64>() / n as f64;
     let x: Vec<_> = env.iter().map(|v| *v as f64 - mean).collect();
     let min_lag = (60. / 200. * RATE).floor() as usize;
-    let max_lag = (60. / 60. * RATE).ceil() as usize;
+    let max_lag = RATE.ceil() as usize;
     let mut ac = vec![0.; max_lag * 4 + 2];
     for lag in 0..ac.len().min(n) {
         check(cancel)?;
@@ -67,12 +67,12 @@ pub fn estimate(env: &[f32], cancel: &CancellationToken) -> Result<Option<(f64, 
         return Ok(None);
     }
     let mut score = vec![0.; max_lag + 2];
-    for lag in min_lag..=max_lag + 1 {
+    for (lag, score) in score.iter_mut().enumerate().skip(min_lag) {
         let s = (1..=4)
             .map(|k| at(&ac, (lag * k) as f64).max(0.) / k as f64)
             .sum::<f64>();
         let octaves = (60. * RATE / lag as f64 / 120.).log2();
-        score[lag] = s * (-0.5 * octaves * octaves).exp();
+        *score = s * (-0.5 * octaves * octaves).exp();
     }
     let mut best = min_lag;
     for lag in min_lag..=max_lag {
@@ -115,7 +115,7 @@ pub fn track(env: &[f32], period: f64, cancel: &CancellationToken) -> Result<Vec
         .collect();
     let sum = kernel.iter().sum::<f64>();
     let mut local = vec![0.; n];
-    for i in 0..n {
+    for (i, local) in local.iter_mut().enumerate() {
         if i % 4096 == 0 {
             check(cancel)?;
         }
@@ -126,7 +126,7 @@ pub fn track(env: &[f32], period: f64, cancel: &CancellationToken) -> Result<Vec
                 s += env[k as usize] as f64 * kernel[(j + half) as usize];
             }
         }
-        local[i] = s / sum / deviation;
+        *local = s / sum / deviation;
     }
     let lo = (period / 2.).round() as usize;
     let hi = (period * 2.).round() as usize;

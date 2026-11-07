@@ -53,6 +53,14 @@ pub struct Session {
     cancel: CancellationToken,
     deadline: tokio::task::JoinHandle<()>,
 }
+pub struct FrameRequest<'a> {
+    pub document: editor::Document,
+    pub frames: &'a [u64],
+    pub width: u32,
+    pub motion_blur: bool,
+    pub census: bool,
+}
+
 impl Session {
     pub async fn rehearse(
         &mut self,
@@ -218,7 +226,18 @@ impl Session {
             .ok_or("画布无效")?;
         let out = (width * (short_side as f64 / width.min(height)).min(1.)).round() as u32;
         let jpeg = self
-            .render(pool, root, project, document, &[frame], out, false, false)
+            .render(
+                pool,
+                root,
+                project,
+                FrameRequest {
+                    document,
+                    frames: &[frame],
+                    width: out,
+                    motion_blur: false,
+                    census: false,
+                },
+            )
             .await?
             .into_iter()
             .next()
@@ -234,21 +253,25 @@ impl Session {
         pool: &ConnectionPool,
         root: &Path,
         project: i64,
-        document: editor::Document,
-        frames: &[u64],
-        width: u32,
-        motion_blur: bool,
-        census: bool,
-    ) -> Result<Vec<Picture>, String> {
-        self.render_budget(
-            pool,
-            root,
-            project,
+        FrameRequest {
             document,
             frames,
             width,
             motion_blur,
             census,
+        }: FrameRequest<'_>,
+    ) -> Result<Vec<Picture>, String> {
+        self.render_budget(
+            pool,
+            root,
+            project,
+            FrameRequest {
+                document,
+                frames,
+                width,
+                motion_blur,
+                census,
+            },
             None,
         )
         .await
@@ -258,11 +281,13 @@ impl Session {
         pool: &ConnectionPool,
         root: &Path,
         project: i64,
-        document: editor::Document,
-        frames: &[u64],
-        width: u32,
-        motion_blur: bool,
-        census: bool,
+        FrameRequest {
+            document,
+            frames,
+            width,
+            motion_blur,
+            census,
+        }: FrameRequest<'_>,
         budget_ms: Option<u64>,
     ) -> Result<Vec<Picture>, String> {
         if frames.is_empty() || frames.len() > 24 || !(2..=8192).contains(&width) {
@@ -343,44 +368,62 @@ async fn prepare(
         .prefix("editor-agent-effects-")
         .tempdir()
         .map_err(|e| e.to_string())?;
-    let (mut browser, mut paths) = super::inputs::prepare(
-        pool, &mut document, &Value::Null, "picture", cancel,
-    ).await?;
+    let (mut browser, mut paths) =
+        super::inputs::prepare(pool, &mut document, &Value::Null, "picture", cancel).await?;
     let effects = async {
-        recording_effects::prepare_mask_images(&mut browser, &document.project, &Value::Null, &mut paths, temp.path()).await?;
-        recording_effects::prepare(
-            pool, &mut browser,
-            &mut document,
+        recording_effects::prepare_mask_images(
+            &mut browser,
+            &document.project,
             &Value::Null,
             &mut paths,
             temp.path(),
+        )
+        .await?;
+        recording_effects::prepare(
+            pool,
+            &mut browser,
+            recording_effects::Preparation {
+                document: &mut document,
+                range: &Value::Null,
+                paths: &mut paths,
+                directory: temp.path(),
+            },
             cancel,
             |_, _| {},
-        ).await
-    }.await;
+        )
+        .await
+    }
+    .await;
     browser.close().await;
     effects?;
     let mut untagged = BTreeMap::new();
     {
         let _permit = crate::server::common::processing::transcode::acquire(cancel).await?;
         let visible: std::collections::BTreeSet<&str> = document.project["tracks"]
-            .as_array().into_iter().flatten()
+            .as_array()
+            .into_iter()
+            .flatten()
             .filter(|track| track["hidden"] != true && track["kind"] != "audio")
             .flat_map(|track| track["items"].as_array().into_iter().flatten())
-            .filter(|item| item["type"] == "clip" || (item["type"] == "danmaku" && item["danmaku"]["settings"]["enabled"] == true))
-            .filter_map(|item| item["media"].as_str()).collect();
+            .filter(|item| {
+                item["type"] == "clip"
+                    || (item["type"] == "danmaku" && item["danmaku"]["settings"]["enabled"] == true)
+            })
+            .filter_map(|item| item["media"].as_str())
+            .collect();
         for media in document.project["media"]
             .as_array()
             .into_iter()
             .flatten()
-            .filter(|m| m["kind"] == "video" && m["id"].as_str().is_some_and(|id| visible.contains(id)))
+            .filter(|m| {
+                m["kind"] == "video" && m["id"].as_str().is_some_and(|id| visible.contains(id))
+            })
         {
-            if let Some(path) = media["id"].as_str().and_then(|id| paths.get(id)) {
-                if let Some(height) =
+            if let Some(path) = media["id"].as_str().and_then(|id| paths.get(id))
+                && let Some(height) =
                     editor::graphic_media::colour_hint(Path::new(path), cancel).await?
-                {
-                    untagged.insert(path.clone(), height);
-                }
+            {
+                untagged.insert(path.clone(), height);
             }
         }
     }

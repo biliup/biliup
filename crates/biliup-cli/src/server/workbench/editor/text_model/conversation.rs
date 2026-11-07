@@ -293,10 +293,10 @@ impl Conversation {
                                 if let Some(value) = part["text"].as_str() {
                                     text.push(value.to_string())
                                 }
-                            } else if part["type"] == "refusal" {
-                                if let Some(value) = part["refusal"].as_str() {
-                                    text.push(value.to_string())
-                                }
+                            } else if part["type"] == "refusal"
+                                && let Some(value) = part["refusal"].as_str()
+                            {
+                                text.push(value.to_string())
                             }
                         }
                     }

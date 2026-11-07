@@ -520,6 +520,10 @@ mod tests {
                 18,
                 "dd77be0c39401b245fb8291a6db4b0b3a7c56c9ca62ebf4ad0764afdb3f937b121bb25feb6c0febb79abd7b5c5aa8f18",
             ),
+            (
+                19,
+                "517da1681f3b9277489924d659e02874800b5c59a97f014e7fbd86eadf11634b90db7e5aaff398147157244d7afde462",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded

@@ -133,10 +133,10 @@ impl Platform for Twitcasting {
                     for comment in comments {
                         let mut chat = ChatMessage::new(comment.message);
 
-                        if let Some(user) = comment.from_user {
-                            if let Some(name) = user.name {
-                                chat = chat.with_name(name);
-                            }
+                        if let Some(user) = comment.from_user
+                            && let Some(name) = user.name
+                        {
+                            chat = chat.with_name(name);
                         }
 
                         events.push(DanmakuEvent::Chat(chat));

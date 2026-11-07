@@ -1,4 +1,12 @@
 //! Paged revision metadata; snapshots remain in editor_revisions and restore through normal CAS saves.
+pub struct Note<'a> {
+    pub kind: &'a str,
+    pub author: &'a str,
+    pub label: &'a str,
+    pub lines: &'a [String],
+    pub turn: Option<&'a str>,
+}
+
 use super::{ConnectionPool, Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -24,11 +32,13 @@ pub async fn write(
     tx: &mut Transaction<'_, Sqlite>,
     project: i64,
     revision: i64,
-    kind: &str,
-    author: &str,
-    label: &str,
-    lines: &[String],
-    turn: Option<&str>,
+    Note {
+        kind,
+        author,
+        label,
+        lines,
+        turn,
+    }: Note<'_>,
 ) -> Result<()> {
     sqlx::query("INSERT INTO editor_revision_notes(project_id,revision,kind,author,label,lines_json,turn_id) VALUES(?,?,?,?,?,?,?)")
         .bind(project).bind(revision).bind(kind).bind(author).bind(label).bind(serde_json::to_string(lines)?).bind(turn).execute(&mut **tx).await?;

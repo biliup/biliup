@@ -167,9 +167,9 @@ async fn pending_handbacks_can_be_abandoned_or_handed_over_at_once() {
         let ids = ids.clone();
         async move {
             for url in [a_url, b_url, c_url, d_url] {
-                if !fleet_room(url)
+                if fleet_room(url)
                     .await
-                    .is_some_and(|room| room.node_id == Some(primary))
+                    .is_none_or(|room| room.node_id != Some(primary))
                 {
                     return false;
                 }

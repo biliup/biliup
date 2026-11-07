@@ -91,7 +91,7 @@ export default function FleetRevokedBanner({
                   </Popconfirm>
                   <Popconfirm
                     title="只关闭这条提示？"
-                    content="直播间保持暂停，之后在「直播管理」里逐个恢复。暂停不再跨重启保留：本机重启后它们会照常录制。"
+                    content="直播间保持暂停，重启后也不会自动恢复。之后可在「直播管理」里逐个恢复。"
                     onConfirm={() => act('dismiss')}
                   >
                     <Button size="small" loading={pending === 'dismiss'} disabled={pending !== null}>

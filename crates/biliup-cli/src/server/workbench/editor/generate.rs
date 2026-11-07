@@ -25,24 +25,50 @@ pub(crate) async fn acknowledge_import(
     job: &str,
     turn: Option<&str>,
 ) -> Result<(), super::Error> {
-    let owner: Option<String> = sqlx::query_scalar("SELECT agent_turn_id FROM editor_generation_jobs WHERE id=? AND project_id=?")
-        .bind(job).bind(project).fetch_optional(&mut *conn).await?.flatten();
+    let owner: Option<String> = sqlx::query_scalar(
+        "SELECT agent_turn_id FROM editor_generation_jobs WHERE id=? AND project_id=?",
+    )
+    .bind(job)
+    .bind(project)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
     if let Some(owner) = owner {
-        let active: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND status='running')")
-            .bind(&owner).fetch_one(&mut *conn).await?;
+        let active: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND status='running')",
+        )
+        .bind(&owner)
+        .fetch_one(&mut *conn)
+        .await?;
         if active && turn != Some(owner.as_str()) {
-            return Err(super::invalid("助手正在处理此生成结果，请等待本轮完成或停止后再导入"));
+            return Err(super::invalid(
+                "助手正在处理此生成结果，请等待本轮完成或停止后再导入",
+            ));
         }
     }
     let raw: Option<String> = sqlx::query_scalar("SELECT result_json FROM editor_generation_jobs WHERE id=? AND project_id=? AND phase='importing'")
         .bind(job).bind(project).fetch_optional(&mut *conn).await?.flatten();
-    let mut result: Value = serde_json::from_str(&raw.ok_or_else(|| super::invalid("生成任务已处理或已取消，请刷新工程"))?)?;
-    let asset_id = result["source"]["assetId"].as_str().ok_or_else(|| super::invalid("生成素材身份无效"))?;
-    let media_id = document.project["media"].as_array().into_iter().flatten().find_map(|media| {
-        let id = media["id"].as_str()?;
-        let Some(super::MediaSource::File(source)) = document.sources.get(id) else { return None };
-        (source.asset_id == asset_id && media["path"] == result["media"]["path"] && media["kind"] == result["media"]["kind"]).then(|| id.to_owned())
-    }).ok_or_else(|| super::invalid("生成结果未加入工程素材"))?;
+    let mut result: Value = serde_json::from_str(
+        &raw.ok_or_else(|| super::invalid("生成任务已处理或已取消，请刷新工程"))?,
+    )?;
+    let asset_id = result["source"]["assetId"]
+        .as_str()
+        .ok_or_else(|| super::invalid("生成素材身份无效"))?;
+    let media_id = document.project["media"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find_map(|media| {
+            let id = media["id"].as_str()?;
+            let Some(super::MediaSource::File(source)) = document.sources.get(id) else {
+                return None;
+            };
+            (source.asset_id == asset_id
+                && media["path"] == result["media"]["path"]
+                && media["kind"] == result["media"]["kind"])
+                .then(|| id.to_owned())
+        })
+        .ok_or_else(|| super::invalid("生成结果未加入工程素材"))?;
     result["media"]["id"] = json!(media_id);
     sqlx::query("UPDATE editor_generation_jobs SET phase='done',status='已加入素材',result_json=?,updated_at=? WHERE id=?")
         .bind(serde_json::to_string(&result)?).bind(super::now_ms()).bind(job).execute(&mut *conn).await?;
@@ -292,11 +318,22 @@ impl Jobs {
     pub(crate) async fn preflight(&self, project: i64, req: Request) -> Result<Value, String> {
         let (req, key) = self.prepare(project, req).await?;
         let p = provider(&req.generator)?;
-        let provider = req.text_model.as_ref().map(|m|m.provider.as_str()).unwrap_or(p.key);
-        let model = req.text_model.as_ref().map(|m|m.model.as_str()).unwrap_or(p.model);
+        let provider = req
+            .text_model
+            .as_ref()
+            .map(|m| m.provider.as_str())
+            .unwrap_or(p.key);
+        let model = req
+            .text_model
+            .as_ref()
+            .map(|m| m.model.as_str())
+            .unwrap_or(p.model);
         let pricing = pricing::info(p.id, model, provider);
-        let cost = if key.is_empty() { "直接渲染提供的源码，不调用生成模型".into() }
-            else { pricing.describe(req.size.as_deref(), req.seconds) };
+        let cost = if key.is_empty() {
+            "直接渲染提供的源码，不调用生成模型".into()
+        } else {
+            pricing.describe(req.size.as_deref(), req.seconds)
+        };
         Ok(
             json!({"stamp":request_stamp(&req),"paid":!key.is_empty(),"provider":provider,"model":model,"generator":req.generator,"name":req.name,"kind":req.kind,"prompt":req.prompt,"size":req.size,"seconds":req.seconds,"cost":cost,"pricingSource":pricing.source(),"pricing":pricing}),
         )
@@ -487,8 +524,7 @@ impl Jobs {
         let rendered = generation::render(
             &markup,
             video,
-            width,
-            height,
+            (width, height),
             seconds,
             &self.root,
             &cancel,

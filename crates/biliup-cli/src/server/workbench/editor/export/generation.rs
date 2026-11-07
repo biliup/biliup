@@ -59,8 +59,7 @@ pub fn pixels(size: &str, canvas: &serde_json::Value) -> Result<(u32, u32), Stri
 pub async fn render(
     markup: &str,
     video: bool,
-    width: u32,
-    height: u32,
+    (width, height): (u32, u32),
     seconds: f64,
     root: &Path,
     cancel: &CancellationToken,

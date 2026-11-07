@@ -7,7 +7,6 @@ use super::{
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, sync::LazyLock, time::Duration};
-use tokio_util::sync::CancellationToken;
 static SPEC: LazyLock<Value> = LazyLock::new(|| {
     serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -56,14 +55,17 @@ fn active(value: &Value) -> bool {
 impl Service {
     pub(super) async fn export_tool(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         context: &mut RunContext,
         name: &str,
         args: &Value,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         VALIDATORS
             .get(name)
             .ok_or_else(|| invalid("未知导出工具"))?

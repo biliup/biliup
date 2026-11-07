@@ -44,14 +44,17 @@ pub fn tools() -> Vec<Tool> {
 impl Service {
     pub(super) async fn download_tool(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         context: &mut RunContext,
         name: &str,
         args: &Value,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         VALIDATORS
             .get(name)
             .ok_or_else(|| invalid("未知素材导入工具"))?
@@ -96,8 +99,15 @@ impl Service {
             None
         };
         let saved = editor::get(&self.pool, project).await?;
-        if old.as_ref().is_some_and(|old| old["source"].as_str().is_some_and(|source|source.starts_with("capture:")) && !matches!(old["phase"].as_str(),Some("ready"|"done"))){
-            return Ok(json!({"job":args["job"],"imported":false,"phase":old.as_ref().map(|job|&job["phase"]),"error":old.as_ref().map(|job|&job["error"]),"message":"录制尚未产生可导入的文件，不能作为网络下载重试；可从浏览器录制恢复中保存原文件"}));
+        if old.as_ref().is_some_and(|old| {
+            old["source"]
+                .as_str()
+                .is_some_and(|source| source.starts_with("capture:"))
+                && !matches!(old["phase"].as_str(), Some("ready" | "done"))
+        }) {
+            return Ok(
+                json!({"job":args["job"],"imported":false,"phase":old.as_ref().map(|job|&job["phase"]),"error":old.as_ref().map(|job|&job["error"]),"message":"录制尚未产生可导入的文件，不能作为网络下载重试；可从浏览器录制恢复中保存原文件"}),
+            );
         }
         if old.as_ref().is_some_and(|old| old["phase"] == "done") {
             return Ok(handled(old.as_ref().unwrap(), &saved.document));
@@ -165,8 +175,10 @@ impl Service {
             let before = context.download_budget.bytes;
             let result = {
                 let transfer = downloads::transfer(
-                    &self.pool,
-                    &self.root,
+                    editor::Storage {
+                        pool: &self.pool,
+                        root: &self.root,
+                    },
                     project,
                     &state,
                     &mut context.download_budget,
@@ -255,7 +267,8 @@ impl Service {
             }
         }
         let saved = editor::get(&self.pool, project).await?;
-        let (mut media, existing) = editor::imports::prepare_media(&saved.document.project, &result["media"])?;
+        let (mut media, existing) =
+            editor::imports::prepare_media(&saved.document.project, &result["media"])?;
         if media["id"] != result["media"]["id"] {
             result["media"]["id"] = media["id"].clone();
             let updated=sqlx::query("UPDATE editor_downloads SET result_json=?,updated_at=? WHERE id=? AND project_id=? AND agent_turn_id=? AND phase='ready' AND EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND status='running')").bind(serde_json::to_string(&result)?).bind(editor::now_ms()).bind(&id).bind(project).bind(turn).bind(turn).execute(&self.pool).await?;
@@ -273,12 +286,20 @@ impl Service {
                 .ok_or_else(|| invalid("工程帧率无效"))?;
             media["probe"]["frames"] = json!(((duration * fps / 1000.).floor() as i64).max(1));
         }
-        let previous = existing.then(|| saved.document.project["media"].as_array().unwrap().iter()
-            .find(|entry| entry["id"] == media_id).unwrap());
+        let previous = existing.then(|| {
+            saved.document.project["media"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == media_id)
+                .unwrap()
+        });
         // Reusing a local file through the library adds its registered attribution once,
         // without replacing the user's name or an existing source's provenance.
         let attach_source = previous.is_some_and(|entry| !entry["source"].is_object())
-            && media["source"]["module"].as_str().is_some_and(|module| module.starts_with("library."));
+            && media["source"]["module"]
+                .as_str()
+                .is_some_and(|module| module.starts_with("library."));
         if existing && !attach_source {
             let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             let current:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_projects p JOIN editor_agent_turns t ON t.project_id=p.id WHERE p.id=? AND p.revision=? AND t.id=? AND t.status='running')").bind(project).bind(saved.summary.revision).bind(turn).fetch_one(&mut *tx).await?;
@@ -296,7 +317,11 @@ impl Service {
         } else {
             json!({"summary":format!("导入素材：{}",media["name"].as_str().unwrap_or(&media_id)),"ops":[{"op":"add_media","media":media}]})
         };
-        let sources = if existing { Value::Null } else { json!({&media_id:result["source"]}) };
+        let sources = if existing {
+            Value::Null
+        } else {
+            json!({&media_id:result["source"]})
+        };
         let current_plan = plan::read(&self.pool, project).await?;
         if let Err(error) = plan::check_build(&current_plan, context.planning, &edit["ops"]) {
             return Ok(ready(&id, error));
@@ -334,9 +359,14 @@ impl Service {
         .await
         {
             Ok(saved) => {
-                let imported=saved.document.project["media"].as_array().and_then(|all|all.iter().find(|media|media["id"]==media_id)).ok_or(Error::NotFound)?;
-                Ok(json!({"job":id,"phase":"done","applied":true,"imported":true,"id":media_id,"media":imported,"canvas":saved.document.project["canvas"],"revision":saved.summary.revision,"note":"素材已加入当前工程，可用 timeline_edit 放入时间轴；导入包含在本轮撤销中。"}))
-            },
+                let imported = saved.document.project["media"]
+                    .as_array()
+                    .and_then(|all| all.iter().find(|media| media["id"] == media_id))
+                    .ok_or(Error::NotFound)?;
+                Ok(
+                    json!({"job":id,"phase":"done","applied":true,"imported":true,"id":media_id,"media":imported,"canvas":saved.document.project["canvas"],"revision":saved.summary.revision,"note":"素材已加入当前工程，可用 timeline_edit 放入时间轴；导入包含在本轮撤销中。"}),
+                )
+            }
             Err(error) => Ok(ready(&id, error)),
         }
     }

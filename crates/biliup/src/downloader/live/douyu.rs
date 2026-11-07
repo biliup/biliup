@@ -500,16 +500,16 @@ impl<'a> DouyuLive<'a> {
             has_hevc = info.player_1.as_ref().is_some_and(|url| !url.trim().is_empty()),
             "斗鱼播放接口返回画质"
         );
-        if let Some(actual_rate) = info.rate {
-            if actual_rate != self.douyu_rate {
-                warn!(
-                    room_id,
-                    requested_rate = self.douyu_rate,
-                    actual_rate,
-                    quality = actual.map(|quality| quality.name.as_str()),
-                    "斗鱼返回的画质与请求不同；原画可能需要有效的网页版登录 Cookie"
-                );
-            }
+        if let Some(actual_rate) = info.rate
+            && actual_rate != self.douyu_rate
+        {
+            warn!(
+                room_id,
+                requested_rate = self.douyu_rate,
+                actual_rate,
+                quality = actual.map(|quality| quality.name.as_str()),
+                "斗鱼返回的画质与请求不同；原画可能需要有效的网页版登录 Cookie"
+            );
         }
     }
 
@@ -1308,8 +1308,7 @@ mod tests {
             let response: PlayResponse = serde_json::from_str(body).unwrap();
             assert_eq!(
                 play_info_from_response(response)
-                    .err()
-                    .expect("error")
+                    .expect_err("error")
                     .to_string(),
                 expected
             );

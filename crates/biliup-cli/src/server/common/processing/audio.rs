@@ -202,10 +202,10 @@ async fn validate_packet_timestamps(path: &Path, require_aac: bool) -> AppResult
         let mut aac_packets = 0;
         while let Some(line) = lines.next_line().await? {
             if let Some(codec) = line.strip_prefix("#codec_id ") {
-                if let Some((stream, codec)) = codec.split_once(':') {
-                    if !require_aac || codec.trim() == "aac" {
-                        aac_streams.insert(stream.trim().parse::<usize>().unwrap_or(usize::MAX));
-                    }
+                if let Some((stream, codec)) = codec.split_once(':')
+                    && (!require_aac || codec.trim() == "aac")
+                {
+                    aac_streams.insert(stream.trim().parse::<usize>().unwrap_or(usize::MAX));
                 }
             } else if !line.starts_with('#') {
                 let mut fields = line.split(',').map(str::trim);

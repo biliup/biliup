@@ -18,9 +18,9 @@ pub struct Browser {
     socket: Socket,
     seq: u64,
     cancel: CancellationToken,
-    media:Option<super::super::graphic_media::ProjectFrames>,
-    context:Option<u64>,
-    main_frame:Option<String>,
+    media: Option<super::super::graphic_media::ProjectFrames>,
+    context: Option<u64>,
+    main_frame: Option<String>,
 }
 
 pub fn executable() -> Result<PathBuf, String> {
@@ -107,26 +107,25 @@ impl Browser {
                 }
                 if let Ok(text) =
                     tokio::fs::read_to_string(profile.path().join("DevToolsActivePort")).await
+                    && let Some(port) = text.lines().next().and_then(|p| p.parse::<u16>().ok())
                 {
-                    if let Some(port) = text.lines().next().and_then(|p| p.parse::<u16>().ok()) {
-                        let targets: Value = client
-                            .get(format!("http://127.0.0.1:{port}/json/list"))
-                            .send()
+                    let targets: Value = client
+                        .get(format!("http://127.0.0.1:{port}/json/list"))
+                        .send()
+                        .await
+                        .map_err(|e| e.to_string())?
+                        .json()
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    if let Some(url) = targets
+                        .as_array()
+                        .and_then(|pages| pages.iter().find(|p| p["type"] == "page"))
+                        .and_then(|page| page["webSocketDebuggerUrl"].as_str())
+                    {
+                        return tokio_tungstenite::connect_async(url)
                             .await
-                            .map_err(|e| e.to_string())?
-                            .json()
-                            .await
-                            .map_err(|e| e.to_string())?;
-                        if let Some(url) = targets
-                            .as_array()
-                            .and_then(|pages| pages.iter().find(|p| p["type"] == "page"))
-                            .and_then(|page| page["webSocketDebuggerUrl"].as_str())
-                        {
-                            return tokio_tungstenite::connect_async(url)
-                                .await
-                                .map(|(socket, _)| socket)
-                                .map_err(|e| e.to_string());
-                        }
+                            .map(|(socket, _)| socket)
+                            .map_err(|e| e.to_string());
                     }
                 }
                 tokio::time::sleep(Duration::from_millis(50)).await;
@@ -142,14 +141,22 @@ impl Browser {
             socket,
             seq: 0,
             cancel: cancel.clone(),
-            media:None,
-            context:None,
-            main_frame:None,
+            media: None,
+            context: None,
+            main_frame: None,
         };
         browser.call("Page.enable", json!({})).await?;
-        browser.main_frame=browser.call("Page.getFrameTree",json!({})).await?["frameTree"]["frame"]["id"].as_str().map(str::to_string);
-        browser.call("Runtime.enable",json!({})).await?;
-        browser.call("Runtime.addBinding",json!({"name":"__biliup_graphic_media"})).await?;
+        browser.main_frame =
+            browser.call("Page.getFrameTree", json!({})).await?["frameTree"]["frame"]["id"]
+                .as_str()
+                .map(str::to_string);
+        browser.call("Runtime.enable", json!({})).await?;
+        browser
+            .call(
+                "Runtime.addBinding",
+                json!({"name":"__biliup_graphic_media"}),
+            )
+            .await?;
         // Block requests at the protocol level as well as the page CSP. Only embedded data is drawn.
         browser
             .call("Fetch.enable", json!({"patterns":[{"urlPattern":"*"}]}))
@@ -189,30 +196,63 @@ impl Browser {
             .await
             .map_err(|e| e.to_string())?;
         let receive = async {
-            let mut media_requests=0;
+            let mut media_requests = 0;
             while let Some(message) = self.socket.next().await {
                 let message = message.map_err(|e| e.to_string())?;
                 let Message::Text(message) = message else {
                     continue;
                 };
                 let value: Value = serde_json::from_str(&message).map_err(|e| e.to_string())?;
-                if value["method"]=="Runtime.executionContextCreated" {
-                    let context=&value["params"]["context"];
-                    if context["origin"]=="https://biliup-editor.invalid"&&context["auxData"]["isDefault"]==true&&context["auxData"]["frameId"].as_str()==self.main_frame.as_deref(){self.context=context["id"].as_u64();}
-                } else if value["method"]=="Runtime.bindingCalled"&&value["params"]["name"]=="__biliup_graphic_media" {
-                    if self.context.is_none()||value["params"]["executionContextId"].as_u64()!=self.context{continue}
-                    let Some(payload)=value["params"]["payload"].as_str().filter(|s|s.len()<=2048) else{continue};
-                    let Ok(payload)=serde_json::from_str::<Value>(payload)else{continue};
-                    let Some(seq)=payload["seq"].as_u64().filter(|v|*v<=9_007_199_254_740_991)else{continue};
-                    media_requests+=1;
-                    let result=async {
-                        if media_requests>64{return Err("单帧请求的素材数量超过限制".to_string())}
-                        let request:super::super::graphic_media::Request=serde_json::from_value(payload["request"].clone()).map_err(|_|"图形素材请求无效")?;
-                        let media=self.media.as_ref().ok_or("此图形没有关联工程素材")?;
-                        media.picture(&request,&self.cancel).await
-                    }.await;
-                    let reply=match result{Ok(p)=>json!({"bytes":STANDARD.encode(p.bytes.as_slice()),"type":p.mime,"width":p.width,"height":p.height}),Err(error)=>json!({"error":error})};
-                    self.seq+=1;
+                if value["method"] == "Runtime.executionContextCreated" {
+                    let context = &value["params"]["context"];
+                    if context["origin"] == "https://biliup-editor.invalid"
+                        && context["auxData"]["isDefault"] == true
+                        && context["auxData"]["frameId"].as_str() == self.main_frame.as_deref()
+                    {
+                        self.context = context["id"].as_u64();
+                    }
+                } else if value["method"] == "Runtime.bindingCalled"
+                    && value["params"]["name"] == "__biliup_graphic_media"
+                {
+                    if self.context.is_none()
+                        || value["params"]["executionContextId"].as_u64() != self.context
+                    {
+                        continue;
+                    }
+                    let Some(payload) = value["params"]["payload"]
+                        .as_str()
+                        .filter(|s| s.len() <= 2048)
+                    else {
+                        continue;
+                    };
+                    let Ok(payload) = serde_json::from_str::<Value>(payload) else {
+                        continue;
+                    };
+                    let Some(seq) = payload["seq"]
+                        .as_u64()
+                        .filter(|v| *v <= 9_007_199_254_740_991)
+                    else {
+                        continue;
+                    };
+                    media_requests += 1;
+                    let result = async {
+                        if media_requests > 64 {
+                            return Err("单帧请求的素材数量超过限制".to_string());
+                        }
+                        let request: super::super::graphic_media::Request =
+                            serde_json::from_value(payload["request"].clone())
+                                .map_err(|_| "图形素材请求无效")?;
+                        let media = self.media.as_ref().ok_or("此图形没有关联工程素材")?;
+                        media.picture(&request, &self.cancel).await
+                    }
+                    .await;
+                    let reply = match result {
+                        Ok(p) => {
+                            json!({"bytes":STANDARD.encode(p.bytes.as_slice()),"type":p.mime,"width":p.width,"height":p.height})
+                        }
+                        Err(error) => json!({"error":error}),
+                    };
+                    self.seq += 1;
                     self.socket.send(Message::Text(json!({"id":self.seq,"method":"Runtime.evaluate","params":{"expression":format!("BiliupExport.graphicMediaReply({seq},{reply})"),"awaitPromise":false,"returnByValue":true}}).to_string().into())).await.map_err(|e|e.to_string())?;
                 } else if value["method"] == "Fetch.requestPaused" {
                     self.seq += 1;
@@ -279,7 +319,11 @@ impl Browser {
         .await?;
         Ok(())
     }
-    pub fn media(&mut self,project:&Value,paths:&std::collections::BTreeMap<String,String>){self.media=Some(super::super::graphic_media::ProjectFrames::new(project,paths));}
+    pub fn media(&mut self, project: &Value, paths: &std::collections::BTreeMap<String, String>) {
+        self.media = Some(super::super::graphic_media::ProjectFrames::new(
+            project, paths,
+        ));
+    }
 
     pub async fn png(&mut self) -> Result<Vec<u8>, String> {
         let value = self
@@ -292,15 +336,22 @@ impl Browser {
             .decode(value["data"].as_str().ok_or("渲染器未返回图像")?)
             .map_err(|e| e.to_string())
     }
-    pub async fn jpeg(&mut self)->Result<Vec<u8>,String>{
+    pub async fn jpeg(&mut self) -> Result<Vec<u8>, String> {
         let value=self.call("Page.captureScreenshot",json!({"format":"jpeg","quality":85,"fromSurface":true,"captureBeyondViewport":false})).await?;
-        STANDARD.decode(value["data"].as_str().ok_or("渲染器未返回图像")?).map_err(|e|e.to_string())
+        STANDARD
+            .decode(value["data"].as_str().ok_or("渲染器未返回图像")?)
+            .map_err(|e| e.to_string())
     }
 
     pub async fn transparent_png(&mut self) -> Result<Vec<u8>, String> {
-        self.call("Emulation.setDefaultBackgroundColorOverride", json!({"color":{"r":0,"g":0,"b":0,"a":0}})).await?;
+        self.call(
+            "Emulation.setDefaultBackgroundColorOverride",
+            json!({"color":{"r":0,"g":0,"b":0,"a":0}}),
+        )
+        .await?;
         let result = self.png().await;
-        self.call("Emulation.setDefaultBackgroundColorOverride", json!({})).await?;
+        self.call("Emulation.setDefaultBackgroundColorOverride", json!({}))
+            .await?;
         result
     }
 

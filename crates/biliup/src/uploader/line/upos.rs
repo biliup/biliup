@@ -97,21 +97,6 @@ impl Upos {
         })
     }
 
-    pub(crate) async fn upload_stream<'a, F, B>(
-        &'a self,
-        // file: std::fs::File,
-        stream: F,
-        total_size: u64,
-        limit: usize,
-    ) -> Result<impl Stream<Item = Result<(UposPart, usize)>> + 'a>
-    where
-        F: Stream<Item = Result<(B, usize)>> + 'a,
-        B: Into<Body> + Clone,
-    {
-        self.upload_stream_with_observer(stream, total_size, limit, None)
-            .await
-    }
-
     pub(crate) async fn upload_stream_with_observer<'a, F, B>(
         &'a self,
         stream: F,
@@ -157,10 +142,10 @@ impl Upos {
                 };
                 let mut attempts = 0;
                 retry(|| {
-                    if attempts > 0 {
-                        if let Some(observer) = observer {
-                            observer.chunk_retry(i + 1);
-                        }
+                    if attempts > 0
+                        && let Some(observer) = observer
+                    {
+                        observer.chunk_retry(i + 1);
                     }
                     attempts += 1;
                     async {
@@ -339,7 +324,7 @@ mod tests {
         ];
 
         let uploaded = tokio::time::timeout(Duration::from_secs(20), async {
-            upos.upload_stream(futures::stream::iter(chunks), 6, 0)
+            upos.upload_stream_with_observer(futures::stream::iter(chunks), 6, 0, None)
                 .await?
                 .try_collect::<Vec<_>>()
                 .await

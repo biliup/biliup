@@ -246,8 +246,7 @@ pub fn staged_path(root: &Path, id: &str, ext: &str) -> Result<PathBuf, Error> {
     Ok(root.join("editor-downloads").join(format!("{id}.{ext}")))
 }
 pub async fn transfer(
-    pool: &ConnectionPool,
-    root: &Path,
+    super::Storage { pool, root }: super::Storage<'_>,
     project: i64,
     job: &Value,
     budget: &mut Budget,
@@ -269,8 +268,7 @@ pub async fn transfer(
         let bytes = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let meter = bytes.clone();
         let mut result = super::library::add(
-            pool,
-            root,
+            super::Storage { pool, root },
             online,
             project,
             item,
@@ -322,7 +320,7 @@ pub async fn transfer(
         let raw = response
             .url()
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .unwrap_or("download");
         let decoded = urlencoding::decode(raw).map_err(|_| invalid("文件地址编码无效"))?;
         let mut candidate = extension(&decoded).to_ascii_lowercase();

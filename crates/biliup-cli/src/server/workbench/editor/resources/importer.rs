@@ -257,7 +257,7 @@ pub async fn download(
         let raw = response
             .url()
             .path_segments()
-            .and_then(|s| s.last())
+            .and_then(|mut s| s.next_back())
             .unwrap_or("download");
         let decoded = urlencoding::decode(raw).map_err(|_| invalid("文件地址编码无效"))?;
         let url_ext = decoded

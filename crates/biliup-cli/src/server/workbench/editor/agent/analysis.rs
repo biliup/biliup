@@ -248,13 +248,12 @@ impl Service {
                     let Some(id) = item["id"].as_str() else {
                         continue;
                     };
-                    if let Ok((path, _)) = editor::media::source(&self.pool, project, id).await {
-                        if tokio::fs::canonicalize(path)
+                    if let Ok((path, _)) = editor::media::source(&self.pool, project, id).await
+                        && tokio::fs::canonicalize(path)
                             .await
                             .is_ok_and(|p| p.starts_with(&folder))
-                        {
-                            chosen.push(item);
-                        }
+                    {
+                        chosen.push(item);
                     }
                 }
                 if chosen.is_empty() {

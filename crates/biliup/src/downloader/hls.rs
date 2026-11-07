@@ -236,8 +236,7 @@ pub async fn download(
         if pl.segments.is_empty() {
             debug!("Segments array is empty - waiting for playlist update");
         }
-        let mut seq = pl.media_sequence;
-        for segment in &pl.segments {
+        for (seq, segment) in (pl.media_sequence..).zip(&pl.segments) {
             if previous_last_segment.is_none_or(|previous| seq > previous) {
                 // 媒体序号跳号：漏掉的切片补不回来，已写的内容与下一片接不上，在这里切段，
                 // 让每个文件内部的时间戳和弹幕保持连续
@@ -280,7 +279,6 @@ pub async fn download(
                 }
                 previous_last_segment = Some(seq);
             }
-            seq += 1;
         }
 
         if !playlist_should_refresh(&pl) {
@@ -409,7 +407,7 @@ async fn download_to_file(
         let bytes = Bytes::from(pending);
         length = bytes.len() as u64;
         out.write_chunk(&bytes)?;
-        if let Some(sink) = preview.as_deref_mut() {
+        if let Some(sink) = preview {
             sink.push_fmp4_segment(bytes);
         }
     }
@@ -728,7 +726,7 @@ mod tests {
         use std::sync::{Arc, Mutex};
 
         let dir = tempfile::tempdir().unwrap();
-        let kept: Arc<Mutex<Vec<(String, Vec<u8>)>>> = Arc::default();
+        let kept = Arc::new(Mutex::new(Vec::new()));
         let file = LifecycleFile::with_hook(dir.path().join("rec").to_str().unwrap(), "ts", {
             let kept = kept.clone();
             move |name: &str| {

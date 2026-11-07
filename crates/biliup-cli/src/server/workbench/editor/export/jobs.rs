@@ -25,18 +25,37 @@ impl Jobs {
     pub fn live_snapshot(&self, id: i64) -> Option<Value> {
         lock(&self.live).get(&id).map(|(_, job)| job.clone())
     }
-    pub async fn status(&self,project:i64,id:i64)->Result<Value,String>{
-        let raw:String=sqlx::query_scalar("SELECT job_json FROM editor_exports WHERE project_id=? AND id=?").bind(project).bind(id).fetch_optional(&self.pool).await.map_err(|e|e.to_string())?.ok_or("导出任务不存在")?;
-        let mut job=match self.live_snapshot(id){Some(value)=>value,None=>serde_json::from_str(&raw).map_err(|e|e.to_string())?};
-        if job["phase"]=="done"{
-            job["download"]=json!(format!("/v1/editor/projects/{project}/exports/{id}/download?attachment=true"));
-            if job["subtitlesFile"].is_string(){job["subtitlesDownload"]=json!(format!("/v1/editor/projects/{project}/exports/{id}/download?subtitles=true&attachment=true"));}
+    pub async fn status(&self, project: i64, id: i64) -> Result<Value, String> {
+        let raw: String =
+            sqlx::query_scalar("SELECT job_json FROM editor_exports WHERE project_id=? AND id=?")
+                .bind(project)
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| e.to_string())?
+                .ok_or("导出任务不存在")?;
+        let mut job = match self.live_snapshot(id) {
+            Some(value) => value,
+            None => serde_json::from_str(&raw).map_err(|e| e.to_string())?,
+        };
+        if job["phase"] == "done" {
+            job["download"] = json!(format!(
+                "/v1/editor/projects/{project}/exports/{id}/download?attachment=true"
+            ));
+            if job["subtitlesFile"].is_string() {
+                job["subtitlesDownload"] = json!(format!(
+                    "/v1/editor/projects/{project}/exports/{id}/download?subtitles=true&attachment=true"
+                ));
+            }
         }
         Ok(job)
     }
-    pub(crate) async fn cancel_agent(&self,project:i64,turn:&str)->Result<(),String>{
+    pub(crate) async fn cancel_agent(&self, project: i64, turn: &str) -> Result<(), String> {
         let ids:Vec<i64>=sqlx::query_scalar("SELECT id FROM editor_exports WHERE project_id=? AND agent_turn_id=? AND phase IN ('queued','preparing','rendering')").bind(project).bind(turn).fetch_all(&self.pool).await.map_err(|e|e.to_string())?;
-        for id in ids{self.cancel(project,id).await?;}Ok(())
+        for id in ids {
+            self.cancel(project, id).await?;
+        }
+        Ok(())
     }
     pub fn new(pool: ConnectionPool, root: PathBuf) -> Self {
         Self {
@@ -76,53 +95,114 @@ impl Jobs {
         revision: i64,
         input: Value,
     ) -> Result<String, String> {
-        self.enqueue_inner(project,revision,input,None,None).await
+        self.enqueue_inner(project, revision, input, None, None)
+            .await
     }
     /// Retry the stored export snapshot; later project edits must not change its content or options.
     /// One child per attempt makes retries safe when a response is lost or two pages click together.
-    pub async fn retry(self:&Arc<Self>,project:i64,previous:i64)->Result<String,String>{
+    pub async fn retry(self: &Arc<Self>, project: i64, previous: i64) -> Result<String, String> {
         super::available()?;
-        let _lifecycle=MEDIA_LIFECYCLE.read().await;
-        let mut tx=self.pool.begin_with("BEGIN IMMEDIATE").await.map_err(|e|e.to_string())?;
+        let _lifecycle = MEDIA_LIFECYCLE.read().await;
+        let mut tx = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|e| e.to_string())?;
         let row=sqlx::query("SELECT revision,phase,document_json,options_json,brand_json,job_json FROM editor_exports WHERE project_id=? AND id=?")
             .bind(project).bind(previous).fetch_optional(&mut *tx).await.map_err(|e|e.to_string())?.ok_or("导出任务不存在")?;
-        if let Some(id)=sqlx::query_scalar::<_,i64>("SELECT id FROM editor_exports WHERE retry_of=? AND project_id=?")
-            .bind(previous).bind(project).fetch_optional(&mut *tx).await.map_err(|e|e.to_string())?{
+        if let Some(id) = sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM editor_exports WHERE retry_of=? AND project_id=?",
+        )
+        .bind(previous)
+        .bind(project)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        {
             return Ok(format!("editor-export-{id}"));
         }
-        if !matches!(row.get::<&str,_>("phase"),"failed"|"cancelled"){
+        if !matches!(row.get::<&str, _>("phase"), "failed" | "cancelled") {
             return Err("只能重试失败或已取消的导出".into());
         }
-        let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_projects WHERE id=?)").bind(project).fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
-        if !exists{return Err("源工程已删除，无法重试导出".into())}
-        let document:editor::Document=serde_json::from_str(row.get("document_json")).map_err(|e|e.to_string())?;
-        let options:Value=serde_json::from_str(row.get("options_json")).map_err(|e|e.to_string())?;
-        let brand:editor::fonts::Snapshot=serde_json::from_str(row.get("brand_json")).map_err(|e|e.to_string())?;
-        let mut job:Value=serde_json::from_str(row.get("job_json")).map_err(|e|e.to_string())?;
-        let object=job.as_object_mut().ok_or("导出任务内容无效")?;
-        for key in ["error","warnings","finishedAt","elapsedSeconds","encoderName","bytes","subtitlesFile","subtitleTrack","step","etaSeconds"]{object.remove(key);}
-        job["phase"]=json!("queued");job["progress"]=json!(0);job["startedAt"]=json!(chrono::Utc::now().to_rfc3339());
-        job["agent"]=json!(false);job["retryOf"]=json!(previous);
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_projects WHERE id=?)")
+                .bind(project)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+        if !exists {
+            return Err("源工程已删除，无法重试导出".into());
+        }
+        let document: editor::Document =
+            serde_json::from_str(row.get("document_json")).map_err(|e| e.to_string())?;
+        let options: Value =
+            serde_json::from_str(row.get("options_json")).map_err(|e| e.to_string())?;
+        let brand: editor::fonts::Snapshot =
+            serde_json::from_str(row.get("brand_json")).map_err(|e| e.to_string())?;
+        let mut job: Value =
+            serde_json::from_str(row.get("job_json")).map_err(|e| e.to_string())?;
+        let object = job.as_object_mut().ok_or("导出任务内容无效")?;
+        for key in [
+            "error",
+            "warnings",
+            "finishedAt",
+            "elapsedSeconds",
+            "encoderName",
+            "bytes",
+            "subtitlesFile",
+            "subtitleTrack",
+            "step",
+            "etaSeconds",
+        ] {
+            object.remove(key);
+        }
+        job["phase"] = json!("queued");
+        job["progress"] = json!(0);
+        job["startedAt"] = json!(chrono::Utc::now().to_rfc3339());
+        job["agent"] = json!(false);
+        job["retryOf"] = json!(previous);
         let id:i64=sqlx::query_scalar("INSERT INTO editor_exports(project_id,revision,phase,job_json,document_json,options_json,brand_json,retry_of,created_at) VALUES(?,?,'queued',?,?,?,?,?,?) RETURNING id")
             .bind(project).bind(row.get::<i64,_>("revision")).bind(job.to_string()).bind(row.get::<&str,_>("document_json"))
             .bind(row.get::<&str,_>("options_json")).bind(row.get::<&str,_>("brand_json")).bind(previous).bind(now_ms())
             .fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
-        job["id"]=json!(format!("editor-export-{id}"));
-        sqlx::query("UPDATE editor_exports SET job_json=? WHERE id=?").bind(job.to_string()).bind(id).execute(&mut *tx).await.map_err(|e|e.to_string())?;
-        tx.commit().await.map_err(|e|e.to_string())?;
-        let token=CancellationToken::new();
-        lock(&self.live).insert(id,(token.clone(),job));
-        let jobs=self.clone();
-        tokio::spawn(async move{jobs.run(id,project,document,brand,options,token).await;});
+        job["id"] = json!(format!("editor-export-{id}"));
+        sqlx::query("UPDATE editor_exports SET job_json=? WHERE id=?")
+            .bind(job.to_string())
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        tx.commit().await.map_err(|e| e.to_string())?;
+        let token = CancellationToken::new();
+        lock(&self.live).insert(id, (token.clone(), job));
+        let jobs = self.clone();
+        tokio::spawn(async move {
+            jobs.run(id, project, document, brand, options, token).await;
+        });
         Ok(format!("editor-export-{id}"))
     }
-    pub(crate) async fn enqueue_agent(self:&Arc<Self>,project:i64,revision:i64,input:Value,turn:&str,key:&str,cancel:&CancellationToken)->Result<String,String>{
-        self.enqueue_inner(project,revision,input,Some((turn,key)),Some(cancel)).await
+    pub(crate) async fn enqueue_agent(
+        self: &Arc<Self>,
+        project: i64,
+        revision: i64,
+        input: Value,
+        turn: &str,
+        key: &str,
+        cancel: &CancellationToken,
+    ) -> Result<String, String> {
+        self.enqueue_inner(project, revision, input, Some((turn, key)), Some(cancel))
+            .await
     }
-    async fn enqueue_inner(self:&Arc<Self>,project:i64,revision:i64,input:Value,owner:Option<(&str,&str)>,parent:Option<&CancellationToken>)->Result<String,String>{
-        if let Some((turn,key))=owner{
-            if let Some(id)=sqlx::query_scalar::<_,i64>("SELECT id FROM editor_exports WHERE project_id=? AND agent_turn_id=? AND request_key=?").bind(project).bind(turn).bind(key).fetch_optional(&self.pool).await.map_err(|e|e.to_string())?{return Ok(format!("editor-export-{id}"))}
-        }
+    async fn enqueue_inner(
+        self: &Arc<Self>,
+        project: i64,
+        revision: i64,
+        input: Value,
+        owner: Option<(&str, &str)>,
+        parent: Option<&CancellationToken>,
+    ) -> Result<String, String> {
+        if let Some((turn,key))=owner
+            && let Some(id)=sqlx::query_scalar::<_,i64>("SELECT id FROM editor_exports WHERE project_id=? AND agent_turn_id=? AND request_key=?").bind(project).bind(turn).bind(key).fetch_optional(&self.pool).await.map_err(|e|e.to_string())?{return Ok(format!("editor-export-{id}"))}
         super::available()?;
         let saved = editor::get(&self.pool, project)
             .await
@@ -141,11 +221,19 @@ impl Jobs {
         let options = json!({"quality":input["quality"],"video":input["video"],"range":input["range"],
             "burnCaptions":input["burnCaptions"].as_bool().unwrap_or(true),"motionBlur":input["motionBlur"].as_bool().unwrap_or(false),"targetLufs":target,"subtitles":input["subtitles"]});
         let parsed: Options = serde_json::from_value(options.clone()).map_err(|e| e.to_string())?;
-        let token=parent.map(CancellationToken::child_token).unwrap_or_default();let _cancel=token.clone().drop_guard();
-        let mut browser=super::browser::Browser::launch(&token).await?;
-        let preview=browser.eval(&format!("BiliupExport.exportRequest({},{options})",saved.document.project)).await;
+        let token = parent
+            .map(CancellationToken::child_token)
+            .unwrap_or_default();
+        let _cancel = token.clone().drop_guard();
+        let mut browser = super::browser::Browser::launch(&token).await?;
+        let preview = browser
+            .eval(&format!(
+                "BiliupExport.exportRequest({},{options})",
+                saved.document.project
+            ))
+            .await;
         browser.close().await;
-        let preview=preview?;
+        let preview = preview?;
         if parsed.subtitles.as_ref().is_some_and(|s| {
             s.file
                 .as_deref()
@@ -153,14 +241,22 @@ impl Jobs {
         }) {
             return Err("字幕格式无效".into());
         }
-        let name=super::filename(input["output"].as_str().unwrap_or(&saved.summary.name));
+        let name = super::filename(input["output"].as_str().unwrap_or(&saved.summary.name));
         let mut job = json!({"id":"","projectDir":format!("biliup:{project}"),"name":saved.summary.name,"output":name,
             "quality":input["quality"],"burnCaptions":options["burnCaptions"],"loudness":input["loudness"].as_str().unwrap_or("normal"),"phase":"queued","progress":0,
             "width":saved.document.project["canvas"]["width"],"height":saved.document.project["canvas"]["height"],
             "fps":saved.document.project["canvas"]["fps"],"seconds":0,"startedAt":chrono::Utc::now().to_rfc3339(),"encoder":"software","codec":input["video"]["codec"].as_str().unwrap_or("h264")});
-        job["revision"]=json!(revision);job["range"]=options["range"].clone();job["motionBlur"]=options["motionBlur"].clone();job["targetLufs"]=options["targetLufs"].clone();job["agent"]=json!(owner.is_some());
-        for key in ["width","height","fps","seconds"]{job[key]=preview[key].clone();}
-        let brand=editor::fonts::snapshot(&self.pool,&self.root,project).await.map_err(|e|e.to_string())?;
+        job["revision"] = json!(revision);
+        job["range"] = options["range"].clone();
+        job["motionBlur"] = options["motionBlur"].clone();
+        job["targetLufs"] = options["targetLufs"].clone();
+        job["agent"] = json!(owner.is_some());
+        for key in ["width", "height", "fps", "seconds"] {
+            job[key] = preview[key].clone();
+        }
+        let brand = editor::fonts::snapshot(&self.pool, &self.root, project)
+            .await
+            .map_err(|e| e.to_string())?;
         let mut tx = self
             .pool
             .begin_with("BEGIN IMMEDIATE")
@@ -174,14 +270,28 @@ impl Jobs {
         if current != revision {
             return Err("工程已改变，请重新导出".into());
         }
-        if let Some((turn,key))=owner{
+        if let Some((turn, key)) = owner {
             let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND project_id=? AND status='running')").bind(turn).bind(project).fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
-            if !active{return Err("助手已停止，未提交导出".into())}
+            if !active {
+                return Err("助手已停止，未提交导出".into());
+            }
             if let Some(id)=sqlx::query_scalar::<_,i64>("SELECT id FROM editor_exports WHERE project_id=? AND agent_turn_id=? AND request_key=?").bind(project).bind(turn).bind(key).fetch_optional(&mut *tx).await.map_err(|e|e.to_string())?{return Ok(format!("editor-export-{id}"))}
-            let count:i64=sqlx::query_scalar("SELECT COUNT(*) FROM editor_exports WHERE agent_turn_id=?").bind(turn).fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
-            if count>=3{return Err("本轮最多提交 3 次导出，请先查看已有任务".into())}
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM editor_exports WHERE agent_turn_id=?")
+                    .bind(turn)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            if count >= 3 {
+                return Err("本轮最多提交 3 次导出，请先查看已有任务".into());
+            }
             let busy:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_exports WHERE project_id=? AND phase IN ('queued','preparing','rendering'))").bind(project).fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
-            if busy{return Err("工程已有导出任务正在运行，请用 export_status 查看进度，完成后再提交新的导出".into())}
+            if busy {
+                return Err(
+                    "工程已有导出任务正在运行，请用 export_status 查看进度，完成后再提交新的导出"
+                        .into(),
+                );
+            }
         }
         let id:i64=sqlx::query_scalar("INSERT INTO editor_exports(project_id,revision,phase,job_json,document_json,options_json,created_at,brand_json,agent_turn_id,request_key) VALUES(?,?,'queued',?,?,?,?,?,?,?) RETURNING id")
             .bind(project).bind(revision).bind(job.to_string()).bind(serde_json::to_string(&saved.document).map_err(|e|e.to_string())?).bind(options.to_string()).bind(now_ms()).bind(serde_json::to_string(&brand).map_err(|e|e.to_string())?).bind(owner.map(|o|o.0)).bind(owner.map(|o|o.1)).fetch_one(&mut *tx).await.map_err(|e|e.to_string())?;
@@ -195,20 +305,34 @@ impl Jobs {
         tx.commit().await.map_err(|e| e.to_string())?;
         let token = CancellationToken::new();
         lock(&self.live).insert(id, (token.clone(), job));
-        if parent.is_some_and(CancellationToken::is_cancelled){token.cancel();}
-        if let Some((turn,_))=owner{let active=sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND status='running')").bind(turn).fetch_one(&self.pool).await.unwrap_or(false);if !active{token.cancel();}}
+        if parent.is_some_and(CancellationToken::is_cancelled) {
+            token.cancel();
+        }
+        if let Some((turn, _)) = owner {
+            let active = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS(SELECT 1 FROM editor_agent_turns WHERE id=? AND status='running')",
+            )
+            .bind(turn)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(false);
+            if !active {
+                token.cancel();
+            }
+        }
         let jobs = self.clone();
         tokio::spawn(async move {
-            jobs.run(id, project, saved.document, brand, options, token).await;
+            jobs.run(id, project, saved.document, brand, options, token)
+                .await;
         });
         Ok(format!("editor-export-{id}"))
     }
     async fn run(
         self: Arc<Self>,
         id: i64,
-        project:i64,
+        project: i64,
         mut document: editor::Document,
-        brand:editor::fonts::Snapshot,
+        brand: editor::fonts::Snapshot,
         options: Value,
         cancel: CancellationToken,
     ) {
@@ -227,38 +351,19 @@ impl Jobs {
                 .prefix("editor-effects-")
                 .tempdir()
                 .map_err(|e| e.to_string())?;
-            super::recording_effects::prepare(
-                &self.pool,
-                &mut browser,
-                &mut document,
-                &options["range"],
-                &mut paths,
-                effects.path(),
-                &cancel,
-                |done, total| {
+            super::recording_effects::prepare(&self.pool, &mut browser, super::recording_effects::Preparation { document: &mut document, range: &options["range"], paths: &mut paths, directory: effects.path() }, &cancel, |done, total| {
                     if let Some((_, job)) = lock(&self.live).get_mut(&id) {
                         job["phase"] = json!("preparing");
                         job["step"] = json!({"kind":"graphics","done":done,"total":total})
                     }
-                },
-            )
+                })
             .await?;
             let picture: std::collections::BTreeSet<String> = serde_json::from_value(browser.eval(&format!(
                 "BiliupExport.pictureItemIds({},{})",document.project,options["range"],
             )).await?).map_err(|error|format!("画面素材计划无效：{error}"))?;
             let graphics=editor::graphics::load_for_render(&self.pool,project,&document.project,Some(&picture)).await.map_err(|e|e.to_string())?;
             let assets=editor::fonts::materialize(&self.root,&brand).await;
-            super::render_graphics(
-                document.project,
-                paths,
-                graphics,
-                assets,
-                serde_json::from_value(options).map_err(|e| e.to_string())?,
-                &self.root,
-                &self.path(id),
-                &cancel,
-                Some(browser),
-                |progress| {
+            super::render_graphics(super::RenderProject { project: document.project, paths, graphics, assets }, serde_json::from_value(options).map_err(|e| e.to_string())?, &self.root, &self.path(id), &cancel, Some(browser), |progress| {
                     if let Some((_, job)) = lock(&self.live).get_mut(&id) {
                         match progress {
                             Progress::Sound { done, total } => {
@@ -307,8 +412,7 @@ impl Jobs {
                             }
                         }
                     }
-                },
-            )
+                })
             .await
         }
         .await;

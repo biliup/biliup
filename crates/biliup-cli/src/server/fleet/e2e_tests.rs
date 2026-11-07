@@ -2319,7 +2319,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     )
     .await;
     landed(&member()).await;
-    toggle_pause(&s.managers, local_id).await;
+    toggle_pause(&s.managers, local_id).await.unwrap();
     member().scan().await;
     eventually(
         "a standby pause reaches the controller",

@@ -464,7 +464,7 @@ async fn publishing_clips_cannot_be_reexported_and_lose_the_upload_source() {
         .publisher
         .enqueue(
             f.ended,
-            &[clip.clone()],
+            std::slice::from_ref(&clip),
             Default::default(),
             Mode::Quick,
             None,

@@ -2,7 +2,7 @@
 use super::{ConnectionPool, Error, invalid};
 use rust_embed::Embed;
 use serde_json::{Value, json};
-use std::{path::Path, sync::LazyLock};
+use std::sync::LazyLock;
 use tokio_util::sync::CancellationToken;
 #[derive(Embed)]
 #[folder = "../../public/editor-sfx/"]
@@ -41,8 +41,7 @@ async fn identity(pool: &ConnectionPool, project: i64, mut entry: Value) -> Resu
 }
 
 pub async fn add(
-    pool: &ConnectionPool,
-    root: &Path,
+    super::Storage { pool, root }: super::Storage<'_>,
     online: &super::online_library::Library,
     project: i64,
     id: &str,

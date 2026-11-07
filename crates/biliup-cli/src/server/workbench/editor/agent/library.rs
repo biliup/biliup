@@ -42,14 +42,17 @@ pub fn tools() -> Vec<Tool> {
 impl Service {
     pub(super) async fn library_tool(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         context: &mut RunContext,
         name: &str,
         args: &Value,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         VALIDATORS
             .get(name)
             .ok_or_else(|| invalid("未知素材库工具"))?
@@ -173,11 +176,16 @@ impl Service {
         }
     }
 
-    async fn online_library_search(&self, query: &Value, cancel: &CancellationToken) -> Result<Value, Error> {
+    async fn online_library_search(
+        &self,
+        query: &Value,
+        cancel: &CancellationToken,
+    ) -> Result<Value, Error> {
         // Reuse the portable search core, including aliases and Chinese terms. Keep
         // one runtime for preparation and ranking, and close it on every outcome.
         let mut runtime = editor::export::browser::Browser::launch(cancel)
-            .await.map_err(Error::Invalid)?;
+            .await
+            .map_err(Error::Invalid)?;
         let result = async {
             let prepared = runtime.eval(&format!("BiliupExport.prepareLibrarySearch({query})"))
                 .await.map_err(Error::Invalid)?;

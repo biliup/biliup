@@ -8,7 +8,6 @@ use crate::server::common::processing::{engine, transcode};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::time::Duration;
-use tokio_util::sync::CancellationToken;
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
@@ -16,14 +15,17 @@ fn invalid(message: impl Into<String>) -> Error {
 impl Service {
     pub(super) async fn brand_reference(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         revision: i64,
         context: &mut RunContext,
         state: &Value,
         args: &Value,
-        cancel: &CancellationToken,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         let source = args["path"].as_str().unwrap();
         let id = args["kit"]
             .as_str()
@@ -56,7 +58,18 @@ impl Service {
             "svg" | "png" | "jpg" | "jpeg" | "webp" | "gif"
         ) {
             let (image, url) = self
-                .brand_picture(project, turn, revision, scope, kit, name, "mark", cancel)
+                .brand_picture(
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
+                    revision,
+                    scope,
+                    kit,
+                    name,
+                    "mark",
+                )
                 .await?;
             context.images.push(image);
             return Ok(

@@ -42,6 +42,12 @@ pub(crate) async fn record_changes(
     Ok(())
 }
 
+pub(super) struct Profile<'a> {
+    pub(super) analyzer: &'a str,
+    pub(super) model: Option<&'a str>,
+    pub(super) language: &'a str,
+}
+
 impl Jobs {
     pub async fn retry_restore(
         &self,
@@ -140,9 +146,12 @@ impl Jobs {
         project: i64,
         media: &str,
         version: &str,
-        analyzer: &str,
-        model: Option<&str>,
-        language: &str,
+        Profile {
+            analyzer,
+            model,
+            language,
+        }: Profile<'_>,
+
         key: &str,
     ) -> Result<(), Error> {
         sqlx::query("INSERT INTO editor_analysis_profiles(project_id,media_id,version,analyzer,model,language,cache_key,updated_at) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(project_id,media_id,version,analyzer,model,language) DO UPDATE SET cache_key=excluded.cache_key,updated_at=excluded.updated_at").bind(project).bind(media).bind(version).bind(analyzer).bind(model.unwrap_or("")).bind(language).bind(key).bind(super::super::now_ms()).execute(&self.pool).await?;
@@ -185,19 +194,21 @@ impl Jobs {
                     .as_ref()
                     .map(|m| format!("transcript-v1-{m}-auto"))
                     .unwrap_or(analyzer.into());
-                if let Ok(key) = fingerprint_for(&path, seconds, &cache_analyzer).await {
-                    if read_for(&self.root, &key, analyzer).await.is_some() {
-                        self.remember_profile(
-                            project,
-                            &media_id,
-                            &previous_version,
+                if let Ok(key) = fingerprint_for(&path, seconds, &cache_analyzer).await
+                    && read_for(&self.root, &key, analyzer).await.is_some()
+                {
+                    self.remember_profile(
+                        project,
+                        &media_id,
+                        &previous_version,
+                        Profile {
                             analyzer,
-                            model.as_deref(),
-                            "auto",
-                            &key,
-                        )
-                        .await?;
-                    }
+                            model: model.as_deref(),
+                            language: "auto",
+                        },
+                        &key,
+                    )
+                    .await?;
                 }
             }
         }

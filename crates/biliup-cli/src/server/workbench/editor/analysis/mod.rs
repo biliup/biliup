@@ -24,6 +24,13 @@ use tokio_util::sync::CancellationToken;
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+pub struct CacheQuery<'a> {
+    pub analyzer: &'a str,
+    pub requested_language: &'a str,
+    pub version: Option<&'a str>,
+    pub selected_model: Option<&'a str>,
+}
+
 fn invalid(message: impl Into<String>) -> Error {
     Error::Invalid(message.into())
 }
@@ -296,18 +303,30 @@ impl Jobs {
         omit: &[String],
         requested_language: &str,
     ) -> Result<Value, Error> {
-        self.cached_version(project, media_id, analyzer, omit, requested_language, None, None)
-            .await
+        self.cached_version(
+            project,
+            media_id,
+            CacheQuery {
+                analyzer,
+                requested_language,
+                version: None,
+                selected_model: None,
+            },
+            omit,
+        )
+        .await
     }
     pub async fn cached_version(
         &self,
         project: i64,
         media_id: &str,
-        analyzer: &str,
+        CacheQuery {
+            analyzer,
+            requested_language,
+            version,
+            selected_model,
+        }: CacheQuery<'_>,
         omit: &[String],
-        requested_language: &str,
-        version: Option<&str>,
-        selected_model: Option<&str>,
     ) -> Result<Value, Error> {
         let language = language(requested_language)?;
         let _lifecycle = MEDIA_LIFECYCLE.read().await;
@@ -317,7 +336,10 @@ impl Jobs {
         }
         let seconds = source.duration_ms().unwrap_or(0) as f64 / 1000.;
         let cache_analyzer = if analyzer == "transcript" {
-            let model=match selected_model{Some(id)=>speech_models::model(id).map_err(invalid)?.id.to_owned(),None=>self.models.selected().await};
+            let model = match selected_model {
+                Some(id) => speech_models::model(id).map_err(invalid)?.id.to_owned(),
+                None => self.models.selected().await,
+            };
             format!("transcript-v1-{model}-{language}")
         } else {
             analyzer.to_owned()
@@ -435,21 +457,21 @@ impl Jobs {
                     project,
                     &media_id,
                     &version,
-                    &analyzer,
-                    model.as_deref(),
-                    language,
+                    restore::Profile {
+                        analyzer: &analyzer,
+                        model: model.as_deref(),
+                        language,
+                    },
                     &key,
                 )
                 .await?;
             }
-            if !cached {
-                if let Some(model) = &model {
-                    speech_models::model(model).map_err(invalid)?;
-                    if speech_models::binary().is_none() {
-                        return Err(invalid(
-                            "未找到 whisper-cli，请先配置服务器上的 whisper.cpp",
-                        ));
-                    }
+            if !cached && let Some(model) = &model {
+                speech_models::model(model).map_err(invalid)?;
+                if speech_models::binary().is_none() {
+                    return Err(invalid(
+                        "未找到 whisper-cli，请先配置服务器上的 whisper.cpp",
+                    ));
                 }
             }
             targets.push((analyzer, key, cached, model, cache_analyzer));
@@ -585,7 +607,7 @@ impl Jobs {
                 }
             }else{measure_for(&self.root,&path,seconds,&entry.analyzer,&entry.cancel,|fraction|lock(&entry.job)["progress"]=json!(fraction)).await?;}
             let media_ids=lock(&entry.job)["mediaIds"].as_array().cloned().unwrap_or_default();
-            for media_id in media_ids.iter().filter_map(Value::as_str){self.remember_profile(entry.project,media_id,&entry.version,&entry.analyzer,entry.model.as_deref(),&entry.language,&entry.key).await.map_err(|e|e.to_string())?;}
+            for media_id in media_ids.iter().filter_map(Value::as_str){self.remember_profile(entry.project, media_id, &entry.version, restore::Profile { analyzer: &entry.analyzer, model: entry.model.as_deref(), language: &entry.language }, &entry.key).await.map_err(|e|e.to_string())?;}
             Ok::<_,String>(())
         }.await;
         let mut job = lock(&entry.job);

@@ -56,20 +56,19 @@ impl UploadLock {
         // 检查锁文件是否存在
         if self.lock_path.exists() {
             // 检查锁是否过期（超过30分钟认为是僵尸锁）
-            if let Ok(metadata) = fs::metadata(&self.lock_path) {
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                        if elapsed > STALE_AFTER {
-                            warn!("检测到过期锁文件，自动清理: {:?}", self.lock_path);
-                            let _ = fs::remove_file(&self.lock_path);
-                        } else {
-                            info!(
-                                "检测到其他进程正在使用该账号上传（锁文件: {:?}）",
-                                self.lock_path
-                            );
-                            return Ok(false);
-                        }
-                    }
+            if let Ok(metadata) = fs::metadata(&self.lock_path)
+                && let Ok(modified) = metadata.modified()
+                && let Ok(elapsed) = SystemTime::now().duration_since(modified)
+            {
+                if elapsed > STALE_AFTER {
+                    warn!("检测到过期锁文件，自动清理: {:?}", self.lock_path);
+                    let _ = fs::remove_file(&self.lock_path);
+                } else {
+                    info!(
+                        "检测到其他进程正在使用该账号上传（锁文件: {:?}）",
+                        self.lock_path
+                    );
+                    return Ok(false);
                 }
             }
         }

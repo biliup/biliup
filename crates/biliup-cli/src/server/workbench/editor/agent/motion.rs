@@ -150,11 +150,13 @@ pub async fn collect(
                     pool,
                     root,
                     project,
-                    document.clone(),
-                    chunk,
-                    width,
-                    false,
-                    false,
+                    editor::export::frames::FrameRequest {
+                        document: document.clone(),
+                        frames: chunk,
+                        width,
+                        motion_blur: false,
+                        census: false,
+                    },
                     Some(remaining.as_millis() as u64),
                 )
                 .await
@@ -215,11 +217,13 @@ pub async fn collect(
                             pool,
                             root,
                             project,
-                            document.clone(),
-                            chunk,
-                            width,
-                            false,
-                            false,
+                            editor::export::frames::FrameRequest {
+                                document: document.clone(),
+                                frames: chunk,
+                                width,
+                                motion_blur: false,
+                                census: false,
+                            },
                             Some(remaining.as_millis() as u64),
                         )
                         .await
@@ -284,11 +288,13 @@ pub async fn collect(
                     pool,
                     root,
                     project,
-                    document.clone(),
-                    &frames,
-                    360,
-                    true,
-                    false,
+                    editor::export::frames::FrameRequest {
+                        document: document.clone(),
+                        frames: &frames,
+                        width: 360,
+                        motion_blur: true,
+                        census: false,
+                    },
                 )
                 .await
                 .map_err(invalid)?;

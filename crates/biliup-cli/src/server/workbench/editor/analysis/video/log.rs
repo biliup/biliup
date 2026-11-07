@@ -68,10 +68,9 @@ impl VideoLog {
             } else if self.input == 1
                 && let Some(m) = p[3].captures(text)
                 && let Some(angle) = number(&m[1])
+                && ((angle / 90.).round() as i64) % 2 != 0
             {
-                if ((angle / 90.).round() as i64) % 2 != 0 {
-                    self.display = self.display.map(|(w, h)| (h, w));
-                }
+                self.display = self.display.map(|(w, h)| (h, w));
             }
         }
         if let Some(m) = p[4].captures(text) {
@@ -119,10 +118,10 @@ impl VideoLog {
         Ok(())
     }
     pub fn close_freeze(&mut self, end: f64) {
-        if let Some(start) = self.freeze_start.take() {
-            if end > start {
-                self.frozen.push((start, end));
-            }
+        if let Some(start) = self.freeze_start.take()
+            && end > start
+        {
+            self.frozen.push((start, end));
         }
     }
 }

@@ -1,4 +1,29 @@
 //! Shared video effects: source inputs -> one filter graph -> one final encode.
+struct FilterGraph<'a> {
+    source: &'a SourceSpan,
+    settings: &'a RenderRecipe,
+    media: &'a MediaInfo,
+    target: (u32, u32),
+    origin: i64,
+    ass: Option<&'a Path>,
+    font_dir: Option<&'a Path>,
+    repair_audio: bool,
+    image_inputs: &'a HashMap<i64, usize>,
+    audio_input: usize,
+    frame_rate: &'a str,
+    input: usize,
+    prefix: &'a str,
+}
+
+pub(crate) struct DanmakuLayer<'a> {
+    pub(crate) source: &'a SourceSpan,
+    pub(crate) settings: &'a super::model::DanmakuSettings,
+    pub(crate) size: (u32, u32),
+    pub(crate) fps: f64,
+    pub(crate) window: (u64, u64),
+    pub(crate) output: &'a Path,
+}
+
 use super::encoding::{self, EncoderCapability, SelectedEncoder};
 use super::model::{EffectType, MaskRegion, RenderRecipe, RenderSource};
 use serde::Serialize;
@@ -183,12 +208,25 @@ fn audio_processing_time(line: &[u8]) -> Option<i64> {
     let line = std::str::from_utf8(line).ok()?;
     let line = line.strip_prefix("[ashowinfo@biliup_audio_progress @")?;
     let (_, fields) = line.split_once("] ")?;
-    let number = |key: &str| fields.split_whitespace().find_map(|part| part.strip_prefix(key))?.parse::<f64>().ok();
+    let number = |key: &str| {
+        fields
+            .split_whitespace()
+            .find_map(|part| part.strip_prefix(key))?
+            .parse::<f64>()
+            .ok()
+    };
     let seconds = number("pts_time:")?;
     let rate = number("rate:")?;
     let samples = number("nb_samples:")?;
-    if !seconds.is_finite() || seconds < 0. || !rate.is_finite() || rate <= 0.
-        || !samples.is_finite() || samples <= 0. { return None; }
+    if !seconds.is_finite()
+        || seconds < 0.
+        || !rate.is_finite()
+        || rate <= 0.
+        || !samples.is_finite()
+        || samples <= 0.
+    {
+        return None;
+    }
     let millis = (seconds + samples / rate) * 1000.;
     (millis.is_finite() && millis < i64::MAX as f64).then_some(millis.round() as i64)
 }
@@ -232,15 +270,19 @@ pub(crate) async fn run_process(
             }
             for part in buffer[..n].split_inclusive(|byte| *byte == b'\n') {
                 if !oversized {
-                    if line.len() + part.len() <= MAX_DIAGNOSTICS { line.extend_from_slice(part); }
-                    else { line.clear(); oversized = true; }
+                    if line.len() + part.len() <= MAX_DIAGNOSTICS {
+                        line.extend_from_slice(part);
+                    } else {
+                        line.clear();
+                        oversized = true;
+                    }
                 }
                 if part.last() == Some(&b'\n') {
-                    if !oversized {
-                        if let Some(at) = audio_processing_time(&line).filter(|at| *at > last_audio) {
-                            last_audio = at;
-                            let _ = audio_progress.send_replace(Some(at));
-                        }
+                    if !oversized
+                        && let Some(at) = audio_processing_time(&line).filter(|at| *at > last_audio)
+                    {
+                        last_audio = at;
+                        let _ = audio_progress.send_replace(Some(at));
                     }
                     line.clear();
                     oversized = false;
@@ -262,10 +304,8 @@ pub(crate) async fn run_process(
     let outcome = loop {
         // Drain the final progress=end block even if wait() becomes ready
         // before the pipe. Otherwise fast encodes can lose all telemetry.
-        if !stdout_open {
-            if let Some(status) = exit_status.take() {
-                break status;
-            }
+        if !stdout_open && let Some(status) = exit_status.take() {
+            break status;
         }
         tokio::select! {
             _ = cancel.cancelled() => { break Err("合成已取消".to_string()); }
@@ -284,12 +324,11 @@ pub(crate) async fn run_process(
                     Ok(Some(line)) => {
                         let at = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms="))
                             .and_then(|v| v.parse::<i64>().ok()).map(|v| v / 1000);
-                        if let Some(at) = at {
-                            if at > latest {
+                        if let Some(at) = at
+                            && at > latest {
                                 latest = at;
                                 watch.as_mut().reset(tokio::time::Instant::now() + stall);
                             }
-                        }
                         let frame = line.strip_prefix("frame=").and_then(|v| v.trim().parse::<i64>().ok());
                         if let Some(frame) = frame.filter(|frame| *frame > latest_frame) {
                             latest_frame = frame;
@@ -528,19 +567,21 @@ fn enable(region: &MaskRegion, source: &SourceSpan, origin: i64) -> Option<Strin
 /// Coordinates refer to the actual source frame; scaling/padding is performed
 /// after masks so a changing aspect ratio cannot expose a strip underneath.
 fn filter_graph(
-    source: &SourceSpan,
-    settings: &RenderRecipe,
-    media: &MediaInfo,
-    target: (u32, u32),
-    origin: i64,
-    ass: Option<&Path>,
-    font_dir: Option<&Path>,
-    repair_audio: bool,
-    image_inputs: &HashMap<i64, usize>,
-    audio_input: usize,
-    frame_rate: &str,
-    input: usize,
-    prefix: &str,
+    FilterGraph {
+        source,
+        settings,
+        media,
+        target,
+        origin,
+        ass,
+        font_dir,
+        repair_audio,
+        image_inputs,
+        audio_input,
+        frame_rate,
+        input,
+        prefix,
+    }: FilterGraph<'_>,
 ) -> String {
     let mut parts = vec![format!(
         "[SOURCE:v:0]setpts=PTS-({:.9})/TB-({})/TB,format=rgb24[v0]",
@@ -676,12 +717,15 @@ pub(crate) async fn render_with_permit(
 
 /// A source-clock text layer, retaining alpha for the editor's track compositor.
 pub(crate) async fn render_danmaku_layer(
-    source: &SourceSpan,
-    settings: &super::model::DanmakuSettings,
-    size: (u32, u32),
-    fps: f64,
-    window: (u64, u64),
-    output: &Path,
+    DanmakuLayer {
+        source,
+        settings,
+        size,
+        fps,
+        window,
+        output,
+    }: DanmakuLayer<'_>,
+
     cancel: &CancellationToken,
     mut report: impl FnMut(i64) + Send,
 ) -> Result<(), String> {
@@ -911,21 +955,21 @@ async fn render_internal(
         } else {
             None
         };
-        graph.push(filter_graph(
+        graph.push(filter_graph(FilterGraph {
             source,
-            &request.settings,
-            &media[n],
+            settings: &request.settings,
+            media: &media[n],
             target,
             origin,
             ass,
-            font_dir.as_deref(),
-            audio_repair[n],
-            &images,
-            silent,
-            &first.frame_rate,
-            n,
-            &format!("s{n}"),
-        ));
+            font_dir: font_dir.as_deref(),
+            repair_audio: audio_repair[n],
+            image_inputs: &images,
+            audio_input: silent,
+            frame_rate: &first.frame_rate,
+            input: n,
+            prefix: &format!("s{n}"),
+        }));
         links.push_str(&format!("[s{n}video][s{n}audio]"));
     }
     graph.push(format!(
@@ -1058,19 +1102,25 @@ pub async fn process_video(
     settings: &RenderRecipe,
     source: Option<&SourceSpan>,
 ) -> Result<PathBuf, String> {
-    let mut observation=crate::server::common::upload_observation::TaskObservation::current()
-        .map(|task|task.begin_processing("rendering",input));
-    let result=process_video_observed(input,xml,settings,source,observation.as_ref()).await;
-    if let Some(observation)=observation.as_mut(){
-        match &result {Ok(path)=>observation.finish(Some(path),None),Err(error)=>observation.finish(None,Some(error))}
+    let mut observation = crate::server::common::upload_observation::TaskObservation::current()
+        .map(|task| task.begin_processing("rendering", input));
+    let result = process_video_observed(input, xml, settings, source, observation.as_ref()).await;
+    if let Some(observation) = observation.as_mut() {
+        match &result {
+            Ok(path) => observation.finish(Some(path), None),
+            Err(error) => observation.finish(None, Some(error)),
+        }
     }
     result
 }
 
 async fn process_video_observed(
-    input:&Path,xml:Option<&Path>,settings:&RenderRecipe,source:Option<&SourceSpan>,
-    observation:Option<&crate::server::common::upload_observation::ProcessingObservation>,
-) -> Result<PathBuf,String> {
+    input: &Path,
+    xml: Option<&Path>,
+    settings: &RenderRecipe,
+    source: Option<&SourceSpan>,
+    observation: Option<&crate::server::common::upload_observation::ProcessingObservation>,
+) -> Result<PathBuf, String> {
     if super::masking::is_unmasked(input) && settings.regions.is_empty() {
         return Err("隔离原片需要有效遮挡配置，禁止发布为普通录像".into());
     }
@@ -1098,7 +1148,9 @@ async fn process_video_observed(
     span.path = input.to_owned();
     span.danmaku_path = xml.map(Path::to_owned).or(span.danmaku_path);
     let output = automatic_output_path(input, span.source_session_id);
-    if let Some(task)=observation {task.progress(0,Some(span.trim_end_ms-span.trim_start_ms));}
+    if let Some(task) = observation {
+        task.progress(0, Some(span.trim_end_ms - span.trim_start_ms));
+    }
     render(
         EngineRequest {
             sources: vec![span],
@@ -1110,7 +1162,7 @@ async fn process_video_observed(
         cancel,
         |progress| {
             if let Some(task) = observation {
-                task.progress(progress.processed_ms.unwrap_or(0),progress.total_ms);
+                task.progress(progress.processed_ms.unwrap_or(0), progress.total_ms);
             }
         },
     )

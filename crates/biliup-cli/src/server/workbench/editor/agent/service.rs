@@ -79,8 +79,8 @@ pub(super) struct RunContext {
     pub download_budget: editor::downloads::Budget,
     pub export_ranges: Vec<Value>,
     pub library_searches: usize,
-    pub web_searches:usize,
-    pub web_search_cache:HashMap<String,Value>,
+    pub web_searches: usize,
+    pub web_search_cache: HashMap<String, Value>,
     pub model: text_model::Settings,
     pub review: review::State,
     pub access: Access,
@@ -139,7 +139,7 @@ impl Service {
     pub async fn initialize(&self) -> sqlx::Result<()> {
         store::initialize(&self.pool).await?;
         sqlx::query("UPDATE editor_downloads SET phase='cancelled',error='服务重启，录制请求已停止；可从浏览器录制恢复中保存原文件',updated_at=? WHERE phase IN ('capture-waiting','capture-recording','capture-uploading')").bind(editor::now_ms()).execute(&self.pool).await?;
-        editor::downloads::initialize(&self.pool,&self.root).await
+        editor::downloads::initialize(&self.pool, &self.root).await
     }
     pub fn stop(&self) {
         self.stop.cancel();
@@ -294,11 +294,17 @@ impl Service {
             }
         }
         // References identify this turn's real image bytes; they are not filesystem paths.
-        let attachments = request.images.iter().map(|image| json!({
-            "source":attachment_id(image),
-            "name":image.name.chars().take(240).collect::<String>(),
-            "mimeType":image.mime_type
-        })).collect::<Vec<_>>();
+        let attachments = request
+            .images
+            .iter()
+            .map(|image| {
+                json!({
+                    "source":attachment_id(image),
+                    "name":image.name.chars().take(240).collect::<String>(),
+                    "mimeType":image.mime_type
+                })
+            })
+            .collect::<Vec<_>>();
         // Validate before admission or a paid request. Bytes stay in this run unless
         // an explicit brand_write imports one into the shared brand asset store.
         conversation
@@ -355,32 +361,40 @@ impl Service {
                 tokio::select! { _ = caller.revoked() => revoke_token.cancel(), _ = revoke_token.cancelled() => {} }
             });
             let started = std::time::Instant::now();
-            let result = std::panic::AssertUnwindSafe(service.run(
-                project,
-                &turn,
-                RunContext {
-                    create_decisions: HashMap::new(),
-                    download_budget: Default::default(),
-                    export_ranges: request.ranges.clone(),
-                    library_searches: 0,
-                    web_searches:0,
-                    web_search_cache:HashMap::new(),
-                    model: settings,
-                    review: Default::default(),
-                    access: request.access,
-                    planning: false,
-                    sent_back: false,
-                    skip_storyboard: request.skip_storyboard,
-                    delegate_plan: request.delegate_plan,
-                    images: vec![],
-                    looked: Default::default(),
-                    attachments: request.images.into_iter().map(|image| (attachment_id(&image), image)).collect(),
-                },
-                conversation,
-                key,
-                &cancel,
-                &mut data,
-            ))
+            let result = std::panic::AssertUnwindSafe(
+                service.run(
+                    super::Turn {
+                        project,
+                        id: &turn,
+                        cancel: &cancel,
+                    },
+                    RunContext {
+                        create_decisions: HashMap::new(),
+                        download_budget: Default::default(),
+                        export_ranges: request.ranges.clone(),
+                        library_searches: 0,
+                        web_searches: 0,
+                        web_search_cache: HashMap::new(),
+                        model: settings,
+                        review: Default::default(),
+                        access: request.access,
+                        planning: false,
+                        sent_back: false,
+                        skip_storyboard: request.skip_storyboard,
+                        delegate_plan: request.delegate_plan,
+                        images: vec![],
+                        looked: Default::default(),
+                        attachments: request
+                            .images
+                            .into_iter()
+                            .map(|image| (attachment_id(&image), image))
+                            .collect(),
+                    },
+                    conversation,
+                    key,
+                    &mut data,
+                ),
+            )
             .catch_unwind()
             .await
             .unwrap_or_else(|_| Err(invalid("助手执行中断；已保存的编辑仍然保留")));
@@ -393,7 +407,11 @@ impl Service {
                 "done"
             };
             // A finished turn cannot leave timed-out plugin/model work running in the background.
-            if status!="done"{if let Err(error)=service.exports.cancel_agent(project,&turn).await{tracing::warn!(%error,"无法取消本轮导出任务");}}
+            if status != "done"
+                && let Err(error) = service.exports.cancel_agent(project, &turn).await
+            {
+                tracing::warn!(%error,"无法取消本轮导出任务");
+            }
             cancel.cancel();
             data["finishedAt"] = json!(store::timestamp(editor::now_ms()));
             data["seconds"] = json!(started.elapsed().as_secs_f64());
@@ -427,14 +445,17 @@ impl Service {
     }
     async fn run(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         mut context: RunContext,
         mut conversation: Conversation,
         key: String,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<(), Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         for _ in 0..32 {
             if cancel.is_cancelled() {
                 return Err(invalid("助手已停止"));
@@ -460,7 +481,10 @@ impl Service {
             }
             store::update(&self.pool, turn, data).await?;
             if reply.calls.is_empty() {
-                if let Err(error)=self.cleanup_turn(project,turn,&context,cancel,data).await {
+                if let Err(error) = self
+                    .cleanup_turn(project, turn, &context, cancel, data)
+                    .await
+                {
                     tracing::warn!(%error,"助手空轨道收尾未完成；保留已保存的编辑");
                 }
                 return Ok(());
@@ -497,8 +521,8 @@ impl Service {
                     "skill_read" => "读取剪辑技能",
                     "reference_frames" => "查看参考画面",
                     "web_fetch" => "读取网页资料",
-                    "web_search"=>"搜索网页资料",
-                    "screen_record"=>"等待屏幕录制",
+                    "web_search" => "搜索网页资料",
+                    "screen_record" => "等待屏幕录制",
                     "media_download" => "下载素材",
                     "export_video" => "导出视频",
                     "library_search" => "搜索音源",
@@ -520,12 +544,14 @@ impl Service {
                 store::update(&self.pool, turn, data).await?;
                 let result = self
                     .tool(
-                        project,
-                        turn,
+                        super::Turn {
+                            project,
+                            id: turn,
+                            cancel,
+                        },
                         &mut context,
                         &call.name,
                         &call.arguments,
-                        cancel,
                         data,
                     )
                     .await;
@@ -583,21 +609,72 @@ impl Service {
     }
     async fn tool(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         context: &mut RunContext,
         name: &str,
         args: &Value,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         match name {
-            "library_search" | "library_add" | "media_search" => self.library_tool(project,turn,context,name,args,cancel,data).await,
-            "export_video" | "export_status" | "export_cancel" => self.export_tool(project,turn,context,name,args,cancel,data).await,
-            "media_download" | "media_import" | "media_downloads" => self.download_tool(project,turn,context,name,args,cancel,data).await,
-            "screen_record"=>self.screen_record(project,turn,context,args,cancel,data).await,
-            "web_search" | "web_fetch" | "docs_read" => self.research_tool(project,turn,name,context,args,cancel).await,
-            "brand_read" | "brand_write" | "skill_read" | "reference_frames" => self.brand_tool(project,turn,context,name,args,cancel).await,
+            "library_search" | "library_add" | "media_search" => {
+                self.library_tool(
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
+                    context,
+                    name,
+                    args,
+                    data,
+                )
+                .await
+            }
+            "export_video" | "export_status" | "export_cancel" => {
+                self.export_tool(
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
+                    context,
+                    name,
+                    args,
+                    data,
+                )
+                .await
+            }
+            "media_download" | "media_import" | "media_downloads" => {
+                self.download_tool(
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
+                    context,
+                    name,
+                    args,
+                    data,
+                )
+                .await
+            }
+            "screen_record" => {
+                self.screen_record(project, turn, context, args, cancel, data)
+                    .await
+            }
+            "web_search" | "web_fetch" | "docs_read" => {
+                self.research_tool(project, turn, name, context, args, cancel)
+                    .await
+            }
+            "brand_read" | "brand_write" | "skill_read" | "reference_frames" => {
+                self.brand_tool(project, turn, context, name, args, cancel)
+                    .await
+            }
             "shader_read" => self.shader_read(project, args).await,
             "shader_write" => self.shader_tool(project, turn, context, args, cancel).await,
             "generate_media" | "graphic_write" | "graphic_read" => {
@@ -631,8 +708,18 @@ impl Service {
                     .await
             }
             "plan_read" | "brief_write" | "storyboard_propose" | "ask_user" => {
-                self.card_tool(project, turn, context, name, args, cancel, data)
-                    .await
+                self.card_tool(
+                    super::Turn {
+                        project,
+                        id: turn,
+                        cancel,
+                    },
+                    context,
+                    name,
+                    args,
+                    data,
+                )
+                .await
             }
             "project_read" | "modules_list" => {
                 if !args.as_object().is_some_and(|o| o.is_empty()) {
@@ -744,7 +831,10 @@ impl Service {
         seconds: u64,
         cancel: &CancellationToken,
     ) -> Result<Option<Approval>, Error> {
-        let id = match approval["id"].as_str(){Some(id)=>id.to_owned(),None=>editor::generate::random_id().map_err(invalid)?};
+        let id = match approval["id"].as_str() {
+            Some(id) => id.to_owned(),
+            None => editor::generate::random_id().map_err(invalid)?,
+        };
         let until = editor::now_ms() + seconds as i64 * 1000;
         approval["id"] = json!(id);
         approval["turnId"] = json!(turn);
@@ -787,16 +877,35 @@ impl Service {
     fn authorized(run: &Running, caller: &Caller) -> bool {
         caller.subject.role == Role::Admin || caller.subject.user_id == run.owner
     }
-    pub(super) fn capture_owner(&self,project:i64,caller:&Caller)->Result<(String,CancellationToken),Error>{
-        let active=lock(&self.active);
-        let run=active.get(&project).filter(|run|!run.cancel.is_cancelled()).ok_or_else(||invalid("录制请求已结束"))?;
-        if !Self::authorized(run,caller){return Err(invalid("只有发起者或管理员可以提供录制"))}
-        Ok((run.id.clone(),run.cancel.clone()))
+    pub(super) fn capture_owner(
+        &self,
+        project: i64,
+        caller: &Caller,
+    ) -> Result<(String, CancellationToken), Error> {
+        let active = lock(&self.active);
+        let run = active
+            .get(&project)
+            .filter(|run| !run.cancel.is_cancelled())
+            .ok_or_else(|| invalid("录制请求已结束"))?;
+        if !Self::authorized(run, caller) {
+            return Err(invalid("只有发起者或管理员可以提供录制"));
+        }
+        Ok((run.id.clone(), run.cancel.clone()))
     }
-    pub(super) fn capture_failed(&self,project:i64,id:&str){
-        let active=lock(&self.active);
-        if let Some(decision)=active.get(&project).and_then(|run|run.decision.as_ref()).filter(|d|d.id==id&&d.card["screen"].is_object()){
-            decision.reply.send_replace(Some(Approval{id:id.into(),allow:false,answer:None,beats:None,note:None}));
+    pub(super) fn capture_failed(&self, project: i64, id: &str) {
+        let active = lock(&self.active);
+        if let Some(decision) = active
+            .get(&project)
+            .and_then(|run| run.decision.as_ref())
+            .filter(|d| d.id == id && d.card["screen"].is_object())
+        {
+            decision.reply.send_replace(Some(Approval {
+                id: id.into(),
+                allow: false,
+                answer: None,
+                beats: None,
+                note: None,
+            }));
         }
     }
     pub fn approve(
@@ -876,7 +985,10 @@ impl Service {
         // Status participates in the save transaction, closing the cancel/commit race.
         sqlx::query("UPDATE editor_agent_turns SET status='cancelled',approval_json=NULL,updated_at=? WHERE id=? AND status='running'").bind(editor::now_ms()).bind(&id).execute(&self.pool).await?;
         token.cancel();
-        self.exports.cancel_agent(project,&id).await.map_err(invalid)?;
+        self.exports
+            .cancel_agent(project, &id)
+            .await
+            .map_err(invalid)?;
         Ok(())
     }
     pub async fn new_thread(&self, project: i64) -> Result<String, Error> {

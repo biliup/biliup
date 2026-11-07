@@ -46,9 +46,20 @@ async fn recorded_danmaku_is_a_transparent_layer_above_masked_video() {
       "sources":{"source":{"kind":"recording","sessionId":session,"segmentId":segment,"viewSessionId":session,"viewStartMs":0,"sourceStartMs":0,"durationMs":2000,"fileName":"source.mp4","state":"finished","hasDanmaku":true}},"project":project})).unwrap();
     let mut paths = BTreeMap::from([("source".into(), source.to_string_lossy().into_owned())]);
     let mut browser = browser::Browser::launch(&cancel).await.unwrap();
-    recording_effects::prepare(&pool, &mut browser, &mut doc, &Value::Null, &mut paths, temp.path(), &cancel, |_, _| {})
-        .await
-        .unwrap();
+    recording_effects::prepare(
+        &pool,
+        &mut browser,
+        recording_effects::Preparation {
+            document: &mut doc,
+            range: &Value::Null,
+            paths: &mut paths,
+            directory: temp.path(),
+        },
+        &cancel,
+        |_, _| {},
+    )
+    .await
+    .unwrap();
     browser.close().await;
     let layer = doc.project["tracks"][0]["items"][0]["media"]
         .as_str()

@@ -25,7 +25,7 @@ struct Options {
 impl Options {
     fn parse() -> Result<Self, &'static str> {
         let args: Vec<String> = std::env::args().skip(1).collect();
-        if args.len() % 2 != 0 {
+        if !args.len().is_multiple_of(2) {
             return Err("arguments_require_values");
         }
         let mut values = HashMap::new();

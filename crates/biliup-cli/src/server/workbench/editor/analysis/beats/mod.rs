@@ -164,7 +164,7 @@ pub fn valid(value: &Value) -> bool {
                         .is_some_and(|v| (0. ..=1.).contains(&v))
             })
         })
-        && (!value.get("beatLevels").is_some() || numbers("beatLevels"))
+        && (value.get("beatLevels").is_none() || numbers("beatLevels"))
 }
 pub async fn analyze(
     path: &Path,

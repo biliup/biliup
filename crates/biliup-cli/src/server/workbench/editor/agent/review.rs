@@ -105,11 +105,13 @@ async fn render(
                     pool,
                     root,
                     project,
-                    document.clone(),
-                    chunk,
-                    width,
-                    false,
-                    true,
+                    editor::export::frames::FrameRequest {
+                        document: document.clone(),
+                        frames: chunk,
+                        width,
+                        motion_blur: false,
+                        census: true,
+                    },
                 )
                 .await
                 .map_err(invalid)?,
@@ -146,8 +148,7 @@ impl Service {
         }
         let saved = editor::get(&self.pool, project).await?;
         let revision = saved.summary.revision;
-        let (stamp, env) =
-            environment(&self.pool, &self.root, project, &saved.document).await?;
+        let (stamp, env) = environment(&self.pool, &self.root, project, &saved.document).await?;
         let mut plan = plan::read(&self.pool, project).await?;
         let expected = plan["revision"]
             .as_i64()

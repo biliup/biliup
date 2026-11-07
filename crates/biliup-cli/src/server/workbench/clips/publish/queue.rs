@@ -162,10 +162,14 @@ pub struct BiliBackend {
 
 impl BiliBackend {
     pub fn new(config: Arc<RwLock<Config>>, client: StatelessClient) -> Self {
-        Self { config, client, repair_audio: true }
+        Self {
+            config,
+            client,
+            repair_audio: true,
+        }
     }
     pub(crate) fn preserve_files(mut self) -> Self {
-        self.repair_audio=false;
+        self.repair_audio = false;
         self
     }
 }
@@ -202,12 +206,17 @@ impl Connection for BiliConnection {
         path: &Path,
         progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure> {
-        let result=if self.repair_audio {
-            upload_single_file_with_progress(path,&self.context,progress).await
+        let result = if self.repair_audio {
+            upload_single_file_with_progress(path, &self.context, progress).await
         } else {
-            crate::server::common::upload::upload_prepared_file_with_progress(path,&self.context,progress).await
+            crate::server::common::upload::upload_prepared_file_with_progress(
+                path,
+                &self.context,
+                progress,
+            )
+            .await
         };
-        result.map_err(|e|describe(&e))
+        result.map_err(|e| describe(&e))
     }
 
     async fn cover(&self, path: &Path) -> Result<String, Failure> {
@@ -777,12 +786,12 @@ impl ClipPublisher {
             .iter()
             .find(|job| job.view.id == id)
             .and_then(|job| job.observation.as_ref().map(|guard| guard.observation()));
-        let outcome = if let Some(observation) = &observation {
+
+        if let Some(observation) = &observation {
             observation.scope(self.run_inner(id)).await
         } else {
             self.run_inner(id).await
-        };
-        outcome
+        }
     }
 
     fn finish_observation(&self, id: u64, outcome: &Outcome) {

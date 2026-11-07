@@ -639,17 +639,15 @@ fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
                         in_media_group = true;
                     }
                     b"thumbnail" => {
-                        if in_media_group {
-                            if let Some(entry) = current.as_mut() {
-                                for attr in e.attributes().flatten() {
-                                    if attr.key.local_name().as_ref() == b"url" {
-                                        entry.thumbnail = attr
-                                            .unescape_value()
-                                            .map_err(|e| {
-                                                LiveError::custom(format!("RSS XML 解析错误: {e}"))
-                                            })?
-                                            .into_owned();
-                                    }
+                        if in_media_group && let Some(entry) = current.as_mut() {
+                            for attr in e.attributes().flatten() {
+                                if attr.key.local_name().as_ref() == b"url" {
+                                    entry.thumbnail = attr
+                                        .unescape_value()
+                                        .map_err(|e| {
+                                            LiveError::custom(format!("RSS XML 解析错误: {e}"))
+                                        })?
+                                        .into_owned();
                                 }
                             }
                         }
@@ -666,20 +664,18 @@ fn parse_rss_xml(xml: &str) -> Result<Vec<RssEntry>, LiveError> {
                 let local = e.name().local_name();
                 match local.as_ref() {
                     b"entry" => {
-                        if let Some(mut entry) = current.take() {
-                            if !entry.id.is_empty() {
-                                if entry.webpage_url.is_empty() {
-                                    entry.webpage_url =
-                                        format!("https://www.youtube.com/watch?v={}", entry.id);
-                                }
-                                if entry.thumbnail.is_empty() {
-                                    entry.thumbnail = format!(
-                                        "https://i.ytimg.com/vi/{}/hqdefault.jpg",
-                                        entry.id
-                                    );
-                                }
-                                entries.push(entry);
+                        if let Some(mut entry) = current.take()
+                            && !entry.id.is_empty()
+                        {
+                            if entry.webpage_url.is_empty() {
+                                entry.webpage_url =
+                                    format!("https://www.youtube.com/watch?v={}", entry.id);
                             }
+                            if entry.thumbnail.is_empty() {
+                                entry.thumbnail =
+                                    format!("https://i.ytimg.com/vi/{}/hqdefault.jpg", entry.id);
+                            }
+                            entries.push(entry);
                         }
                     }
                     b"videoId" => {
@@ -1027,7 +1023,7 @@ mod tests {
     async fn rss_playlist_feeds_into_select_entry() {
         // 验证 RSS 解析出的 playlist Value 能被 select_entry 正确遍历
         let live = youtube_live(false, true, true);
-        let rss_entries = vec![
+        let rss_entries = [
             RssEntry {
                 id: "v1".to_string(),
                 title: "Video 1".to_string(),

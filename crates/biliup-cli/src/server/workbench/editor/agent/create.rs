@@ -31,9 +31,15 @@ static VALIDATORS: LazyLock<BTreeMap<String, jsonschema::Validator>> = LazyLock:
         })
         .collect()
 });
-pub(super) fn validate(name:&str,args:&Value)->Result<(),Error>{
-    if serde_json::to_vec(args)?.len()>2*1024*1024{return Err(invalid("创建请求过大"));}
-    VALIDATORS.get(name).ok_or_else(||invalid("未知创建工具"))?.validate(args).map_err(|e|invalid(format!("创建参数无效：{e}")))
+pub(super) fn validate(name: &str, args: &Value) -> Result<(), Error> {
+    if serde_json::to_vec(args)?.len() > 2 * 1024 * 1024 {
+        return Err(invalid("创建请求过大"));
+    }
+    VALIDATORS
+        .get(name)
+        .ok_or_else(|| invalid("未知创建工具"))?
+        .validate(args)
+        .map_err(|e| invalid(format!("创建参数无效：{e}")))
 }
 pub fn tools() -> Vec<Tool> {
     SPEC["tools"]
@@ -135,9 +141,19 @@ impl Service {
                     if let Some(seconds) = proposed["seconds"].as_f64() {
                         lines.push(format!("时长：{seconds} 秒"));
                     }
-                    lines.push(proposed["cost"].as_str().ok_or_else(|| invalid("生成费用信息缺失"))?.to_string());
+                    lines.push(
+                        proposed["cost"]
+                            .as_str()
+                            .ok_or_else(|| invalid("生成费用信息缺失"))?
+                            .to_string(),
+                    );
                     if proposed["paid"] == true {
-                        lines.push(proposed["pricingSource"].as_str().ok_or_else(|| invalid("生成费率来源缺失"))?.to_string());
+                        lines.push(
+                            proposed["pricingSource"]
+                                .as_str()
+                                .ok_or_else(|| invalid("生成费率来源缺失"))?
+                                .to_string(),
+                        );
                     }
                     let allowed = self
                         .confirm(
@@ -206,16 +222,31 @@ impl Service {
                 json!({"job":job,"phase":"done","imported":included,"id":generated_id,"revision":saved.summary.revision,"note":if included{"素材已经加入；未重复生成或修改工程。"}else{"此任务已处理，其素材之后被删除或替换；没有重新加入。"}}),
             );
         }
-        let (mut media, existing) = editor::imports::prepare_media(&saved.document.project, generated)?;
-        let id = media["id"].as_str().ok_or_else(|| invalid("生成素材身份无效"))?.to_owned();
+        let (mut media, existing) =
+            editor::imports::prepare_media(&saved.document.project, generated)?;
+        let id = media["id"]
+            .as_str()
+            .ok_or_else(|| invalid("生成素材身份无效"))?
+            .to_owned();
         if existing {
             let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
             let current: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_projects p JOIN editor_agent_turns t ON t.project_id=p.id WHERE p.id=? AND p.revision=? AND t.id=? AND t.status='running')")
                 .bind(project).bind(saved.summary.revision).bind(turn).fetch_one(&mut *tx).await?;
-            if !current || cancel.is_cancelled() { return Err(invalid("工程版本已变化或助手已停止")); }
-            editor::generate::acknowledge_import(&mut tx, project, &saved.document, &job, Some(turn)).await?;
+            if !current || cancel.is_cancelled() {
+                return Err(invalid("工程版本已变化或助手已停止"));
+            }
+            editor::generate::acknowledge_import(
+                &mut tx,
+                project,
+                &saved.document,
+                &job,
+                Some(turn),
+            )
+            .await?;
             tx.commit().await?;
-            return Ok(json!({"job":job,"phase":"done","imported":true,"id":id,"media":media,"revision":saved.summary.revision,"note":"相同文件已在工程素材中，未重复添加或创建撤销步骤。"}));
+            return Ok(
+                json!({"job":job,"phase":"done","imported":true,"id":id,"media":media,"revision":saved.summary.revision,"note":"相同文件已在工程素材中，未重复添加或创建撤销步骤。"}),
+            );
         }
         if let Some(duration) = state["result"]["source"]["durationMs"].as_f64() {
             let fps = saved.document.project["canvas"]["fps"]
@@ -269,7 +300,7 @@ impl Service {
             &self.pool,
             (project, prepared.base_revision),
             prepared.document,
-            &[job.clone()],
+            std::slice::from_ref(&job),
             store::Journal::Edit {
                 turn,
                 summary: &prepared.summary,
@@ -280,9 +311,14 @@ impl Service {
         .await;
         match committed {
             Ok(saved) => {
-                let imported=saved.document.project["media"].as_array().and_then(|all|all.iter().find(|media|media["id"]==id)).ok_or(Error::NotFound)?;
-                Ok(json!({"job":job,"phase":"done","applied":true,"imported":true,"id":id,"media":imported,"canvas":saved.document.project["canvas"],"revision":saved.summary.revision,"note":"已加入统一素材库；可通过 timeline_edit 放入时间轴，整轮撤销会移除本次导入。"}))
-            },
+                let imported = saved.document.project["media"]
+                    .as_array()
+                    .and_then(|all| all.iter().find(|media| media["id"] == id))
+                    .ok_or(Error::NotFound)?;
+                Ok(
+                    json!({"job":job,"phase":"done","applied":true,"imported":true,"id":id,"media":imported,"canvas":saved.document.project["canvas"],"revision":saved.summary.revision,"note":"已加入统一素材库；可通过 timeline_edit 放入时间轴，整轮撤销会移除本次导入。"}),
+                )
+            }
             Err(error) => Ok(
                 json!({"job":job,"phase":"importing","imported":false,"error":error.to_string(),"note":"生成结果已保留；用 job 参数重试导入，不会重新调用供应商。"}),
             ),
@@ -306,7 +342,7 @@ impl Service {
                     project,
                     turn,
                     "保存动态图形",
-                    &[prepared.name.clone()],
+                    std::slice::from_ref(&prepared.name),
                     saved.summary.revision,
                     cancel,
                 )

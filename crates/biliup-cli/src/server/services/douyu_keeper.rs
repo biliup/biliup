@@ -634,10 +634,10 @@ impl DouyuCookieKeeper {
     }
     async fn ensure(&self, source: &Source) -> Result<Row, KeeperError> {
         let hash = source.hash();
-        if self.pending.lock().unwrap().contains_key(&hash) {
-            if let Some(row) = self.cache.read().unwrap().get(&hash).cloned() {
-                return Ok(row);
-            }
+        if self.pending.lock().unwrap().contains_key(&hash)
+            && let Some(row) = self.cache.read().unwrap().get(&hash).cloned()
+        {
+            return Ok(row);
         }
         if let Some(row) = self.read(&hash).await? {
             self.cache.write().unwrap().insert(hash, row.clone());
@@ -769,20 +769,17 @@ impl DouyuCookieKeeper {
             .map(|(hash, row)| (hash.clone(), row.clone()))
             .collect();
         for (hash, mut row) in pending {
-            match self.finish(&row).await {
-                Ok(saved) => {
-                    self.pending.lock().unwrap().remove(&hash);
-                    self.memory_backoff.lock().unwrap().remove(&hash);
-                    if saved {
-                        row.lease_token = None;
-                        row.lease_until = None;
-                        self.cache.write().unwrap().insert(hash.clone(), row);
-                        self.validated.lock().unwrap().insert(hash);
-                    } else {
-                        self.cache.write().unwrap().remove(&hash);
-                    }
+            if let Ok(saved) = self.finish(&row).await {
+                self.pending.lock().unwrap().remove(&hash);
+                self.memory_backoff.lock().unwrap().remove(&hash);
+                if saved {
+                    row.lease_token = None;
+                    row.lease_until = None;
+                    self.cache.write().unwrap().insert(hash.clone(), row);
+                    self.validated.lock().unwrap().insert(hash);
+                } else {
+                    self.cache.write().unwrap().remove(&hash);
                 }
-                Err(_) => {}
             }
         }
     }

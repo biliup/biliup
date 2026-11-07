@@ -237,8 +237,11 @@ fn capture(text: &str, pattern: &str) -> Option<String> {
         .captures(text)
         .map(|c| c[1].to_string())
 }
-pub(super) async fn colour_hint(path:&Path,cancel:&CancellationToken)->Result<Option<u32>,String>{
-    Ok(probe(path,cancel).await?.untagged)
+pub(super) async fn colour_hint(
+    path: &Path,
+    cancel: &CancellationToken,
+) -> Result<Option<u32>, String> {
+    Ok(probe(path, cancel).await?.untagged)
 }
 async fn probe(path: &Path, cancel: &CancellationToken) -> Result<Info, String> {
     let mut command = process();
@@ -343,12 +346,13 @@ async fn packet_times(
                 .iter()
                 .filter_map(|field| field.strip_prefix("F=0x"))
                 .any(|flags| u32::from_str_radix(flags, 16).is_ok_and(|flags| flags & 4 != 0));
-            if fields.len() >= 6 && !discarded {
-                if let Ok(pts) = fields[2].parse::<f64>() {
-                    let t = pts * tb - start;
-                    if t.is_finite() {
-                        times.push(t)
-                    }
+            if fields.len() >= 6
+                && !discarded
+                && let Ok(pts) = fields[2].parse::<f64>()
+            {
+                let t = pts * tb - start;
+                if t.is_finite() {
+                    times.push(t)
                 }
             }
         }
@@ -565,19 +569,18 @@ impl Frames {
             let mut target = n;
             let mut misses = 0;
             let raw = loop {
-                if let Some(d) = &decoder {
-                    if let Some((index, raw)) = d.recent.iter().find(|(index, _)| *index == target)
-                    {
-                        break (*index, raw.clone());
-                    }
+                if let Some(d) = &decoder
+                    && let Some((index, raw)) = d.recent.iter().find(|(index, _)| *index == target)
+                {
+                    break (*index, raw.clone());
                 }
                 if decoder.as_ref().is_none_or(|d| {
                     target < d.next || target - d.next > (3. * info.fps).ceil().max(30.) as usize
                 }) {
-                    if let Some(mut previous) = decoder.take() {
-                        if lifecycle.is_none() {
-                            lifecycle = previous._lifecycle.take()
-                        }
+                    if let Some(mut previous) = decoder.take()
+                        && lifecycle.is_none()
+                    {
+                        lifecycle = previous._lifecycle.take()
                     }
                     decoder = Some(start(path, info, width, height, target, lifecycle.take())?);
                 }

@@ -1,16 +1,23 @@
 //! Native engineering export: saved project -> shared frame planner -> Chromium rasters -> FFmpeg.
-pub(super) mod browser;
-pub mod generation;
-pub(super) mod frames;
-mod graphics;
 mod audio;
 #[cfg(test)]
 mod audio_tests;
-pub mod jobs;
+pub(super) mod browser;
 mod estimate;
+pub(super) mod frames;
+pub mod generation;
+mod graphics;
 mod inputs;
+pub mod jobs;
 mod recording_effects;
 mod shaders;
+pub struct RenderProject {
+    pub project: Value,
+    pub paths: BTreeMap<String, String>,
+    pub graphics: BTreeMap<String, String>,
+    pub assets: super::fonts::RenderAssets,
+}
+
 use crate::server::common::processing::{encoding, engine};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Deserialize;
@@ -35,12 +42,33 @@ pub struct Options {
     #[serde(default)]
     pub subtitles: Option<SubtitleOptions>,
 }
-pub(super) fn filename(value:&str)->String{
-    let clean=value.chars().map(|c|if c.is_control()||matches!(c,'/'|'\\'|':'|'*'|'?'|'"'|'<'|'>'|'|'){'-'}else{c}).collect::<String>();
-    let clean=clean.trim().trim_matches('.');
-    let stem=if clean.to_ascii_lowercase().ends_with(".mp4"){&clean[..clean.len()-4]}else{clean};
-    let mut name=String::new();for c in stem.trim().chars(){if name.len()+c.len_utf8()>180{break}name.push(c)}
-    if name.is_empty(){name="成片".into()}
+pub(super) fn filename(value: &str) -> String {
+    let clean = value
+        .chars()
+        .map(|c| {
+            if c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect::<String>();
+    let clean = clean.trim().trim_matches('.');
+    let stem = if clean.to_ascii_lowercase().ends_with(".mp4") {
+        &clean[..clean.len() - 4]
+    } else {
+        clean
+    };
+    let mut name = String::new();
+    for c in stem.trim().chars() {
+        if name.len() + c.len_utf8() > 180 {
+            break;
+        }
+        name.push(c)
+    }
+    if name.is_empty() {
+        name = "成片".into()
+    }
     format!("{name}.mp4")
 }
 
@@ -75,7 +103,7 @@ struct Plan {
     frames: u64,
     background: String,
     rasters: Vec<Raster>,
-    graphics:Vec<graphics::Graphic>,
+    graphics: Vec<graphics::Graphic>,
     shaders: Vec<shaders::Shader>,
     luts: Vec<Lut>,
     warnings: Vec<String>,
@@ -108,7 +136,8 @@ struct Encode {
 impl Encode {
     /// Composite in software, then upload only the finished picture to the selected device.
     fn use_device(&mut self, selected: &encoding::SelectedEncoder) -> Result<(), String> {
-        self.graph.push_str(&format!(";\n[vout]{}[vencoded]", selected.video_filter()));
+        self.graph
+            .push_str(&format!(";\n[vout]{}[vencoded]", selected.video_filter()));
         let mut index = 0;
         while index < self.output_args.len() {
             if self.output_args[index] == "-pix_fmt" {
@@ -116,7 +145,9 @@ impl Encode {
                 self.output_args.drain(index..end);
                 continue;
             }
-            if self.output_args[index] == "[vout]" { self.output_args[index] = "[vencoded]".into(); }
+            if self.output_args[index] == "[vout]" {
+                self.output_args[index] = "[vencoded]".into();
+            }
             index += 1;
         }
         // Per-output device options must precede the output filename.
@@ -139,8 +170,15 @@ pub struct Output {
     pub subtitle_track: Option<String>,
 }
 pub enum Progress {
-    Loudness {pass:usize,processed_ms:i64,total_ms:i64},
-    Audio {processed_ms:i64,total_ms:i64},
+    Loudness {
+        pass: usize,
+        processed_ms: i64,
+        total_ms: i64,
+    },
+    Audio {
+        processed_ms: i64,
+        total_ms: i64,
+    },
     Sound {
         done: usize,
         total: usize,
@@ -155,7 +193,9 @@ pub enum Progress {
         done: usize,
         total: usize,
     },
-    Encoder { name: String },
+    Encoder {
+        name: String,
+    },
     Encoding {
         processed_ms: i64,
         total_ms: i64,
@@ -167,19 +207,52 @@ pub fn available() -> Result<(), String> {
 }
 
 /// The planner emits opaque media IDs. Resolve only images registered in this saved project.
-async fn embed_images(html:&str,project:&Value,paths:&BTreeMap<String,String>,cache:&mut BTreeMap<String,String>)->Result<String,String> {
-    let pattern=regex::Regex::new(r"biliup-media:([A-Za-z0-9._-]+)").unwrap();
+async fn embed_images(
+    html: &str,
+    project: &Value,
+    paths: &BTreeMap<String, String>,
+    cache: &mut BTreeMap<String, String>,
+) -> Result<String, String> {
+    let pattern = regex::Regex::new(r"biliup-media:([A-Za-z0-9._-]+)").unwrap();
     for found in pattern.captures_iter(html) {
-        let id=&found[1];if cache.contains_key(id){continue}
-        if !project["media"].as_array().is_some_and(|media|media.iter().any(|m|m["id"]==id&&m["kind"]=="image")){return Err("图形引用的图片不存在".into())}
-        let path=paths.get(id).ok_or("图片文件不存在")?;
-        let path=Path::new(path);
-        if tokio::fs::metadata(path).await.map_err(|e|e.to_string())?.len()>32*1024*1024{return Err("图形嵌入图片不能超过 32 MiB".into())}
-        let mime=match path.extension().and_then(|s|s.to_str()).unwrap_or("") {"svg"=>"image/svg+xml","png"=>"image/png","jpg"|"jpeg"=>"image/jpeg","webp"=>"image/webp","bmp"=>"image/bmp","tif"|"tiff"=>"image/tiff",_=>return Err("图形嵌入图片格式无效".into())};
-        let bytes=tokio::fs::read(path).await.map_err(|e|e.to_string())?;
-        cache.insert(id.to_string(),format!("data:{mime};base64,{}",STANDARD.encode(bytes)));
+        let id = &found[1];
+        if cache.contains_key(id) {
+            continue;
+        }
+        if !project["media"]
+            .as_array()
+            .is_some_and(|media| media.iter().any(|m| m["id"] == id && m["kind"] == "image"))
+        {
+            return Err("图形引用的图片不存在".into());
+        }
+        let path = paths.get(id).ok_or("图片文件不存在")?;
+        let path = Path::new(path);
+        if tokio::fs::metadata(path)
+            .await
+            .map_err(|e| e.to_string())?
+            .len()
+            > 32 * 1024 * 1024
+        {
+            return Err("图形嵌入图片不能超过 32 MiB".into());
+        }
+        let mime = match path.extension().and_then(|s| s.to_str()).unwrap_or("") {
+            "svg" => "image/svg+xml",
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "webp" => "image/webp",
+            "bmp" => "image/bmp",
+            "tif" | "tiff" => "image/tiff",
+            _ => return Err("图形嵌入图片格式无效".into()),
+        };
+        let bytes = tokio::fs::read(path).await.map_err(|e| e.to_string())?;
+        cache.insert(
+            id.to_string(),
+            format!("data:{mime};base64,{}", STANDARD.encode(bytes)),
+        );
     }
-    Ok(pattern.replace_all(html,|m:&regex::Captures<'_>|cache[&m[1]].clone()).into_owned())
+    Ok(pattern
+        .replace_all(html, |m: &regex::Captures<'_>| cache[&m[1]].clone())
+        .into_owned())
 }
 
 fn fonts() -> Value {
@@ -202,10 +275,39 @@ pub async fn render(
     cancel: &CancellationToken,
     report: impl FnMut(Progress),
 ) -> Result<Output, String> {
-    render_graphics(project,paths,BTreeMap::new(),super::fonts::RenderAssets{fonts:super::fonts::bundled(),logos:BTreeMap::new(),warnings:vec![]},options,cache_root,output,cancel,None,report).await
+    render_graphics(
+        RenderProject {
+            project,
+            paths,
+            graphics: BTreeMap::new(),
+            assets: super::fonts::RenderAssets {
+                fonts: super::fonts::bundled(),
+                logos: BTreeMap::new(),
+                warnings: vec![],
+            },
+        },
+        options,
+        cache_root,
+        output,
+        cancel,
+        None,
+        report,
+    )
+    .await
 }
 pub async fn render_graphics(
-    project:Value,paths:BTreeMap<String,String>,graphics:BTreeMap<String,String>,assets:super::fonts::RenderAssets,options:Options,cache_root:&Path,output:&Path,cancel:&CancellationToken,prepared_browser:Option<browser::Browser>,mut report:impl FnMut(Progress),
+    RenderProject {
+        project,
+        paths,
+        graphics,
+        assets,
+    }: RenderProject,
+    options: Options,
+    cache_root: &Path,
+    output: &Path,
+    cancel: &CancellationToken,
+    prepared_browser: Option<browser::Browser>,
+    mut report: impl FnMut(Progress),
 ) -> Result<Output, String> {
     let _permit = crate::server::common::processing::transcode::acquire(cancel).await?;
     if !matches!(options.quality.as_str(), "draft" | "standard" | "high") {
@@ -361,7 +463,7 @@ pub async fn render_graphics(
                 );
             }
         }
-        rasters.extend(graphics::render(&mut browser,&plan.graphics,plan.canvas.width,plan.canvas.height,&project,&paths,temp.path(),cancel,||{done+=1;report(Progress::Preparing{done,total})}).await?);
+        rasters.extend(graphics::render(&mut browser, graphics::Scene { graphics: &plan.graphics, width: plan.canvas.width, height: plan.canvas.height, project: &project, paths: &paths }, temp.path(), cancel, ||{done+=1;report(Progress::Preparing{done,total})}).await?);
         let shaded = shaders::render(
             &mut browser,
             &plan.shaders,

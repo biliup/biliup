@@ -83,10 +83,10 @@ pub async fn refresh_room_cover(
     let _guard = RefreshGuard(id);
     let _slot = REFRESH_SLOTS.acquire().await.ok()?;
     let store = cover_store();
-    if let Some(url) = live_cover {
-        if let Ok(stored) = store.ensure(id, url, room_url).await {
-            return Some(stored);
-        }
+    if let Some(url) = live_cover
+        && let Ok(stored) = store.ensure(id, url, room_url).await
+    {
+        return Some(stored);
     }
     // Bootstrap an old room from recording history before requesting fresh public metadata.
     if store.load(id).await.is_none() {
@@ -114,10 +114,11 @@ pub async fn refresh_room_cover(
             false
         }
     };
-    if refreshed && live_cover.is_none() {
-        if let Some(state) = ATTEMPTS.lock().unwrap().get_mut(&id) {
-            state.retry_after = METADATA_TTL;
-        }
+    if refreshed
+        && live_cover.is_none()
+        && let Some(state) = ATTEMPTS.lock().unwrap().get_mut(&id)
+    {
+        state.retry_after = METADATA_TTL;
     }
     store.load(id).await
 }
@@ -231,14 +232,12 @@ async fn fetch_metadata_cover(client: &Client, room_url: &str) -> Result<Option<
         }
         _ => None,
     };
-    if let Some(api) = api {
-        if let Ok(text) = get_text(client, &api, room_url).await {
-            if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                if let Some(cover) = metadata_json_cover(&value, &parsed) {
-                    return Ok(Some(cover));
-                }
-            }
-        }
+    if let Some(api) = api
+        && let Ok(text) = get_text(client, &api, room_url).await
+        && let Ok(value) = serde_json::from_str::<Value>(&text)
+        && let Some(cover) = metadata_json_cover(&value, &parsed)
+    {
+        return Ok(Some(cover));
     }
     let page = get_text(client, room_url, room_url).await?;
     Ok(metadata_page_cover(&page, &parsed))
@@ -292,13 +291,11 @@ fn metadata_page_cover(page: &str, room_url: &Url) -> Option<String> {
                     "og:image" | "og:image:secure_url" | "twitter:image"
                 )
             })
-        {
-            if let Some(cover) = attrs
+            && let Some(cover) = attrs
                 .get("content")
                 .and_then(|value| normalized_cover(value, room_url))
-            {
-                return Some(cover);
-            }
+        {
+            return Some(cover);
         }
     }
     JSON_COVER
@@ -373,12 +370,13 @@ mod tests {
             fetch_metadata_cover(&image_client(), &room).await.unwrap(),
             Some(format!("{base}/cover.jpg"))
         );
-        let seen = headers_seen.lock().unwrap();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].get("referer").unwrap(), room.as_str());
-        assert!(seen[0].get("cookie").is_none());
-        assert!(seen[0].get("authorization").is_none());
-        drop(seen);
+        {
+            let seen = headers_seen.lock().unwrap();
+            assert_eq!(seen.len(), 1);
+            assert_eq!(seen[0].get("referer").unwrap(), room.as_str());
+            assert!(seen[0].get("cookie").is_none());
+            assert!(seen[0].get("authorization").is_none());
+        }
         assert_eq!(
             fetch_metadata_cover(&image_client(), &format!("{base}/media.flv"))
                 .await

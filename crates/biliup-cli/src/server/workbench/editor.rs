@@ -33,31 +33,31 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 type Result<T> = std::result::Result<T, Error>;
-pub(crate) mod analysis;
 pub(crate) mod agent;
-pub(crate) mod history;
-pub(crate) mod suggestions;
-pub(crate) mod export;
-pub(crate) mod imports;
+pub(crate) mod analysis;
 pub(crate) mod downloads;
-pub(crate) mod svg;
-pub(crate) mod graphics;
-pub(crate) mod shaders;
-pub(crate) mod graphic_media;
+pub(crate) mod export;
 pub(crate) mod fonts;
-pub(crate) mod project_fonts;
-pub(crate) mod proxies;
-pub(crate) mod recent_media;
-pub(crate) mod text_model;
-pub(crate) mod keys;
 pub(crate) mod generate;
-pub(crate) mod public_http;
-pub(crate) mod online_library;
+pub(crate) mod graphic_media;
+pub(crate) mod graphics;
+pub(crate) mod history;
+pub(crate) mod imports;
+pub(crate) mod keys;
+pub(crate) mod library;
 pub(crate) mod media;
 mod metadata;
+pub(crate) mod online_library;
+pub(crate) mod project_fonts;
+pub(crate) mod proxies;
+pub(crate) mod public_http;
+pub(crate) mod recent_media;
 pub(crate) mod resources;
+pub(crate) mod shaders;
 pub(crate) mod sound_library;
-pub(crate) mod library;
+pub(crate) mod suggestions;
+pub(crate) mod svg;
+pub(crate) mod text_model;
 pub(crate) mod waveform;
 fn invalid(message: &str) -> Error {
     Error::Invalid(message.into())
@@ -218,18 +218,26 @@ fn validate(doc: &Document) -> Result<()> {
             if !ids.insert(item["id"].as_str().unwrap()) {
                 return Err(invalid("片段 ID 重复"));
             }
-            if let Some(id) = item["media"].as_str() {
-                if !doc.sources.contains_key(id) {
-                    return Err(invalid("片段引用了未登记素材"));
-                }
+            if let Some(id) = item["media"].as_str()
+                && !doc.sources.contains_key(id)
+            {
+                return Err(invalid("片段引用了未登记素材"));
             }
             for effect in item["effects"].as_array().into_iter().flatten() {
-                if effect["module"] != "effect.biliup-mask" { continue; }
+                if effect["module"] != "effect.biliup-mask" {
+                    continue;
+                }
                 for region in effect["params"]["regions"].as_array().into_iter().flatten() {
-                    if region["effect_type"] != "image" && region["image"].is_null() { continue; }
-                    let id = region["image"]["media"].as_str().ok_or_else(|| invalid("遮挡图片引用无效"))?;
+                    if region["effect_type"] != "image" && region["image"].is_null() {
+                        continue;
+                    }
+                    let id = region["image"]["media"]
+                        .as_str()
+                        .ok_or_else(|| invalid("遮挡图片引用无效"))?;
                     if region["effect_type"] != "image"
-                        || !media.iter().any(|entry| entry["id"] == id && entry["kind"] == "image")
+                        || !media
+                            .iter()
+                            .any(|entry| entry["id"] == id && entry["kind"] == "image")
                         || !doc.sources.contains_key(id)
                     {
                         return Err(invalid("遮挡图片需引用工程中的图片素材"));
@@ -383,9 +391,10 @@ pub async fn get(pool: &ConnectionPool, id: i64) -> Result<Saved> {
         created_at: row.try_get("created_at")?,
         updated_at: row.try_get("updated_at")?,
     };
-    let history=history::cursor::Cursor::from_row(&row,summary.revision)?.info();
+    let history = history::cursor::Cursor::from_row(&row, summary.revision)?.info();
     Ok(Saved {
-        summary,history,
+        summary,
+        history,
         document: serde_json::from_str(row.try_get::<&str, _>("document_json")?)?,
     })
 }
@@ -419,7 +428,7 @@ pub async fn save(
     previous: Option<(i64, i64)>,
     document: Document,
 ) -> Result<Saved> {
-    save_generated(pool,previous,document,&[]).await
+    save_generated(pool, previous, document, &[]).await
 }
 pub async fn save_generated(
     pool: &ConnectionPool,
@@ -427,21 +436,89 @@ pub async fn save_generated(
     document: Document,
     generated: &[String],
 ) -> Result<Saved> {
-    save_inner(pool,previous,document,generated,None,None,None).await
+    save_inner(pool, previous, document, generated, None, None, None).await
 }
-pub async fn save_user_results(pool:&ConnectionPool,previous:(i64,i64),document:Document,generated:&[String],note:Option<&history::UserNote>,suggestion:Option<&suggestions::Acceptance>)->Result<Saved>{
-    save_inner(pool,Some(previous),document,generated,None,note.map(agent::store::Journal::User),suggestion).await
+pub async fn save_user_results(
+    pool: &ConnectionPool,
+    previous: (i64, i64),
+    document: Document,
+    generated: &[String],
+    note: Option<&history::UserNote>,
+    suggestion: Option<&suggestions::Acceptance>,
+) -> Result<Saved> {
+    save_inner(
+        pool,
+        Some(previous),
+        document,
+        generated,
+        None,
+        note.map(agent::store::Journal::User),
+        suggestion,
+    )
+    .await
 }
-pub(crate) async fn save_agent(pool:&ConnectionPool,previous:(i64,i64),document:Document,journal:agent::store::Journal<'_>)->Result<Saved>{
-    save_inner(pool,Some(previous),document,&[],None,Some(journal),None).await
+pub(crate) async fn save_agent(
+    pool: &ConnectionPool,
+    previous: (i64, i64),
+    document: Document,
+    journal: agent::store::Journal<'_>,
+) -> Result<Saved> {
+    save_inner(
+        pool,
+        Some(previous),
+        document,
+        &[],
+        None,
+        Some(journal),
+        None,
+    )
+    .await
 }
-pub(crate) async fn save_agent_generated(pool:&ConnectionPool,previous:(i64,i64),document:Document,generated:&[String],journal:agent::store::Journal<'_>)->Result<Saved>{
-    save_inner(pool,Some(previous),document,generated,None,Some(journal),None).await
+pub(crate) async fn save_agent_generated(
+    pool: &ConnectionPool,
+    previous: (i64, i64),
+    document: Document,
+    generated: &[String],
+    journal: agent::store::Journal<'_>,
+) -> Result<Saved> {
+    save_inner(
+        pool,
+        Some(previous),
+        document,
+        generated,
+        None,
+        Some(journal),
+        None,
+    )
+    .await
 }
-pub(crate) async fn save_agent_download(pool:&ConnectionPool,previous:(i64,i64),document:Document,job:&str,journal:agent::store::Journal<'_>)->Result<Saved>{
-    save_inner(pool,Some(previous),document,&[],Some(job),Some(journal),None).await
+pub(crate) async fn save_agent_download(
+    pool: &ConnectionPool,
+    previous: (i64, i64),
+    document: Document,
+    job: &str,
+    journal: agent::store::Journal<'_>,
+) -> Result<Saved> {
+    save_inner(
+        pool,
+        Some(previous),
+        document,
+        &[],
+        Some(job),
+        Some(journal),
+        None,
+    )
+    .await
 }
-async fn save_inner(pool:&ConnectionPool,previous:Option<(i64,i64)>,mut document:Document,generated:&[String],download:Option<&str>,journal:Option<agent::store::Journal<'_>>,suggestion:Option<&suggestions::Acceptance>)->Result<Saved>{
+async fn save_inner(
+    pool: &ConnectionPool,
+    previous: Option<(i64, i64)>,
+    mut document: Document,
+    generated: &[String],
+    download: Option<&str>,
+    journal: Option<agent::store::Journal<'_>>,
+    suggestion: Option<&suggestions::Acceptance>,
+) -> Result<Saved> {
     validate(&document)?;
     let _lifecycle = MEDIA_LIFECYCLE.read().await;
     metadata::prepare(pool, previous, &mut document).await?;
@@ -463,17 +540,37 @@ async fn save_inner(pool:&ConnectionPool,previous:Option<(i64,i64)>,mut document
     }
     let segments = resolve_sources(&mut tx, &mut document).await?;
     for src in graphics::references(&document.project) {
-        let (id,_)=previous.ok_or_else(||invalid("请先创建工程再添加动态图形"))?;
-        let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_graphics WHERE project_id=? AND src=?)").bind(id).bind(src).fetch_one(&mut *tx).await?;
-        if !exists{return Err(invalid("动态图形不存在或不属于当前工程"))}
+        let (id, _) = previous.ok_or_else(|| invalid("请先创建工程再添加动态图形"))?;
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM editor_graphics WHERE project_id=? AND src=?)",
+        )
+        .bind(id)
+        .bind(src)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !exists {
+            return Err(invalid("动态图形不存在或不属于当前工程"));
+        }
     }
-    if generated.len()>10 {return Err(invalid("一次最多导入 10 个生成结果"))}
+    if generated.len() > 10 {
+        return Err(invalid("一次最多导入 10 个生成结果"));
+    }
     for job in generated {
-        let (id,_) = previous.ok_or_else(||invalid("生成结果需要关联已保存的工程"))?;
-        let turn=match &journal {Some(agent::store::Journal::Edit{turn,..})=>Some(*turn),_=>None};
-        generate::acknowledge_import(&mut tx,id,&document,job,turn).await?;
+        let (id, _) = previous.ok_or_else(|| invalid("生成结果需要关联已保存的工程"))?;
+        let turn = match &journal {
+            Some(agent::store::Journal::Edit { turn, .. }) => Some(*turn),
+            _ => None,
+        };
+        generate::acknowledge_import(&mut tx, id, &document, job, turn).await?;
     }
-    if let Some(job)=download{let (id,_)=previous.ok_or_else(||invalid("下载结果需要关联已保存的工程"))?;let turn=match &journal{Some(agent::store::Journal::Edit{turn,..})=>*turn,_=>return Err(invalid("下载结果缺少助手记录"))};downloads::acknowledge(&mut tx,id,&document,job,turn).await?;}
+    if let Some(job) = download {
+        let (id, _) = previous.ok_or_else(|| invalid("下载结果需要关联已保存的工程"))?;
+        let turn = match &journal {
+            Some(agent::store::Journal::Edit { turn, .. }) => *turn,
+            _ => return Err(invalid("下载结果缺少助手记录")),
+        };
+        downloads::acknowledge(&mut tx, id, &document, job, turn).await?;
+    }
     let text = serde_json::to_string(&document)?;
     if text.len() > 2 * 1024 * 1024 {
         return Err(invalid("工程数据超过 2 MiB"));
@@ -482,7 +579,7 @@ async fn save_inner(pool:&ConnectionPool,previous:Option<(i64,i64)>,mut document
     let now = now_ms();
     let (id, rev) = match previous {
         Some((id, revision)) => {
-            analysis::restore::record_changes(&mut tx,id,&document,now).await?;
+            analysis::restore::record_changes(&mut tx, id, &document, now).await?;
             let next = revision
                 .checked_add(1)
                 .ok_or_else(|| invalid("版本号超出范围"))?;
@@ -510,14 +607,45 @@ async fn save_inner(pool:&ConnectionPool,previous:Option<(i64,i64)>,mut document
         .fetch_one(&mut *tx)
         .await?;
     if let Some(suggestion) = suggestion {
-        suggestions::accept(&mut tx,id,rev,&document,suggestion,now).await?;
+        suggestions::accept(&mut tx, id, rev, &document, suggestion, now).await?;
     }
-    recent_media::index_document(&mut tx,id,&document,now).await?;
-    let history=history::cursor::advance(&mut tx,id,previous.map(|(_,revision)|revision),rev,journal.as_ref()).await?;
+    recent_media::index_document(&mut tx, id, &document, now).await?;
+    let history = history::cursor::advance(
+        &mut tx,
+        id,
+        previous.map(|(_, revision)| revision),
+        rev,
+        journal.as_ref(),
+    )
+    .await?;
     if let Some(journal) = journal {
-        agent::store::commit(&mut tx,id,previous.ok_or_else(||invalid("助手编辑需要已有工程"))?.1,rev,journal,now).await?;
+        agent::store::commit(
+            &mut tx,
+            id,
+            previous.ok_or_else(|| invalid("助手编辑需要已有工程"))?.1,
+            rev,
+            journal,
+            now,
+        )
+        .await?;
     } else {
-        history::write(&mut tx,id,rev,if rev==1{"initial"}else{"edit"},"user",if rev==1{"创建工程"}else{"保存工程"},&[],None).await?;
+        history::write(
+            &mut tx,
+            id,
+            rev,
+            history::Note {
+                kind: if rev == 1 { "initial" } else { "edit" },
+                author: "user",
+                label: if rev == 1 {
+                    "创建工程"
+                } else {
+                    "保存工程"
+                },
+                lines: &[],
+                turn: None,
+            },
+        )
+        .await?;
     }
     tx.commit().await?;
     Ok(Saved {
@@ -550,9 +678,18 @@ pub async fn delete(pool: &ConnectionPool, id: i64, revision: i64) -> Result<()>
         return Err(invalid("工程正在导出，请先取消或等待完成"));
     }
     let generating:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_generation_jobs WHERE project_id=? AND phase='running')").bind(id).fetch_one(&mut *tx).await?;
-    if generating {return Err(invalid("工程正在生成素材，请先取消或等待完成"));}
-    let downloading:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM editor_downloads WHERE project_id=? AND phase='running')").bind(id).fetch_one(&mut *tx).await?;
-    if downloading{return Err(invalid("工程正在下载素材，请先停止助手或等待完成"));}
+    if generating {
+        return Err(invalid("工程正在生成素材，请先取消或等待完成"));
+    }
+    let downloading: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM editor_downloads WHERE project_id=? AND phase='running')",
+    )
+    .bind(id)
+    .fetch_one(&mut *tx)
+    .await?;
+    if downloading {
+        return Err(invalid("工程正在下载素材，请先停止助手或等待完成"));
+    }
     sqlx::query("DELETE FROM editor_projects WHERE id=?")
         .bind(id)
         .execute(&mut *tx)
@@ -563,3 +700,8 @@ pub async fn delete(pool: &ConnectionPool, id: i64, revision: i64) -> Result<()>
 
 #[cfg(test)]
 mod tests;
+
+pub struct Storage<'a> {
+    pub pool: &'a ConnectionPool,
+    pub root: &'a std::path::Path,
+}

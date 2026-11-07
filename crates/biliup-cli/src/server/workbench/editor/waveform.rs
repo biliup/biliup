@@ -100,10 +100,10 @@ pub async fn generate(
     );
     let folder = root.join("editor-cache");
     let cache = folder.join(format!("{key}.json"));
-    if let Ok(bytes) = tokio::fs::read(&cache).await {
-        if let Ok(value) = serde_json::from_slice(&bytes) {
-            return Ok(Some(value));
-        }
+    if let Ok(bytes) = tokio::fs::read(&cache).await
+        && let Ok(value) = serde_json::from_slice(&bytes)
+    {
+        return Ok(Some(value));
     }
     let shared = {
         let mut jobs = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
@@ -118,10 +118,10 @@ pub async fn generate(
         }
     };
     let _same = shared.lock().await;
-    if let Ok(bytes) = tokio::fs::read(&cache).await {
-        if let Ok(value) = serde_json::from_slice(&bytes) {
-            return Ok(Some(value));
-        }
+    if let Ok(bytes) = tokio::fs::read(&cache).await
+        && let Ok(value) = serde_json::from_slice(&bytes)
+    {
+        return Ok(Some(value));
     }
     let _slot = DECODES.acquire().await.map_err(|e| e.to_string())?;
     let mut command = crate::tools::ffmpeg_command();
@@ -201,15 +201,14 @@ pub async fn generate(
     if !status.success() && waveform["seconds"].as_f64().unwrap_or(0.) < 1. {
         return Err("无法解码音频波形".into());
     }
-    if tokio::fs::create_dir_all(&folder).await.is_ok() {
-        if let Ok(file) = tempfile::Builder::new()
+    if tokio::fs::create_dir_all(&folder).await.is_ok()
+        && let Ok(file) = tempfile::Builder::new()
             .prefix("peaks-")
             .tempfile_in(&folder)
-        {
-            let temp = file.into_temp_path();
-            if tokio::fs::write(&temp, waveform.to_string()).await.is_ok() {
-                let _ = temp.persist_noclobber(cache);
-            }
+    {
+        let temp = file.into_temp_path();
+        if tokio::fs::write(&temp, waveform.to_string()).await.is_ok() {
+            let _ = temp.persist_noclobber(cache);
         }
     }
     Ok(Some(waveform))

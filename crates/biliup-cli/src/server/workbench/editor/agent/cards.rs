@@ -19,14 +19,17 @@ pub fn add(data: &mut Value, card: Value, text: &str) {
 impl Service {
     pub(super) async fn card_tool(
         &self,
-        project: i64,
-        turn: &str,
+        scope: super::Turn<'_>,
         context: &mut RunContext,
         name: &str,
         args: &Value,
-        cancel: &CancellationToken,
         data: &mut Value,
     ) -> Result<Value, Error> {
+        let super::Turn {
+            project,
+            id: turn,
+            cancel,
+        } = scope;
         plan::validate(name, args)?;
         match name {
             "plan_read" => plan::read(&self.pool, project).await,

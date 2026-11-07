@@ -31,7 +31,7 @@
 <table>
   <tr>
     <td width="50%"><img src=".github/resource/webui-overview.webp" alt="biliup WebUI 概览：系统状态、直播录制与最近事件" /></td>
-    <td width="50%"><img src=".github/resource/webui-editor.webp" alt="biliup 剪辑台：素材、画面预览、字幕和多轨时间轴" /></td>
+    <td width="50%"><img src=".github/resource/webui-editor.webp" alt="biliup 剪辑台：素材、画面预览、字幕、多轨时间轴和助手" /></td>
   </tr>
 </table>
 

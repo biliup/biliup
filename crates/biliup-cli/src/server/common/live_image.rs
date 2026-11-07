@@ -331,17 +331,15 @@ impl AvatarStore {
             .await
             .map_err(|e| e.to_string())?;
         let fingerprint = format!("{}:{}:{:?}", stored.file, stat.len(), stat.modified().ok());
-        if let Ok(bytes) = tokio::fs::read(&metadata).await {
-            if let Ok((saved, content_type)) = serde_json::from_slice::<(String, String)>(&bytes) {
-                if saved == fingerprint {
-                    if let Ok(bytes) = tokio::fs::read(&output).await {
-                        return Ok(FetchedImage {
-                            content_type,
-                            body: Bytes::from(bytes),
-                        });
-                    }
-                }
-            }
+        if let Ok(bytes) = tokio::fs::read(&metadata).await
+            && let Ok((saved, content_type)) = serde_json::from_slice::<(String, String)>(&bytes)
+            && saved == fingerprint
+            && let Ok(bytes) = tokio::fs::read(&output).await
+        {
+            return Ok(FetchedImage {
+                content_type,
+                body: Bytes::from(bytes),
+            });
         }
         let permit = THUMBNAIL_SLOTS
             .clone()

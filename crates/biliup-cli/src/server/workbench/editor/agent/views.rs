@@ -152,8 +152,7 @@ impl Service {
                 cancel,
             )
             .await?;
-            if editor::get(&self.pool, project).await?.summary.revision != revision
-            {
+            if editor::get(&self.pool, project).await?.summary.revision != revision {
                 return Err(Error::Conflict);
             }
             result["revision"] = json!(revision);
@@ -232,11 +231,13 @@ impl Service {
                         &self.pool,
                         &self.root,
                         project,
-                        document.clone(),
-                        chunk,
-                        width,
-                        false,
-                        true,
+                        editor::export::frames::FrameRequest {
+                            document: document.clone(),
+                            frames: chunk,
+                            width,
+                            motion_blur: false,
+                            census: true,
+                        },
                     )
                     .await
                     .map_err(invalid)?,

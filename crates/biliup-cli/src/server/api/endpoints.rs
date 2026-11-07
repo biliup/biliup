@@ -189,7 +189,7 @@ pub async fn post_streamers_endpoint(
         payload.postprocessor = None;
         payload.opt_args = None;
     }
-    validate_streamer_mosaic(&payload.override_cfg)?;
+    validate_streamer_mosaic(&payload.override_cfg).map_err(IntoResponse::into_response)?;
     match add_streamer(&service_register, payload).await {
         Ok(live_streamers) => Ok(Json(live_streamers)),
         Err(AddStreamerError::UnsupportedUrl) => {
@@ -222,7 +222,7 @@ pub async fn put_streamers_endpoint(
         payload.postprocessor = current.postprocessor;
         payload.opt_args = current.opt_args;
     }
-    validate_streamer_mosaic(&payload.override_cfg)?;
+    validate_streamer_mosaic(&payload.override_cfg).map_err(IntoResponse::into_response)?;
     let mut streamer = update_streamer(&service_register, payload)
         .await
         .map_err(report_to_response)?;
@@ -234,7 +234,7 @@ pub async fn put_streamers_endpoint(
 
 fn validate_streamer_mosaic(
     patch: &Option<crate::server::config::ConfigPatch>,
-) -> Result<(), Response> {
+) -> Result<(), (StatusCode, Json<ApiError>)> {
     let value = patch
         .as_ref()
         .and_then(|patch| patch.mosaic_config.as_ref())
@@ -256,11 +256,10 @@ fn validate_streamer_mosaic(
                 "视频分段时长格式无效，请输入大于 0 的时:分:秒、分:秒或秒数".to_string(),
             )),
         )
-            .into_response()
     })?;
     config
         .validate_mosaic()
-        .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))).into_response())
+        .map_err(|message| (StatusCode::BAD_REQUEST, Json(ApiError::new(message))))
 }
 
 pub async fn delete_streamers_endpoint(
@@ -279,7 +278,9 @@ pub async fn pause_streamers_endpoint(
     State(managers): State<Arc<DownloadManager>>,
     Path(id): Path<i64>,
 ) -> Result<Json<()>, Response> {
-    toggle_pause(&managers, id).await;
+    toggle_pause(&managers, id)
+        .await
+        .map_err(report_to_response)?;
     Ok(Json(()))
 }
 
@@ -1283,10 +1284,10 @@ pub async fn post_uploads(
                     StatusCode::BAD_REQUEST,
                     format!("无效或越界的媒体文件名: {file}"),
                 )
-                    .into_response()
             })
         })
-        .collect::<Result<Vec<_>, Response>>()?;
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(IntoResponse::into_response)?;
     if files.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "至少选择一个媒体文件").into_response());
     }
@@ -1649,9 +1650,7 @@ mod configuration_tests {
         }))
         .unwrap();
         assert_eq!(
-            validate_streamer_mosaic(&Some(invalid))
-                .unwrap_err()
-                .status(),
+            validate_streamer_mosaic(&Some(invalid)).unwrap_err().0,
             StatusCode::BAD_REQUEST
         );
         assert!(validate_streamer_mosaic(&None).is_ok());

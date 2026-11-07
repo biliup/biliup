@@ -22,7 +22,10 @@ fn invalid(message: impl Into<String>) -> Error {
 fn source_id(source: &MediaSource) -> String {
     match source {
         MediaSource::File(file) => format!("file-{}", file.asset_id),
-        MediaSource::Recording(recording) => format!("recording-{}-{}", recording.session_id, recording.segment_id),
+        MediaSource::Recording(recording) => format!(
+            "recording-{}-{}",
+            recording.session_id, recording.segment_id
+        ),
     }
 }
 fn origin(media: &Value, source: &MediaSource) -> Option<&'static str> {
@@ -35,9 +38,7 @@ fn origin(media: &Value, source: &MediaSource) -> Option<&'static str> {
         return None;
     }
     Some(
-        if matches!(source, MediaSource::Recording(_))
-            || root == "capture"
-        {
+        if matches!(source, MediaSource::Recording(_)) || root == "capture" {
             "capture"
         } else if root == "generate" {
             "generated"
@@ -202,14 +203,22 @@ pub async fn search(pool: &ConnectionPool, project: i64, query: Query) -> Result
         return Err(invalid("素材类型无效"));
     }
     let limit = query.limit.unwrap_or(30).clamp(1, 100);
-    let before = query.before.as_deref().map(|cursor| {
-        let (created, id) = cursor.split_once(':').ok_or_else(|| invalid("素材分页位置无效"))?;
-        let created = created.parse::<i64>().map_err(|_| invalid("素材分页位置无效"))?;
-        if created < 0 || id.is_empty() || cursor.len() > 256 {
-            return Err(invalid("素材分页位置无效"));
-        }
-        Ok((created, id))
-    }).transpose()?;
+    let before = query
+        .before
+        .as_deref()
+        .map(|cursor| {
+            let (created, id) = cursor
+                .split_once(':')
+                .ok_or_else(|| invalid("素材分页位置无效"))?;
+            let created = created
+                .parse::<i64>()
+                .map_err(|_| invalid("素材分页位置无效"))?;
+            if created < 0 || id.is_empty() || cursor.len() > 256 {
+                return Err(invalid("素材分页位置无效"));
+            }
+            Ok((created, id))
+        })
+        .transpose()?;
     let _lifecycle = MEDIA_LIFECYCLE.read().await;
     let saved = super::get(pool, project).await?;
     let mut seen: HashSet<String> = saved.document.sources.values().map(source_id).collect();
@@ -226,8 +235,9 @@ pub async fn search(pool: &ConnectionPool, project: i64, query: Query) -> Result
         let entry = Entry::from_row(&row)?;
         // A cursor is a position in the immutable creation order, not a row offset.
         // Importing/removing a result or receiving a new one cannot skip the following page.
-        if before.is_some_and(|(created, id)| entry.created > created || entry.created == created && entry.id.as_str() <= id)
-            || seen.contains(&entry.id)
+        if before.is_some_and(|(created, id)| {
+            entry.created > created || entry.created == created && entry.id.as_str() <= id
+        }) || seen.contains(&entry.id)
             || !kind.is_empty() && kind != entry.origin && entry.media["kind"] != kind
         {
             continue;
@@ -273,19 +283,32 @@ async fn entry(pool: &ConnectionPool, id: &str) -> Result<Entry, Error> {
 }
 /// Only prepares a registered reference. The normal project save commits its retention pin.
 pub async fn import(pool: &ConnectionPool, project: i64, id: &str) -> Result<Value, Error> {
-    prepare_import(pool,project,id,false).await
+    prepare_import(pool, project, id, false).await
 }
-pub(crate) async fn import_pinned(pool:&ConnectionPool,project:i64,id:&str)->Result<Value,Error>{
-    prepare_import(pool,project,id,true).await
+pub(crate) async fn import_pinned(
+    pool: &ConnectionPool,
+    project: i64,
+    id: &str,
+) -> Result<Value, Error> {
+    prepare_import(pool, project, id, true).await
 }
-async fn prepare_import(pool:&ConnectionPool,project:i64,id:&str,pin:bool)->Result<Value,Error>{
+async fn prepare_import(
+    pool: &ConnectionPool,
+    project: i64,
+    id: &str,
+    pin: bool,
+) -> Result<Value, Error> {
     let _lifecycle = MEDIA_LIFECYCLE.read().await;
     let saved = super::get(pool, project).await?;
     let mut entry = entry(pool, id).await?;
     entry.path(pool).await?;
-    if pin{if let MediaSource::Recording(source)=&entry.source{
-        sqlx::query("INSERT OR IGNORE INTO editor_sources(project_id,segment_id) VALUES(?,?)").bind(project).bind(source.segment_id).execute(pool).await?;
-    }}
+    if pin && let MediaSource::Recording(source) = &entry.source {
+        sqlx::query("INSERT OR IGNORE INTO editor_sources(project_id,segment_id) VALUES(?,?)")
+            .bind(project)
+            .bind(source.segment_id)
+            .execute(pool)
+            .await?;
+    }
     let fps = saved.document.project["canvas"]["fps"]
         .as_f64()
         .unwrap_or(30.);

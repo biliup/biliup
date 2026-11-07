@@ -73,11 +73,22 @@ async fn fingerprint(path: &Path, source: &MediaSource) -> Result<String, Error>
         // duration do not invalidate an already prepared preview of that window.
         MediaSource::Recording(recording) => hash.update(format!(
             "preview|recording|{}|{}|{}|{duration}",
-            recording.session_id, recording.segment_id, path.to_string_lossy()
+            recording.session_id,
+            recording.segment_id,
+            path.to_string_lossy()
         )),
         MediaSource::File(_) => {
-            let modified = stat.modified().map_err(invalid)?.duration_since(UNIX_EPOCH).map_err(invalid)?.as_nanos();
-            hash.update(format!("preview|file|{}|{}|{modified}|{duration}", path.to_string_lossy(), stat.len()));
+            let modified = stat
+                .modified()
+                .map_err(invalid)?
+                .duration_since(UNIX_EPOCH)
+                .map_err(invalid)?
+                .as_nanos();
+            hash.update(format!(
+                "preview|file|{}|{}|{modified}|{duration}",
+                path.to_string_lossy(),
+                stat.len()
+            ));
         }
     }
     Ok(format!("{:x}", hash.finalize()))
@@ -346,7 +357,13 @@ impl Jobs {
     }
     /// Use a proxy only when it was made from these registered source bytes and duration.
     /// Historical graphic frames may use a surviving cache, never the current ID's new file.
-    pub async fn cached(&self, project: i64, path: &Path, source: &MediaSource, key: Option<&str>) -> Result<PathBuf, Error> {
+    pub async fn cached(
+        &self,
+        project: i64,
+        path: &Path,
+        source: &MediaSource,
+        key: Option<&str>,
+    ) -> Result<PathBuf, Error> {
         let current = fingerprint(path, source).await?;
         if key.is_some_and(|key| key != current) {
             return Err(Error::NotFound);
@@ -400,10 +417,10 @@ impl Jobs {
                 if !busy {
                     // Match foreground lock order, and never hold the CPU while waiting for
                     // cleanup's write lock (it may be waiting on a foreground reader).
-                    if let Ok(lifecycle) = MEDIA_LIFECYCLE.try_read() {
-                        if let Some(permit) = transcode::try_acquire() {
-                            break (lifecycle, permit);
-                        }
+                    if let Ok(lifecycle) = MEDIA_LIFECYCLE.try_read()
+                        && let Some(permit) = transcode::try_acquire()
+                    {
+                        break (lifecycle, permit);
                     }
                 }
                 tokio::select! {_ = cancel.cancelled()=>return Err(invalid("代理已取消")),_ = tokio::time::sleep(Duration::from_millis(750))=>{}}
@@ -513,10 +530,7 @@ impl Jobs {
             .get(&entry.id)
             .ok_or(Error::NotFound)?;
         let path = media::source_path(&self.pool, source).await?;
-        if path != entry.path
-            || fingerprint(&path, source).await?
-                != entry.key
-        {
+        if path != entry.path || fingerprint(&path, source).await? != entry.key {
             return Err(invalid("原片已改变，请刷新代理"));
         }
         Ok(())
@@ -548,16 +562,26 @@ fn needs_proxy(text: &str) -> bool {
         .captures(input)
         .and_then(|c| c[1].parse::<u64>().ok())
         .unwrap_or(0);
-    let container = input.lines().find_map(|line| line.trim().strip_prefix("Input #0, "))
-        .and_then(|line| line.split(", from ").next()).unwrap_or("");
+    let container = input
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("Input #0, "))
+        .and_then(|line| line.split(", from ").next())
+        .unwrap_or("");
     // Browser video elements cannot seek raw FLV/TS without an index. Even small
     // recordings need a seekable MP4; the demuxed original remains the immediate preview.
-    let native_container = container.split(',').any(|name| matches!(name.trim(), "mov" | "mp4" | "webm"));
+    let native_container = container
+        .split(',')
+        .any(|name| matches!(name.trim(), "mov" | "mp4" | "webm"));
     let native_codec = matches!(codec, "h264" | "vp8" | "vp9" | "av1");
-    let audio = input.lines().find_map(|line| line.split("Audio:").nth(1))
+    let audio = input
+        .lines()
+        .find_map(|line| line.split("Audio:").nth(1))
         .and_then(|line| line.trim().split([',', ' ']).next());
     let native_audio = audio.is_none_or(|codec| matches!(codec, "aac" | "mp3" | "opus" | "vorbis"));
-    large || !native_container || !native_codec || !native_audio
+    large
+        || !native_container
+        || !native_codec
+        || !native_audio
         || (matches!(
             codec,
             "h264" | "hevc" | "mpeg2video" | "mpeg4" | "vp8" | "vp9" | "av1"

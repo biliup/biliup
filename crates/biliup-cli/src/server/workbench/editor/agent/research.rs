@@ -179,7 +179,16 @@ impl Service {
             };
             let (final_url, mime, data) = tokio::select! {_=cancel.cancelled()=>return Err(invalid("助手已停止读取网页")),result=tokio::time::timeout(Duration::from_secs(60),work)=>result.map_err(|_|invalid("网页读取超时"))??};
             let (id, now) = save_source(
-                &self.pool, project, turn, url, &final_url, &mime, &data, cancel,
+                &self.pool,
+                super::Turn {
+                    project,
+                    id: turn,
+                    cancel,
+                },
+                url,
+                &final_url,
+                &mime,
+                &data,
             )
             .await?;
             (id, final_url, mime, now, data)
@@ -322,14 +331,17 @@ impl Service {
 // Web pages and search results share the same bounded evidence store.
 pub(super) async fn save_source(
     pool: &editor::ConnectionPool,
-    project: i64,
-    turn: &str,
+    scope: super::Turn<'_>,
     url: &str,
     final_url: &str,
     mime: &str,
     data: &Value,
-    cancel: &CancellationToken,
 ) -> Result<(String, i64), Error> {
+    let super::Turn {
+        project,
+        id: turn,
+        cancel,
+    } = scope;
     if data.to_string().len() > 4 * 1024 * 1024 {
         return Err(invalid("网页资料超过大小限制"));
     }

@@ -163,7 +163,7 @@ async fn source_registration_rolls_back_if_segment_update_fails() {
     let base = test_context(Config::default());
     let ctx = Context::new(1, base.worker().clone(), pool, base.live_stream().clone());
     assert!(
-        update_processed_path(&ctx, &raw, &output, &[raw.clone()], None)
+        update_processed_path(&ctx, &raw, &output, std::slice::from_ref(&raw), None)
             .await
             .is_err()
     );

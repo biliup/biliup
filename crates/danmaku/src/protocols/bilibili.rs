@@ -141,12 +141,12 @@ impl Bilibili {
                 cookie_uid = Some(uid);
             }
         }
-        if let (Some(explicit), Some(cookie)) = (context.uid, cookie_uid) {
-            if explicit != cookie {
-                return Err(DanmakuError::Decode(
-                    "Bilibili context UID does not match cookie UID (values redacted)".into(),
-                ));
-            }
+        if let (Some(explicit), Some(cookie)) = (context.uid, cookie_uid)
+            && explicit != cookie
+        {
+            return Err(DanmakuError::Decode(
+                "Bilibili context UID does not match cookie UID (values redacted)".into(),
+            ));
         }
         // A logged-in API token cannot authenticate an anonymous uid=0 registration.
         let uid = context.uid.or(cookie_uid).unwrap_or(0);
@@ -429,11 +429,11 @@ impl Bilibili {
 
         // info[2][0] = uid, info[2][1] = name
         let user_info = info.get(2)?.as_array()?;
-        let uid = user_info.get(0)?.as_u64();
+        let uid = user_info.first()?.as_u64();
         let name = user_info.get(1)?.as_str().map(|s| s.to_string());
 
         // info[0][3] = color
-        let meta = info.get(0)?.as_array()?;
+        let meta = info.first()?.as_array()?;
         let color = meta
             .get(3)
             .and_then(|v| v.as_u64())

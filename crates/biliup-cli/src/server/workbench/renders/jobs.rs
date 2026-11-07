@@ -80,13 +80,39 @@ fn output_file_name(name: Option<&str>, id: i64) -> String {
 impl RenderJobs {
     pub fn new(pool: ConnectionPool, root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        let editor_analysis = Arc::new(crate::server::workbench::editor::analysis::Jobs::new(pool.clone(), root.clone()));
-        let editor_generate = Arc::new(crate::server::workbench::editor::generate::Jobs::new(pool.clone(),root.clone()));
-        let editor_exports=Arc::new(crate::server::workbench::editor::export::jobs::Jobs::new(pool.clone(),root.clone()));
-        let editor_library=Arc::new(crate::server::workbench::editor::online_library::Library::new(pool.clone(),root.clone()));
+        let editor_analysis = Arc::new(crate::server::workbench::editor::analysis::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_generate = Arc::new(crate::server::workbench::editor::generate::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_exports = Arc::new(crate::server::workbench::editor::export::jobs::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_library = Arc::new(
+            crate::server::workbench::editor::online_library::Library::new(
+                pool.clone(),
+                root.clone(),
+            ),
+        );
         Self {
-            editor_agent: Arc::new(crate::server::workbench::editor::agent::service::Service::new(pool.clone(),root.clone(),editor_analysis.clone(),editor_generate.clone(),editor_exports.clone(),editor_library.clone())),
-            editor_proxies: Arc::new(crate::server::workbench::editor::proxies::Jobs::new(pool.clone(),root.clone())),
+            editor_agent: Arc::new(
+                crate::server::workbench::editor::agent::service::Service::new(
+                    pool.clone(),
+                    root.clone(),
+                    editor_analysis.clone(),
+                    editor_generate.clone(),
+                    editor_exports.clone(),
+                    editor_library.clone(),
+                ),
+            ),
+            editor_proxies: Arc::new(crate::server::workbench::editor::proxies::Jobs::new(
+                pool.clone(),
+                root.clone(),
+            )),
             editor_generate,
             editor_library,
             editor_analysis,
@@ -321,16 +347,23 @@ impl RenderJobs {
         })
     }
     pub async fn enqueue(self: &Arc<Self>, spec: RenderSpec) -> Result<JobView, String> {
-        self.enqueue_attempt(spec,None).await
+        self.enqueue_attempt(spec, None).await
     }
-    async fn enqueue_attempt(self:&Arc<Self>,spec:RenderSpec,retry_of:Option<i64>)->Result<JobView,String>{
+    async fn enqueue_attempt(
+        self: &Arc<Self>,
+        spec: RenderSpec,
+        retry_of: Option<i64>,
+    ) -> Result<JobView, String> {
         for asset in &spec.assets {
             assets::verify(asset).await?;
         }
-        let (record,created) = store::insert_attempt(&self.pool, &spec, recorder::now_ms(),retry_of)
-            .await
-            .map_err(|e| e.to_string())?;
-        if !created{return Ok(record.view);}
+        let (record, created) =
+            store::insert_attempt(&self.pool, &spec, recorder::now_ms(), retry_of)
+                .await
+                .map_err(|e| e.to_string())?;
+        if !created {
+            return Ok(record.view);
+        }
         lock(&self.tokens).insert(record.view.id, CancellationToken::new());
         if let Some(cid) = spec.clip_id {
             match clips::begin_render_export(&self.pool, cid, record.view.id, recorder::now_ms())
@@ -558,12 +591,11 @@ impl RenderJobs {
         let writer = tokio::spawn(async move {
             while progress_rx.changed().await.is_ok() {
                 let progress = progress_rx.borrow_and_update().clone();
-                if let Some(progress) = progress {
-                    if let Err(error) =
+                if let Some(progress) = progress
+                    && let Err(error) =
                         store::progress_snapshot(&pool, id, &progress, recorder::now_ms()).await
-                    {
-                        tracing::warn!(%error, id, "保存合成进度失败");
-                    }
+                {
+                    tracing::warn!(%error, id, "保存合成进度失败");
                 }
             }
         });
@@ -615,7 +647,10 @@ impl RenderJobs {
             .is_some_and(|job| job.view.state == "cancelled"))
     }
     pub async fn retry(self: &Arc<Self>, id: i64) -> Result<JobView, String> {
-        if let Some(existing)=store::retry_for(&self.pool,id).await.map_err(|e|e.to_string())?{
+        if let Some(existing) = store::retry_for(&self.pool, id)
+            .await
+            .map_err(|e| e.to_string())?
+        {
             return Ok(existing.view);
         }
         let job = store::get(&self.pool, id)
@@ -631,7 +666,7 @@ impl RenderJobs {
                 return Err(format!("分段 {} 的源文件已丢失", s.segment_id));
             }
         }
-        self.enqueue_attempt(job.spec,Some(id)).await
+        self.enqueue_attempt(job.spec, Some(id)).await
     }
     pub async fn shutdown(&self) {
         self.stop();

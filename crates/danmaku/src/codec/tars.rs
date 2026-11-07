@@ -93,7 +93,7 @@ impl TarsOutputStream {
 
     /// Write an int16 value.
     pub fn write_int16(&mut self, tag: u8, value: i16) {
-        if value >= -128 && value <= 127 {
+        if (-128..=127).contains(&value) {
             self.write_int8(tag, value as i8);
         } else {
             self.write_head(tag, TarsType::Int16);
@@ -103,7 +103,7 @@ impl TarsOutputStream {
 
     /// Write an int32 value.
     pub fn write_int32(&mut self, tag: u8, value: i32) {
-        if value >= -32768 && value <= 32767 {
+        if (-32768..=32767).contains(&value) {
             self.write_int16(tag, value as i16);
         } else {
             self.write_head(tag, TarsType::Int32);
@@ -346,15 +346,11 @@ impl<'a> TarsInputStream<'a> {
     }
 
     fn skip_to_struct_end_at(&mut self, depth: usize) {
-        loop {
-            if let Some((_, tars_type)) = self.read_head() {
-                if tars_type == TarsType::StructEnd {
-                    break;
-                }
-                self.skip_field_at(tars_type, depth);
-            } else {
+        while let Some((_, tars_type)) = self.read_head() {
+            if tars_type == TarsType::StructEnd {
                 break;
             }
+            self.skip_field_at(tars_type, depth);
         }
     }
 

@@ -299,7 +299,7 @@
   text-overflow: ellipsis;
 }
 
-/* 直播中:底部左侧时长 + 写盘速率 */
+/* 直播中:底部左侧写盘速率与标记 */
 .liveStats {
   display: inline-flex;
   align-items: baseline;
@@ -308,11 +308,8 @@
   min-width: 0;
 }
 
-/* 直播中:实时时长(绿色) */
-.liveInfo {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: rgb(var(--semi-green-5));
+/* 直播状态内的实时时长 */
+.liveDuration {
   white-space: nowrap;
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
@@ -376,16 +373,6 @@
 }
 
 /* ===== 底部 ===== */
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--semi-color-text-2);
-  margin-top: 8px;
-}
-
 /* 底部左侧状态与右侧操作共用一行，不为空状态预留高度 */
 .footer {
   display: flex;

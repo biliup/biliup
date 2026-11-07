@@ -1,4 +1,11 @@
 //! One brand/skill view for the assistant and persisted resource APIs.
+pub struct Update<'a> {
+    pub revision: i64,
+    pub expected: &'a str,
+    pub kit: Option<Value>,
+    pub active: Option<Value>,
+}
+
 use super::{ConnectionPool, Error, Result, invalid};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -28,7 +35,8 @@ pub async fn snapshot(pool: &ConnectionPool, project: i64) -> Result<Snapshot> {
     let assets=sqlx::query("SELECT scope,kit,name FROM editor_brand_files WHERE project_id IS NULL OR project_id=? ORDER BY scope='global' DESC,scope,kit,name").bind(project).fetch_all(&mut *tx).await?;
     tx.commit().await?;
     let mut kits = BTreeMap::<String, Value>::new();
-    let mut skills: BTreeMap<String, Value> = super::skills::all().iter()
+    let mut skills: BTreeMap<String, Value> = super::skills::all()
+        .iter()
         .map(|skill| (skill["id"].as_str().unwrap().to_string(), skill.clone()))
         .collect();
     let mut active = json!({"kit":null,"skills":[]});
@@ -85,10 +93,13 @@ pub async fn commit(
     pool: &ConnectionPool,
     project: i64,
     turn: &str,
-    revision: i64,
-    expected: &str,
-    kit: Option<Value>,
-    active: Option<Value>,
+    Update {
+        revision,
+        expected,
+        kit,
+        active,
+    }: Update<'_>,
+
     cancel: &CancellationToken,
 ) -> Result<()> {
     let kit = kit

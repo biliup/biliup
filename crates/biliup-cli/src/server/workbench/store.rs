@@ -672,10 +672,11 @@ pub async fn session_segments(
         for (i, segment) in segments.iter_mut().enumerate() {
             segment.start_ms += member.offset_ms;
             segment.end_ms = segment.end_ms.map(|t| t + member.offset_ms);
-            if i == 0 && member.source_session_id != session_id {
-                if let Some(end) = previous_end {
-                    segment.gap_before_ms = (segment.start_ms - end).max(0);
-                }
+            if i == 0
+                && member.source_session_id != session_id
+                && let Some(end) = previous_end
+            {
+                segment.gap_before_ms = (segment.start_ms - end).max(0);
             }
         }
         previous_end = segments.last().map(|s| s.end_ms.unwrap_or(s.start_ms));
