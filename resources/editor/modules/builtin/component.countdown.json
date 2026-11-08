@@ -1,0 +1,64 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.countdown",
+  "kind": "component",
+  "name": "Countdown",
+  "description": "A number counting down from `from` to 0 over the item's length, in a ring that empties.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "from": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 3600,
+        "x-unit": "s",
+        "x-group": "Content",
+        "description": "Where it starts."
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The number and the ring."
+      },
+      "track": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The ring's empty part."
+      },
+      "ring": {
+        "type": "boolean",
+        "x-group": "Style",
+        "description": "Draw the ring."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 360,
+      "height": 360
+    },
+    "animated": true,
+    "defaults": {
+      "from": 5,
+      "color": "fg",
+      "track": "#FFFFFF2E",
+      "ring": true
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "timer"
+  }
+}

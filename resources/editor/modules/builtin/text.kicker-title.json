@@ -1,0 +1,41 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.kicker-title",
+  "kind": "text-style",
+  "name": "Kicker and title",
+  "description": "A title with a small accent kicker above it.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.1,
+    "weight": 700,
+    "font": "DM Sans",
+    "tracking": -0.035,
+    "lineHeight": 1.02,
+    "color": "fg",
+    "x": 0.08,
+    "y": 0.42,
+    "text": "Your title",
+    "with": [
+      {
+        "look": "text.kicker",
+        "text": "Chapter one",
+        "dy": -0.065
+      }
+    ],
+    "animation": {
+      "in": {
+        "module": "move.rise",
+        "seconds": 0.4
+      }
+    }
+  }
+}

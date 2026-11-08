@@ -83,7 +83,7 @@ pub struct SegmentRow {
 }
 
 impl SegmentRow {
-    fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
+    pub(crate) fn from_row(row: &SqliteRow) -> sqlx::Result<Self> {
         Ok(Self {
             id: row.try_get("id")?,
             session_id: row.try_get("session_id")?,
@@ -121,6 +121,7 @@ pub enum DeleteSessionOutcome {
     NotEnded,
     Busy,
     GroupMember,
+    EditorReferenced,
 }
 
 /// 开播检测到时取这一场的行：同一主播最近一场已经结束、且 `now_ms - ended_at <= merge_window_ms`
@@ -225,6 +226,14 @@ pub async fn delete_session(pool: &ConnectionPool, id: i64) -> sqlx::Result<Dele
         }
         Some(None) => {}
         Some(Some(_)) => {}
+    }
+
+    let editing: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM editor_projects WHERE session_id=?1)
+            OR EXISTS(SELECT 1 FROM editor_sources r JOIN segments g ON g.id=r.segment_id WHERE g.session_id=?1)",
+    ).bind(id).fetch_one(&mut *tx).await?;
+    if editing {
+        return Ok(DeleteSessionOutcome::EditorReferenced);
     }
 
     let busy: bool = sqlx::query_scalar(
@@ -582,25 +591,46 @@ pub async fn list_sessions_including_sources(
     offset: i64,
     include_sources: bool,
 ) -> sqlx::Result<(Vec<SessionListRow>, i64)> {
+    search_sessions(pool, streamer_id, limit, offset, include_sources, "").await
+}
+
+pub async fn search_sessions(
+    pool: &ConnectionPool,
+    streamer_id: Option<i64>,
+    limit: i64,
+    offset: i64,
+    include_sources: bool,
+    search: &str,
+) -> sqlx::Result<(Vec<SessionListRow>, i64)> {
     let visible = if include_sources {
         "1=1"
     } else {
         "NOT EXISTS(SELECT 1 FROM session_group_members members WHERE members.source_session_id=s.id)"
     };
+    // Match before pagination. Group views also search the names and files of their sources.
+    let matches = "(?2 = '' OR instr(lower(s.name || ' ' || s.title), lower(?2)) > 0
+        OR EXISTS(SELECT 1 FROM stream_sessions source
+          WHERE (source.id=s.id OR source.id IN
+            (SELECT source_session_id FROM session_group_members WHERE group_session_id=s.id))
+          AND (instr(lower(source.name || ' ' || source.title), lower(?2)) > 0
+            OR EXISTS(SELECT 1 FROM segments file WHERE file.session_id=source.id
+              AND instr(lower(file.path), lower(?2)) > 0))))";
     let total: i64 = sqlx::query_scalar(&format!(
         "SELECT COUNT(*) FROM stream_sessions s
-         WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible}"
+         WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible} AND {matches}"
     ))
     .bind(streamer_id)
+    .bind(search)
     .fetch_one(pool)
     .await?;
     let sql = format!(
-        "{} WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible}
-         GROUP BY s.id ORDER BY s.id DESC LIMIT ?2 OFFSET ?3",
+        "{} WHERE (?1 IS NULL OR s.streamer_id = ?1) AND {HAS_TIMELINE} AND {visible} AND {matches}
+         GROUP BY s.id ORDER BY s.id DESC LIMIT ?3 OFFSET ?4",
         session_list_select()
     );
     let rows = sqlx::query_as(&sql)
         .bind(streamer_id)
+        .bind(search)
         .bind(limit)
         .bind(offset)
         .fetch_all(pool)
@@ -642,10 +672,11 @@ pub async fn session_segments(
         for (i, segment) in segments.iter_mut().enumerate() {
             segment.start_ms += member.offset_ms;
             segment.end_ms = segment.end_ms.map(|t| t + member.offset_ms);
-            if i == 0 && member.source_session_id != session_id {
-                if let Some(end) = previous_end {
-                    segment.gap_before_ms = (segment.start_ms - end).max(0);
-                }
+            if i == 0
+                && member.source_session_id != session_id
+                && let Some(end) = previous_end
+            {
+                segment.gap_before_ms = (segment.start_ms - end).max(0);
             }
         }
         previous_end = segments.last().map(|s| s.end_ms.unwrap_or(s.start_ms));

@@ -756,7 +756,7 @@ async fn global_jobs_filter_page_and_persist_telemetry_through_terminal_states()
 fn legacy_recipes_default_to_auto_and_unknown_encoders_are_rejected() {
     let recipe: RenderRecipe = serde_json::from_str(r#"{"regions":[]}"#).unwrap();
     assert_eq!(
-        serde_json::to_value(&recipe.encoding.encoder).unwrap(),
+        serde_json::to_value(recipe.encoding.encoder).unwrap(),
         "auto"
     );
     assert!(serde_json::from_str::<RenderRecipe>(r#"{"encoding":{"encoder":"shell"}}"#).is_err());

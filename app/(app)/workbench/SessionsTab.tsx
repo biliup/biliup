@@ -3,10 +3,10 @@ import { Banner, Button, Popconfirm, Spin, Table, Tag, Toast, Tooltip, Typograph
 import { IconDeleteStroked } from '@douyinfe/semi-icons'
 import Link from 'next/link'
 import useSWR from 'swr'
-import { fetcher, type StreamerInfo } from '@/app/lib/api-streamer'
+import { API_BASE, fetcher, type StreamerInfo } from '@/app/lib/api-streamer'
 import {
   isReadable, replayHref, type SessionDetail, type SessionSummary, type SessionPage, type SessionMergeCandidate,
-  sessionUrl, deleteSession, mergeCandidatesUrl, dismissSessionMerge, mergeProblem, formatSpan, formatPrecise,
+  sessionUrl, deleteSession, mergeCandidatesUrl, dismissSessionMerge, mergeProblem, formatSpan, formatPrecise, segmentEnd,
 } from '@/app/lib/sessions'
 import { formatSize } from '@/app/lib/use-dashboard'
 import { humDate } from '@/app/lib/utils'
@@ -20,9 +20,13 @@ import { useIsMobile } from '../../lib/useIsMobile'
 import dc from '@/app/ui/data-card.module.scss'
 import styles from './sessions.module.scss'
 import SessionMergeDialog from './SessionMergeDialog'
+import {GlobalDialog} from '@/app/ui/editor/controls/GlobalDialog'
+import {X,Film,Play,Scissors} from 'lucide-react'
+import dynamic from 'next/dynamic'
+const Player=dynamic(()=>import('@/app/ui/Player'),{ssr:false})
 
 /** 「直播场次」：每场一行，能按场次回看的点「回看」进回看页 */
-export default function SessionsTab() {
+export default function SessionsTab({streamerId=null}:{streamerId?:number|null}={}) {
   const isMobile = useIsMobile()
   const { Text } = Typography
   const autoClip = useAutoClip()
@@ -30,7 +34,7 @@ export default function SessionsTab() {
   const canEdit = can('clip.edit')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const { data, error, isLoading, mutate } = useSWR<SessionPage>(`/v1/sessions?page=${page}&page_size=${pageSize}`, fetcher, { keepPreviousData: true, refreshInterval: 10_000 })
+  const { data, error, isLoading, mutate } = useSWR<SessionPage>(`/v1/sessions?page=${page}&page_size=${pageSize}${streamerId?`&streamer_id=${streamerId}`:''}`, fetcher, { keepPreviousData: true, refreshInterval: 10_000 })
   const { data: candidateData, error: candidatesError, mutate: reloadCandidates } = useSWR<{ items: SessionMergeCandidate[] }>(canEdit ? mergeCandidatesUrl : null, fetcher, { refreshInterval: 10_000 })
   const [selected, setSelected] = useState<SessionSummary[]>([])
   const [merge, setMerge] = useState<{ ids: number[]; candidate?: SessionMergeCandidate } | null>(null)
@@ -134,17 +138,11 @@ export default function SessionsTab() {
       width: can('clip.edit') ? 128 : 72,
       render: (_: unknown, record: SessionSummary) =>
         <div className={styles.actions}>
-          {record.segment_count > 0 || record.kind === 'group' ? (
+          {canEdit && (record.segment_count > 0 || record.kind === 'group') ? (
             <Link href={replayHref(record.id)} className={styles.replayLink}>
-              回看
+              剪辑
             </Link>
-          ) : (
-            <Tooltip content="这一场在升级前录制，没有时间轴，不能按场次回看；请在「录制文件」里按文件播放">
-              <Text type="tertiary" className={styles.replayOff}>
-                回看
-              </Text>
-            </Tooltip>
-          )}
+          ) : null}
           {can('clip.edit') ? (
             <Popconfirm
               title="删除这场直播历史？"
@@ -173,7 +171,7 @@ export default function SessionsTab() {
   return (
     <div className={styles.sessionPage}>
       {candidateData?.items.length ? <div className={dc.card}>
-        <div className={styles.mergeToolbar}><strong>场次续接建议</strong><Text type="tertiary" size="small">同一主播停录后重新开播，可确认合并到完整工作台</Text></div>
+        <div className={styles.mergeToolbar}><strong>场次续接建议</strong></div>
         <div className={styles.candidates}>
           {candidateData.items.map(candidate => <div key={candidate.id} className={styles.candidate}>
             <div className={styles.candidateBody}>
@@ -222,7 +220,7 @@ export default function SessionsTab() {
       {merge ? <SessionMergeDialog key={`${merge.ids.join(',')}:${merge.candidate?.id ?? 'manual'}`} sourceIds={merge.ids} candidate={merge.candidate} canReadRecipe={can('file.view')}
         onClose={() => setMerge(null)} onMerged={id => {
           setMerge(null); setSelected([]); void mutate(); void reloadCandidates()
-          Toast.success({ content: <span>已合并场次 · <Link href={replayHref(id)} className={styles.replayLink}>进入完整工作台</Link></span>, duration: 5 })
+          Toast.success({ content: <span>已合并场次 · <Link href={replayHref(id)} className={styles.replayLink}>打开剪辑</Link></span>, duration: 5 })
         }} /> : null}
     </div>
   )
@@ -282,6 +280,8 @@ function TextForGroup() {
 
 // 展开子行:该次直播的录制文件列表；有时间轴的场次，能回看的文件可以直接定位到这一段
 const FileLists = ({ record }: { record: SessionSummary }) => {
+  const {can}=useMe()
+  const [playing,setPlaying]=useState<SessionDetail['segments'][number]>()
   const { data: detail, isLoading } = useSWR<SessionDetail>(
     sessionUrl(record.id),
     fetcher,
@@ -291,11 +291,11 @@ const FileLists = ({ record }: { record: SessionSummary }) => {
     }
   )
 
-  if (isLoading) return <div>加载中...</div>
-  if (!detail) return <div>读取场次详情失败</div>
+  if (isLoading) return <div className={styles.fileListStatus}><Spin size="small"/></div>
+  if (!detail) return <div className={styles.fileListStatus} role="alert">读取场次详情失败</div>
 
   return (
-    <div style={{ padding: '4px 8px', fontSize: 13, color: 'var(--semi-color-text-1)' }}>
+    <div className={styles.recordingFiles}>
       {detail.kind === 'group' ? <div className={styles.members}>
         <strong>来源场次</strong>
         {detail.members?.map(member => <div key={member.source_session_id}>
@@ -303,23 +303,19 @@ const FileLists = ({ record }: { record: SessionSummary }) => {
           <span>{member.title || '无标题'} · 合并位置 {formatPrecise(member.offset_ms)}{member.gap_before_ms > 0 ? ` · 前有 ${formatSpan(member.gap_before_ms)} 缺口` : ''}</span>
         </div>)}
       </div> : null}
-      文件列表:
       {detail.segments.map((segment) => {
         const start = isReadable(segment) ? segment.start_ms : undefined
+        const duration = segmentEnd(segment)-segment.start_ms
         return (
-          <div
-            key={segment.id}
-            style={{ padding: '2px 0 2px 24px', fontVariantNumeric: 'tabular-nums' }}
-          >
-            {baseName(segment.file_name)}
-            {start !== undefined ? (
-              <Link href={replayHref(record.id, start)} className={styles.fileReplay}>
-                回看这一段
-              </Link>
-            ) : null}
+          <div key={segment.id} className={styles.recordingFile}>
+            <div className={styles.fileIcon}><Film size={21}/></div>
+            <div className={styles.fileInfo}><strong>{baseName(segment.file_name)}</strong><div className={styles.fileMeta}><span className={styles.fileFormat}>{segment.container.toUpperCase()}</span>{duration>0&&<span>{formatSpan(duration)}</span>}{segment.bytes!==null&&<span>{formatSize(segment.bytes)}</span>}{segment.state==='recording'&&<span className={styles.fileRecording}>录制中</span>}{!isReadable(segment)&&<span className={styles.fileUnavailable}>{segment.state==='missing'?'文件缺失':'已删除'}</span>}</div></div>
+            {start !== undefined&&<div className={styles.fileActions}><button type="button" className={styles.fileAction} onClick={()=>setPlaying(segment)}><Play size={15}/>播放</button>{can('clip.edit')&&<Link href={replayHref(record.id,start)} className={styles.fileAction}><Scissors size={15}/>剪辑</Link>}</div>}
           </div>
         )
       })}
+      {!detail.segments.length&&<div className={styles.fileListStatus}>暂无录制文件</div>}
+      {playing&&<GlobalDialog label="播放录像" onClose={()=>setPlaying(undefined)}><section className="modal workspace-output"><header><strong>{baseName(playing.file_name)}</strong><button className="icon-btn" aria-label="关闭" onClick={()=>setPlaying(undefined)}><X/></button></header><Player url={`${API_BASE}/v1/editor/sessions/${record.id}/media/recording-${playing.source_session_id??record.id}-${playing.id}/file`} type={playing.container==='flv'?'flv':playing.container==='ts'?'mpegts':undefined} height="50vh"/></section></GlobalDialog>}
     </div>
   )
 }

@@ -89,19 +89,19 @@ pub struct ArchivesQuery {
 }
 
 impl ArchivesQuery {
-    fn validate(&self) -> Result<&'static str, Response> {
+    fn validate(&self) -> Result<&'static str, (StatusCode, &'static str)> {
         if self.from_page == 0 {
-            return Err((StatusCode::BAD_REQUEST, "from_page 必须大于等于 1").into_response());
+            return Err((StatusCode::BAD_REQUEST, "from_page 必须大于等于 1"));
         }
         if !(1..=20).contains(&self.max_pages) {
-            return Err((StatusCode::BAD_REQUEST, "max_pages 必须在 1 到 20 之间").into_response());
+            return Err((StatusCode::BAD_REQUEST, "max_pages 必须在 1 到 20 之间"));
         }
         match self.status.as_deref().unwrap_or("all") {
             "all" => Ok("is_pubing,pubed,not_pubed"),
             "is_pubing" => Ok("is_pubing"),
             "pubed" => Ok("pubed"),
             "not_pubed" => Ok("not_pubed"),
-            _ => Err((StatusCode::BAD_REQUEST, "无效的稿件状态").into_response()),
+            _ => Err((StatusCode::BAD_REQUEST, "无效的稿件状态")),
         }
     }
 }
@@ -112,7 +112,7 @@ pub async fn get_user_archives_endpoint(
     State(pool): State<ConnectionPool>,
     Query(query): Query<ArchivesQuery>,
 ) -> Result<Json<ArchivePage>, Response> {
-    let status = query.validate()?;
+    let status = query.validate().map_err(IntoResponse::into_response)?;
     let cookie = get_registered_cookie(&pool, id).await?;
     let bili = login_by_cookies(&cookie.value, None)
         .await
@@ -163,10 +163,7 @@ mod tests {
                 max_pages: 1,
             },
         ] {
-            assert_eq!(
-                query.validate().unwrap_err().status(),
-                StatusCode::BAD_REQUEST
-            );
+            assert_eq!(query.validate().unwrap_err().0, StatusCode::BAD_REQUEST);
         }
     }
 

@@ -423,432 +423,349 @@ fn hex_bytes(s: &str) -> Vec<u8> {
 
 #[allow(unused_parens, unused_mut, unused_assignments)]
 fn transform(data: &[u8], table: &[u8]) -> [u8; 8] {
+    // Explicit registers keep analysis of the generated expression chain bounded.
+    let mut registers = [0u32; 116];
     let mut output = [0u8; 8];
-    let mut v3: u32 =
-        (((data[5u32 as usize] as u32) | ((data[4u32 as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v4: u32 = (((((data[3u32 as usize] as u32) | ((data[2u32 as usize] as u32) << 8u32))
-        ^ (table[((0u32 + 1792u32) + (data[2u32 as usize] as u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1536u32)
+    registers[3] = ((data[5u32 as usize] as u32) | ((data[4u32 as usize] as u32) << 8u32));
+    registers[4] = ((((data[3u32 as usize] as u32) | ((data[2u32 as usize] as u32) << 8u32))
+        ^ (table[(1792u32 + (data[2u32 as usize] as u32)) as usize] as u32))
+        ^ ((table[(1536u32
             + (((data[3u32 as usize] as u32)
-                ^ (table[((0u32 + 1792u32) + (data[2u32 as usize] as u32)) as usize] as u32))
+                ^ (table[(1792u32 + (data[2u32 as usize] as u32)) as usize] as u32))
                 & 255u32)) as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v5: u32 =
-        (((data[7u32 as usize] as u32) | ((data[6u32 as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v6: u32 = (((v4 ^ (table[((0u32 + 1280u32) + (v4 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1024u32)
-            + ((v4 ^ (table[((0u32 + 1280u32) + (v4 >> 8u32)) as usize] as u32)) & 255u32))
+            << 8u32));
+    registers[5] = ((data[7u32 as usize] as u32) | ((data[6u32 as usize] as u32) << 8u32));
+    registers[6] = ((registers[4] ^ (table[(1280u32 + (registers[4] >> 8u32)) as usize] as u32))
+        ^ ((table[(1024u32
+            + ((registers[4] ^ (table[(1280u32 + (registers[4] >> 8u32)) as usize] as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[7] = (((registers[3] ^ registers[6]) ^ 32u32)
+        ^ (table[(768u32 + (((registers[3] ^ registers[6]) ^ 32u32) >> 8u32)) as usize] as u32));
+    registers[8] =
+        (registers[7] ^ ((table[(512u32 + (registers[7] & 255u32)) as usize] as u32) << 8u32));
+    registers[9] = ((registers[8] ^ (table[(256u32 + (registers[8] >> 8u32)) as usize] as u32))
+        ^ ((table[((registers[8] ^ (table[(256u32 + (registers[8] >> 8u32)) as usize] as u32))
+            & 255u32) as usize] as u32)
+            << 8u32));
+    registers[10] = ((((registers[5] ^ registers[9]) ^ 31u32)
+        ^ (table[(2304u32 + (((registers[5] ^ registers[9]) ^ 31u32) >> 8u32)) as usize] as u32))
+        ^ ((table[(2048u32
+            + ((((registers[5] ^ registers[9]) & 255u32) ^ 31u32)
+                ^ (table[(2304u32 + (((registers[5] ^ registers[9]) ^ 31u32) >> 8u32)) as usize]
+                    as u32))) as usize] as u32)
+            << 8u32));
+    registers[11] = (registers[10] ^ (table[(1792u32 + (registers[10] >> 8u32)) as usize] as u32));
+    registers[12] =
+        (registers[11] ^ ((table[(1536u32 + (registers[11] & 255u32)) as usize] as u32) << 8u32));
+    registers[13] = ((((data[1u32 as usize] as u32) | ((data[0u32 as usize] as u32) << 8u32))
+        ^ registers[12])
+        ^ 30u32);
+    registers[14] = (registers[13] ^ (table[(1280u32 + (registers[13] >> 8u32)) as usize] as u32));
+    registers[15] =
+        (registers[14] ^ ((table[(1024u32 + (registers[14] & 255u32)) as usize] as u32) << 8u32));
+    registers[16] = (registers[15] ^ (table[(768u32 + (registers[15] >> 8u32)) as usize] as u32));
+    registers[17] =
+        (registers[16] ^ ((table[(512u32 + (registers[16] & 255u32)) as usize] as u32) << 8u32));
+    registers[18] = (((registers[6] ^ registers[17]) ^ 29u32)
+        ^ (table[(256u32 + (((registers[6] ^ registers[17]) ^ 29u32) >> 8u32)) as usize] as u32));
+    registers[19] = (registers[18] ^ ((table[(registers[18] & 255u32) as usize] as u32) << 8u32));
+    registers[20] = (registers[19] ^ (table[(2304u32 + (registers[19] >> 8u32)) as usize] as u32));
+    registers[21] =
+        (registers[20] ^ ((table[(2048u32 + (registers[20] & 255u32)) as usize] as u32) << 8u32));
+    registers[22] = ((((registers[9] ^ registers[21]) ^ 28u32)
+        ^ (table[(1792u32 + (((registers[9] ^ registers[21]) ^ 28u32) >> 8u32)) as usize] as u32))
+        ^ ((table[(1536u32
+            + ((((registers[9] ^ registers[21]) & 255u32) ^ 28u32)
+                ^ (table[(1792u32 + (((registers[9] ^ registers[21]) ^ 28u32) >> 8u32)) as usize]
+                    as u32))) as usize] as u32)
+            << 8u32));
+    registers[23] = (registers[22] ^ (table[(1280u32 + (registers[22] >> 8u32)) as usize] as u32));
+    registers[24] =
+        (registers[23] ^ ((table[(1024u32 + (registers[23] & 255u32)) as usize] as u32) << 8u32));
+    registers[25] = ((registers[12] ^ registers[24]) ^ 27u32);
+    registers[26] = (registers[25] ^ (table[(768u32 + (registers[25] >> 8u32)) as usize] as u32));
+    registers[27] = (table[(512u32
+        + ((registers[25] ^ (table[(768u32 + (registers[25] >> 8u32)) as usize] as u32)) & 255u32))
+        as usize] as u32);
+    registers[28] = (registers[21] ^ 1u32);
+    registers[29] = ((registers[26] ^ (registers[27] << 8u32))
+        ^ (table[(256u32 + ((registers[26] ^ (registers[27] << 8u32)) >> 8u32)) as usize] as u32));
+    registers[30] = (((registers[21] ^ 1u32)
+        ^ (table[(768u32 + (registers[21] >> 8u32)) as usize] as u32))
+        ^ ((table[(512u32
+            + (((registers[21] & 255u32) ^ 1u32)
+                ^ (table[(768u32 + (registers[21] >> 8u32)) as usize] as u32)))
             as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v7: u32 = ((((v3 ^ v6) ^ 32u32)
-        ^ (table[((0u32 + 768u32) + (((v3 ^ v6) ^ 32u32) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v8: u32 = ((v7 ^ ((table[((0u32 + 512u32) + (v7 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v9: u32 = (((v8 ^ (table[((0u32 + 256u32) + (v8 >> 8u32)) as usize] as u32))
-        ^ ((table[(0u32
-            + ((v8 ^ (table[((0u32 + 256u32) + (v8 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v10: u32 = (((((v5 ^ v9) ^ 31u32)
-        ^ (table[((0u32 + 2304u32) + (((v5 ^ v9) ^ 31u32) >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 2048u32)
-            + ((((v5 ^ v9) & 255u32) ^ 31u32)
-                ^ (table[((0u32 + 2304u32) + (((v5 ^ v9) ^ 31u32) >> 8u32)) as usize] as u32)))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v11: u32 =
-        ((v10 ^ (table[((0u32 + 1792u32) + (v10 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v12: u32 = ((v11
-        ^ ((table[((0u32 + 1536u32) + (v11 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v13: u32 =
-        (((((data[1u32 as usize] as u32) | ((data[0u32 as usize] as u32) << 8u32)) ^ v12) ^ 30u32)
-            & 4294967295u32);
-    let mut v14: u32 =
-        ((v13 ^ (table[((0u32 + 1280u32) + (v13 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v15: u32 = ((v14
-        ^ ((table[((0u32 + 1024u32) + (v14 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v16: u32 =
-        ((v15 ^ (table[((0u32 + 768u32) + (v15 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v17: u32 = ((v16
-        ^ ((table[((0u32 + 512u32) + (v16 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v18: u32 = ((((v6 ^ v17) ^ 29u32)
-        ^ (table[((0u32 + 256u32) + (((v6 ^ v17) ^ 29u32) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v19: u32 =
-        ((v18 ^ ((table[(0u32 + (v18 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v20: u32 =
-        ((v19 ^ (table[((0u32 + 2304u32) + (v19 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v21: u32 = ((v20
-        ^ ((table[((0u32 + 2048u32) + (v20 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v22: u32 = (((((v9 ^ v21) ^ 28u32)
-        ^ (table[((0u32 + 1792u32) + (((v9 ^ v21) ^ 28u32) >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1536u32)
-            + ((((v9 ^ v21) & 255u32) ^ 28u32)
-                ^ (table[((0u32 + 1792u32) + (((v9 ^ v21) ^ 28u32) >> 8u32)) as usize] as u32)))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v23: u32 =
-        ((v22 ^ (table[((0u32 + 1280u32) + (v22 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v24: u32 = ((v23
-        ^ ((table[((0u32 + 1024u32) + (v23 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v25: u32 = (((v12 ^ v24) ^ 27u32) & 4294967295u32);
-    let mut v26: u32 =
-        ((v25 ^ (table[((0u32 + 768u32) + (v25 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v27: u32 = ((table[((0u32 + 512u32)
-        + ((v25 ^ (table[((0u32 + 768u32) + (v25 >> 8u32)) as usize] as u32)) & 255u32))
-        as usize] as u32)
-        & 4294967295u32);
-    let mut v28: u32 = ((v21 ^ 1u32) & 4294967295u32);
-    let mut v29: u32 = (((v26 ^ (v27 << 8u32))
-        ^ (table[((0u32 + 256u32) + ((v26 ^ (v27 << 8u32)) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v30: u32 = ((((v21 ^ 1u32)
-        ^ (table[((0u32 + 768u32) + (v21 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 512u32)
-            + (((v21 & 255u32) ^ 1u32)
-                ^ (table[((0u32 + 768u32) + (v21 >> 8u32)) as usize] as u32)))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v31: u32 =
-        ((v29 ^ ((table[(0u32 + (v29 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v32: u32 = (((v17 ^ v31) ^ 26u32) & 4294967295u32);
-    let mut v33: u32 =
-        ((v30 ^ (table[((0u32 + 256u32) + (v30 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v34: u32 =
-        ((v32 ^ (table[((0u32 + 2304u32) + (v32 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v35: u32 = ((((table[(0u32
-        + ((v30 ^ (table[((0u32 + 256u32) + (v30 >> 8u32)) as usize] as u32)) & 255u32))
-        as usize] as u32)
+            << 8u32));
+    registers[31] = (registers[29] ^ ((table[(registers[29] & 255u32) as usize] as u32) << 8u32));
+    registers[32] = ((registers[17] ^ registers[31]) ^ 26u32);
+    registers[33] = (registers[30] ^ (table[(256u32 + (registers[30] >> 8u32)) as usize] as u32));
+    registers[34] = (registers[32] ^ (table[(2304u32 + (registers[32] >> 8u32)) as usize] as u32));
+    registers[35] = (((table[((registers[30]
+        ^ (table[(256u32 + (registers[30] >> 8u32)) as usize] as u32))
+        & 255u32) as usize] as u32)
         << 8u32)
-        | 20u32)
-        & 4294967295u32);
-    let mut v36: u32 = ((v34
-        ^ ((table[((0u32 + 2048u32) + (v34 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v37: u32 =
-        ((v36 ^ (table[((0u32 + 1792u32) + (v36 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v38: u32 = (((v24 ^ (table[((0u32 + 256u32) + (v24 >> 8u32)) as usize] as u32))
-        ^ ((table[(0u32
-            + ((v24 ^ (table[((0u32 + 256u32) + (v24 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v39: u32 = ((((v21 ^ v37)
-        ^ ((table[((0u32 + 1536u32) + (v37 & 255u32)) as usize] as u32) << 8u32))
-        ^ 25u32)
-        & 4294967295u32);
-    let mut v40: u32 =
-        ((v39 ^ (table[((0u32 + 1280u32) + (v39 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v41: u32 = ((v40
-        ^ ((table[((0u32 + 1024u32) + (v40 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v42: u32 =
-        ((v41 ^ (table[((0u32 + 768u32) + (v41 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v43: u32 = (((((((table[((0u32 + 2048u32)
-        + ((v38 ^ (table[((0u32 + 2304u32) + (v38 >> 8u32)) as usize] as u32)) & 255u32))
+        | 20u32);
+    registers[36] =
+        (registers[34] ^ ((table[(2048u32 + (registers[34] & 255u32)) as usize] as u32) << 8u32));
+    registers[37] = (registers[36] ^ (table[(1792u32 + (registers[36] >> 8u32)) as usize] as u32));
+    registers[38] = ((registers[24] ^ (table[(256u32 + (registers[24] >> 8u32)) as usize] as u32))
+        ^ ((table[((registers[24] ^ (table[(256u32 + (registers[24] >> 8u32)) as usize] as u32))
+            & 255u32) as usize] as u32)
+            << 8u32));
+    registers[39] = (((registers[21] ^ registers[37])
+        ^ ((table[(1536u32 + (registers[37] & 255u32)) as usize] as u32) << 8u32))
+        ^ 25u32);
+    registers[40] = (registers[39] ^ (table[(1280u32 + (registers[39] >> 8u32)) as usize] as u32));
+    registers[41] =
+        (registers[40] ^ ((table[(1024u32 + (registers[40] & 255u32)) as usize] as u32) << 8u32));
+    registers[42] = (registers[41] ^ (table[(768u32 + (registers[41] >> 8u32)) as usize] as u32));
+    registers[43] = ((((((table[(2048u32
+        + ((registers[38] ^ (table[(2304u32 + (registers[38] >> 8u32)) as usize] as u32)) & 255u32))
         as usize] as u32)
         << 8u32)
         | 22u32)
-        ^ v38)
-        ^ (table[((0u32 + 2304u32) + (v38 >> 8u32)) as usize] as u32))
-        ^ v31)
-        & 4294967295u32);
-    let mut v44: u32 =
-        ((v31 ^ (table[((0u32 + 1792u32) + (v31 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v45: u32 =
-        ((((v24 ^ ((table[((0u32 + 512u32) + (v42 & 255u32)) as usize] as u32) << 8u32)) ^ v42)
-            ^ 23u32)
-            & 4294967295u32);
-    let mut v46: u32 = ((v44
-        ^ ((table[((0u32 + 1536u32) + (v44 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v47: u32 = (((v45 ^ (table[((0u32 + 2304u32) + (v45 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 2048u32)
-            + ((v45 ^ (table[((0u32 + 2304u32) + (v45 >> 8u32)) as usize] as u32)) & 255u32))
+        ^ registers[38])
+        ^ (table[(2304u32 + (registers[38] >> 8u32)) as usize] as u32))
+        ^ registers[31]);
+    registers[44] = (registers[31] ^ (table[(1792u32 + (registers[31] >> 8u32)) as usize] as u32));
+    registers[45] = (((registers[24]
+        ^ ((table[(512u32 + (registers[42] & 255u32)) as usize] as u32) << 8u32))
+        ^ registers[42])
+        ^ 23u32);
+    registers[46] =
+        (registers[44] ^ ((table[(1536u32 + (registers[44] & 255u32)) as usize] as u32) << 8u32));
+    registers[47] = ((registers[45]
+        ^ (table[(2304u32 + (registers[45] >> 8u32)) as usize] as u32))
+        ^ ((table[(2048u32
+            + ((registers[45] ^ (table[(2304u32 + (registers[45] >> 8u32)) as usize] as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[48] = ((registers[35] ^ registers[45]) ^ registers[33]);
+    registers[49] = (registers[47] ^ (table[(1792u32 + (registers[47] >> 8u32)) as usize] as u32));
+    registers[50] = ((registers[43]
+        ^ (table[(1280u32 + (registers[43] >> 8u32)) as usize] as u32))
+        ^ ((table[(1024u32
+            + ((registers[43] ^ (table[(1280u32 + (registers[43] >> 8u32)) as usize] as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[51] = (((registers[43]
+        ^ ((table[(1536u32 + (registers[49] & 255u32)) as usize] as u32) << 8u32))
+        ^ registers[49])
+        ^ 19u32);
+    registers[52] = (registers[46] ^ (table[(1280u32 + (registers[46] >> 8u32)) as usize] as u32));
+    registers[53] = (registers[51] ^ (table[(768u32 + (registers[51] >> 8u32)) as usize] as u32));
+    registers[54] = (registers[50] ^ (table[(768u32 + (registers[50] >> 8u32)) as usize] as u32));
+    registers[55] =
+        (registers[53] ^ ((table[(512u32 + (registers[53] & 255u32)) as usize] as u32) << 8u32));
+    registers[56] = (registers[55] ^ (table[(256u32 + (registers[55] >> 8u32)) as usize] as u32));
+    registers[57] = (((((table[(1024u32 + (registers[52] & 255u32)) as usize] as u32) << 8u32)
+        | 21u32)
+        ^ registers[52])
+        ^ registers[28]);
+    registers[58] = (registers[56] ^ ((table[(registers[56] & 255u32) as usize] as u32) << 8u32));
+    registers[59] = ((((registers[57]
+        ^ ((table[(512u32 + (registers[54] & 255u32)) as usize] as u32) << 8u32))
+        ^ registers[54])
+        ^ registers[58])
+        ^ 2u32);
+    registers[60] = (registers[57] ^ (table[(256u32 + (registers[57] >> 8u32)) as usize] as u32));
+    registers[61] = (registers[59] ^ (table[(2304u32 + (registers[59] >> 8u32)) as usize] as u32));
+    registers[62] = (registers[60] ^ ((table[(registers[60] & 255u32) as usize] as u32) << 8u32));
+    registers[63] =
+        (registers[61] ^ ((table[(2048u32 + (registers[61] & 255u32)) as usize] as u32) << 8u32));
+    registers[64] = (registers[62] ^ (table[(2304u32 + (registers[62] >> 8u32)) as usize] as u32));
+    registers[65] = (registers[63] ^ (table[(1792u32 + (registers[63] >> 8u32)) as usize] as u32));
+    registers[66] =
+        (registers[65] ^ ((table[(1536u32 + (registers[65] & 255u32)) as usize] as u32) << 8u32));
+    registers[67] = ((((registers[48]
+        ^ ((table[(2048u32 + (registers[64] & 255u32)) as usize] as u32) << 8u32))
+        ^ registers[64])
+        ^ registers[66])
+        ^ 30u32);
+    registers[68] = (registers[48] ^ (table[(1792u32 + (registers[48] >> 8u32)) as usize] as u32));
+    registers[69] = (registers[67] ^ (table[(1280u32 + (registers[67] >> 8u32)) as usize] as u32));
+    registers[70] =
+        (registers[68] ^ ((table[(1536u32 + (registers[68] & 255u32)) as usize] as u32) << 8u32));
+    registers[71] =
+        (registers[69] ^ ((table[(1024u32 + (registers[69] & 255u32)) as usize] as u32) << 8u32));
+    registers[72] = (registers[70] ^ (table[(1280u32 + (registers[70] >> 8u32)) as usize] as u32));
+    registers[73] = (registers[71] ^ (table[(768u32 + (registers[71] >> 8u32)) as usize] as u32));
+    registers[74] =
+        (registers[73] ^ ((table[(512u32 + (registers[73] & 255u32)) as usize] as u32) << 8u32));
+    registers[75] = (((((table[(1024u32 + (registers[72] & 255u32)) as usize] as u32) << 8u32)
+        | 14u32)
+        ^ registers[72])
+        ^ registers[74]);
+    registers[76] = (registers[75] ^ (table[(256u32 + (registers[75] >> 8u32)) as usize] as u32));
+    registers[77] = (registers[76] ^ ((table[(registers[76] & 255u32) as usize] as u32) << 8u32));
+    registers[78] = (registers[77] ^ (table[(2304u32 + (registers[77] >> 8u32)) as usize] as u32));
+    registers[79] =
+        (registers[78] ^ ((table[(2048u32 + (registers[78] & 255u32)) as usize] as u32) << 8u32));
+    registers[80] = ((((registers[58] ^ registers[79]) ^ 13u32)
+        ^ (table[(1792u32 + (((registers[58] ^ registers[79]) ^ 13u32) >> 8u32)) as usize]
+            as u32))
+        ^ ((table[(1536u32
+            + ((((registers[58] ^ registers[79]) & 255u32) ^ 13u32)
+                ^ (table[(1792u32 + (((registers[58] ^ registers[79]) ^ 13u32) >> 8u32)) as usize]
+                    as u32))) as usize] as u32)
+            << 8u32));
+    registers[81] = (registers[80] ^ (table[(1280u32 + (registers[80] >> 8u32)) as usize] as u32));
+    registers[82] =
+        (registers[81] ^ ((table[(1024u32 + (registers[81] & 255u32)) as usize] as u32) << 8u32));
+    registers[83] = (((registers[66] ^ registers[82]) ^ 12u32)
+        ^ (table[(768u32 + (((registers[66] ^ registers[82]) ^ 12u32) >> 8u32)) as usize] as u32));
+    registers[84] = (table[(512u32
+        + ((((registers[66] ^ registers[82]) & 255u32) ^ 12u32)
+            ^ (table[(768u32 + (((registers[66] ^ registers[82]) ^ 12u32) >> 8u32)) as usize]
+                as u32))) as usize] as u32);
+    registers[85] = ((registers[83] ^ (registers[84] << 8u32))
+        ^ (table[(256u32 + ((registers[83] ^ (registers[84] << 8u32)) >> 8u32)) as usize] as u32));
+    registers[86] = (((registers[82] ^ 1u32)
+        ^ (table[(2304u32 + (registers[82] >> 8u32)) as usize] as u32))
+        ^ ((table[(2048u32
+            + (((registers[82] & 255u32) ^ 1u32)
+                ^ (table[(2304u32 + (registers[82] >> 8u32)) as usize] as u32)))
             as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v48: u32 = (((v35 ^ v45) ^ v33) & 4294967295u32);
-    let mut v49: u32 =
-        ((v47 ^ (table[((0u32 + 1792u32) + (v47 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v50: u32 = (((v43 ^ (table[((0u32 + 1280u32) + (v43 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1024u32)
-            + ((v43 ^ (table[((0u32 + 1280u32) + (v43 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v51: u32 =
-        ((((v43 ^ ((table[((0u32 + 1536u32) + (v49 & 255u32)) as usize] as u32) << 8u32)) ^ v49)
-            ^ 19u32)
-            & 4294967295u32);
-    let mut v52: u32 =
-        ((v46 ^ (table[((0u32 + 1280u32) + (v46 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v53: u32 =
-        ((v51 ^ (table[((0u32 + 768u32) + (v51 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v54: u32 =
-        ((v50 ^ (table[((0u32 + 768u32) + (v50 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v55: u32 = ((v53
-        ^ ((table[((0u32 + 512u32) + (v53 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v56: u32 =
-        ((v55 ^ (table[((0u32 + 256u32) + (v55 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v57: u32 =
-        ((((((table[((0u32 + 1024u32) + (v52 & 255u32)) as usize] as u32) << 8u32) | 21u32)
-            ^ v52)
-            ^ v28)
-            & 4294967295u32);
-    let mut v58: u32 =
-        ((v56 ^ ((table[(0u32 + (v56 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v59: u32 =
-        (((((v57 ^ ((table[((0u32 + 512u32) + (v54 & 255u32)) as usize] as u32) << 8u32)) ^ v54)
-            ^ v58)
-            ^ 2u32)
-            & 4294967295u32);
-    let mut v60: u32 =
-        ((v57 ^ (table[((0u32 + 256u32) + (v57 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v61: u32 =
-        ((v59 ^ (table[((0u32 + 2304u32) + (v59 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v62: u32 =
-        ((v60 ^ ((table[(0u32 + (v60 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v63: u32 = ((v61
-        ^ ((table[((0u32 + 2048u32) + (v61 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v64: u32 =
-        ((v62 ^ (table[((0u32 + 2304u32) + (v62 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v65: u32 =
-        ((v63 ^ (table[((0u32 + 1792u32) + (v63 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v66: u32 = ((v65
-        ^ ((table[((0u32 + 1536u32) + (v65 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v67: u32 = (((((v48
-        ^ ((table[((0u32 + 2048u32) + (v64 & 255u32)) as usize] as u32) << 8u32))
-        ^ v64)
-        ^ v66)
-        ^ 30u32)
-        & 4294967295u32);
-    let mut v68: u32 =
-        ((v48 ^ (table[((0u32 + 1792u32) + (v48 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v69: u32 =
-        ((v67 ^ (table[((0u32 + 1280u32) + (v67 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v70: u32 = ((v68
-        ^ ((table[((0u32 + 1536u32) + (v68 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v71: u32 = ((v69
-        ^ ((table[((0u32 + 1024u32) + (v69 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v72: u32 =
-        ((v70 ^ (table[((0u32 + 1280u32) + (v70 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v73: u32 =
-        ((v71 ^ (table[((0u32 + 768u32) + (v71 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v74: u32 = ((v73
-        ^ ((table[((0u32 + 512u32) + (v73 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v75: u32 =
-        ((((((table[((0u32 + 1024u32) + (v72 & 255u32)) as usize] as u32) << 8u32) | 14u32)
-            ^ v72)
-            ^ v74)
-            & 4294967295u32);
-    let mut v76: u32 =
-        ((v75 ^ (table[((0u32 + 256u32) + (v75 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v77: u32 =
-        ((v76 ^ ((table[(0u32 + (v76 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v78: u32 =
-        ((v77 ^ (table[((0u32 + 2304u32) + (v77 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v79: u32 = ((v78
-        ^ ((table[((0u32 + 2048u32) + (v78 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v80: u32 = (((((v58 ^ v79) ^ 13u32)
-        ^ (table[((0u32 + 1792u32) + (((v58 ^ v79) ^ 13u32) >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1536u32)
-            + ((((v58 ^ v79) & 255u32) ^ 13u32)
-                ^ (table[((0u32 + 1792u32) + (((v58 ^ v79) ^ 13u32) >> 8u32)) as usize] as u32)))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v81: u32 =
-        ((v80 ^ (table[((0u32 + 1280u32) + (v80 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v82: u32 = ((v81
-        ^ ((table[((0u32 + 1024u32) + (v81 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v83: u32 = ((((v66 ^ v82) ^ 12u32)
-        ^ (table[((0u32 + 768u32) + (((v66 ^ v82) ^ 12u32) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v84: u32 = ((table[((0u32 + 512u32)
-        + ((((v66 ^ v82) & 255u32) ^ 12u32)
-            ^ (table[((0u32 + 768u32) + (((v66 ^ v82) ^ 12u32) >> 8u32)) as usize] as u32)))
-        as usize] as u32)
-        & 4294967295u32);
-    let mut v85: u32 = (((v83 ^ (v84 << 8u32))
-        ^ (table[((0u32 + 256u32) + ((v83 ^ (v84 << 8u32)) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v86: u32 = ((((v82 ^ 1u32)
-        ^ (table[((0u32 + 2304u32) + (v82 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 2048u32)
-            + (((v82 & 255u32) ^ 1u32)
-                ^ (table[((0u32 + 2304u32) + (v82 >> 8u32)) as usize] as u32)))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v87: u32 =
-        ((v85 ^ ((table[(0u32 + (v85 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v88: u32 = ((((v74 ^ v87) ^ 11u32)
-        ^ (table[((0u32 + 2304u32) + (((v74 ^ v87) ^ 11u32) >> 8u32)) as usize] as u32))
-        & 4294967295u32);
-    let mut v89: u32 = ((table[((0u32 + 2048u32)
-        + ((((v74 ^ v87) & 255u32) ^ 11u32)
-            ^ (table[((0u32 + 2304u32) + (((v74 ^ v87) ^ 11u32) >> 8u32)) as usize] as u32)))
-        as usize] as u32)
-        & 4294967295u32);
-    let mut v90: u32 =
-        ((v86 ^ (table[((0u32 + 1792u32) + (v86 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v91: u32 = (((v87 ^ (table[((0u32 + 1792u32) + (v87 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1536u32)
-            + ((v87 ^ (table[((0u32 + 1792u32) + (v87 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v92: u32 =
-        ((v91 ^ (table[((0u32 + 1280u32) + (v91 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v93: u32 = ((((table[((0u32 + 1536u32)
-        + ((v86 ^ (table[((0u32 + 1792u32) + (v86 >> 8u32)) as usize] as u32)) & 255u32))
+            << 8u32));
+    registers[87] = (registers[85] ^ ((table[(registers[85] & 255u32) as usize] as u32) << 8u32));
+    registers[88] = (((registers[74] ^ registers[87]) ^ 11u32)
+        ^ (table[(2304u32 + (((registers[74] ^ registers[87]) ^ 11u32) >> 8u32)) as usize] as u32));
+    registers[89] = (table[(2048u32
+        + ((((registers[74] ^ registers[87]) & 255u32) ^ 11u32)
+            ^ (table[(2304u32 + (((registers[74] ^ registers[87]) ^ 11u32) >> 8u32)) as usize]
+                as u32))) as usize] as u32);
+    registers[90] = (registers[86] ^ (table[(1792u32 + (registers[86] >> 8u32)) as usize] as u32));
+    registers[91] = ((registers[87]
+        ^ (table[(1792u32 + (registers[87] >> 8u32)) as usize] as u32))
+        ^ ((table[(1536u32
+            + ((registers[87] ^ (table[(1792u32 + (registers[87] >> 8u32)) as usize] as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[92] = (registers[91] ^ (table[(1280u32 + (registers[91] >> 8u32)) as usize] as u32));
+    registers[93] = (((table[(1536u32
+        + ((registers[86] ^ (table[(1792u32 + (registers[86] >> 8u32)) as usize] as u32)) & 255u32))
         as usize] as u32)
         << 8u32)
-        | 4u32)
-        & 4294967295u32);
-    let mut v94: u32 = ((((v88 ^ (v89 << 8u32))
-        ^ (table[((0u32 + 1792u32) + ((v88 ^ (v89 << 8u32)) >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 1536u32)
-            + ((v88
-                ^ (table[((0u32 + 1792u32) + ((v88 ^ (v89 << 8u32)) >> 8u32)) as usize] as u32))
+        | 4u32);
+    registers[94] = (((registers[88] ^ (registers[89] << 8u32))
+        ^ (table[(1792u32 + ((registers[88] ^ (registers[89] << 8u32)) >> 8u32)) as usize]
+            as u32))
+        ^ ((table[(1536u32
+            + ((registers[88]
+                ^ (table[(1792u32 + ((registers[88] ^ (registers[89] << 8u32)) >> 8u32)) as usize]
+                    as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[95] = ((registers[79] ^ registers[94]) ^ 10u32);
+    registers[96] = (((registers[94]
+        ^ ((table[(1024u32 + (registers[92] & 255u32)) as usize] as u32) << 8u32))
+        ^ registers[92])
+        ^ 6u32);
+    registers[97] = (registers[95] ^ (table[(1280u32 + (registers[95] >> 8u32)) as usize] as u32));
+    registers[98] = ((registers[94] ^ (table[(768u32 + (registers[94] >> 8u32)) as usize] as u32))
+        ^ ((table[(512u32
+            + ((registers[94] ^ (table[(768u32 + (registers[94] >> 8u32)) as usize] as u32))
+                & 255u32)) as usize] as u32)
+            << 8u32));
+    registers[99] =
+        (registers[97] ^ ((table[(1024u32 + (registers[97] & 255u32)) as usize] as u32) << 8u32));
+    registers[100] = ((registers[96]
+        ^ (table[(256u32 + (registers[96] >> 8u32)) as usize] as u32))
+        ^ ((table[((registers[96] ^ (table[(256u32 + (registers[96] >> 8u32)) as usize] as u32))
+            & 255u32) as usize] as u32)
+            << 8u32));
+    registers[101] = (registers[98] ^ (table[(256u32 + (registers[98] >> 8u32)) as usize] as u32));
+    registers[102] = (registers[99] ^ (table[(768u32 + (registers[99] >> 8u32)) as usize] as u32));
+    registers[100] = ((registers[100] & 4294901760u32)
+        | ((registers[100] ^ (table[(2304u32 + (registers[100] >> 8u32)) as usize] as u32))
+            & 65535u32));
+    registers[103] = ((((((table[(registers[101] & 255u32) as usize] as u32) << 8u32) | 5u32)
+        ^ registers[101])
+        ^ registers[82])
+        ^ 1u32);
+    registers[104] = (((registers[82] ^ registers[102])
+        ^ ((table[(512u32 + (registers[102] & 255u32)) as usize] as u32) << 8u32))
+        ^ 9u32);
+    registers[105] =
+        (registers[104] ^ (table[(256u32 + (registers[104] >> 8u32)) as usize] as u32));
+    registers[102] = ((registers[102] & 4294901760u32)
+        | (((registers[103]
+            ^ ((table[(2048u32 + (registers[100] & 255u32)) as usize] as u32) << 8u32))
+            ^ registers[100])
+            & 65535u32));
+    registers[106] =
+        (registers[103] ^ (table[(1792u32 + (registers[103] >> 8u32)) as usize] as u32));
+    registers[107] =
+        (registers[105] ^ ((table[(registers[105] & 255u32) as usize] as u32) << 8u32));
+    registers[108] = (table[(1536u32
+        + ((registers[103] ^ (table[(1792u32 + (registers[103] >> 8u32)) as usize] as u32))
+            & 255u32)) as usize] as u32);
+    registers[108] = ((registers[108] & 4294901760u32)
+        | (((registers[106] ^ ((registers[108] & 65535u32) << 8u32))
+            ^ (table[(1280u32 + ((registers[106] ^ (registers[108] << 8u32)) >> 8u32)) as usize]
+                as u32))
+            & 65535u32));
+    registers[109] = ((((registers[87]
+        ^ ((table[(2048u32
+            + ((registers[107] ^ (table[(2304u32 + (registers[107] >> 8u32)) as usize] as u32))
                 & 255u32)) as usize] as u32)
             << 8u32))
-        & 4294967295u32);
-    let mut v95: u32 = (((v79 ^ v94) ^ 10u32) & 4294967295u32);
-    let mut v96: u32 =
-        ((((v94 ^ ((table[((0u32 + 1024u32) + (v92 & 255u32)) as usize] as u32) << 8u32)) ^ v92)
-            ^ 6u32)
-            & 4294967295u32);
-    let mut v97: u32 =
-        ((v95 ^ (table[((0u32 + 1280u32) + (v95 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v98: u32 = (((v94 ^ (table[((0u32 + 768u32) + (v94 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 512u32)
-            + ((v94 ^ (table[((0u32 + 768u32) + (v94 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v99: u32 = ((v97
-        ^ ((table[((0u32 + 1024u32) + (v97 & 255u32)) as usize] as u32) << 8u32))
-        & 4294967295u32);
-    let mut v100: u32 = (((v96 ^ (table[((0u32 + 256u32) + (v96 >> 8u32)) as usize] as u32))
-        ^ ((table[(0u32
-            + ((v96 ^ (table[((0u32 + 256u32) + (v96 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    let mut v101: u32 =
-        ((v98 ^ (table[((0u32 + 256u32) + (v98 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v102: u32 =
-        ((v99 ^ (table[((0u32 + 768u32) + (v99 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    v100 = ((v100 & 4294901760u32)
-        | ((v100 ^ (table[((0u32 + 2304u32) + (v100 >> 8u32)) as usize] as u32)) & 65535u32));
-    let mut v103: u32 =
-        (((((((table[(0u32 + (v101 & 255u32)) as usize] as u32) << 8u32) | 5u32) ^ v101) ^ v82)
-            ^ 1u32)
-            & 4294967295u32);
-    let mut v104: u32 = ((((v82 ^ v102)
-        ^ ((table[((0u32 + 512u32) + (v102 & 255u32)) as usize] as u32) << 8u32))
-        ^ 9u32)
-        & 4294967295u32);
-    let mut v105: u32 =
-        ((v104 ^ (table[((0u32 + 256u32) + (v104 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    v102 = ((v102 & 4294901760u32)
-        | (((v103 ^ ((table[((0u32 + 2048u32) + (v100 & 255u32)) as usize] as u32) << 8u32))
-            ^ v100)
+        ^ registers[107])
+        ^ (table[(2304u32 + (registers[107] >> 8u32)) as usize] as u32))
+        ^ 7u32);
+    registers[110] = ((registers[93] ^ registers[109]) ^ registers[90]);
+    registers[108] = ((registers[108] & 4294901760u32)
+        | (((registers[110]
+            ^ ((table[(1024u32 + (registers[108] & 255u32)) as usize] as u32) << 8u32))
+            ^ registers[108])
             & 65535u32));
-    let mut v106: u32 =
-        ((v103 ^ (table[((0u32 + 1792u32) + (v103 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v107: u32 =
-        ((v105 ^ ((table[(0u32 + (v105 & 255u32)) as usize] as u32) << 8u32)) & 4294967295u32);
-    let mut v108: u32 = ((table[((0u32 + 1536u32)
-        + ((v103 ^ (table[((0u32 + 1792u32) + (v103 >> 8u32)) as usize] as u32)) & 255u32))
-        as usize] as u32)
-        & 4294967295u32);
-    v108 = ((v108 & 4294901760u32)
-        | (((v106 ^ ((v108 & 65535u32) << 8u32))
-            ^ (table[((0u32 + 1280u32) + ((v106 ^ (v108 << 8u32)) >> 8u32)) as usize] as u32))
-            & 65535u32));
-    let mut v109: u32 = (((((v87
-        ^ ((table[((0u32 + 2048u32)
-            + ((v107 ^ (table[((0u32 + 2304u32) + (v107 >> 8u32)) as usize] as u32)) & 255u32))
-            as usize] as u32)
-            << 8u32))
-        ^ v107)
-        ^ (table[((0u32 + 2304u32) + (v107 >> 8u32)) as usize] as u32))
-        ^ 7u32)
-        & 4294967295u32);
-    let mut v110: u32 = (((v93 ^ v109) ^ v90) & 4294967295u32);
-    v108 = ((v108 & 4294901760u32)
-        | (((v110 ^ ((table[((0u32 + 1024u32) + (v108 & 255u32)) as usize] as u32) << 8u32))
-            ^ v108)
-            & 65535u32));
-    let mut v111: u32 =
-        ((v109 ^ (table[((0u32 + 1280u32) + (v109 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    let mut v112: u32 = ((table[((0u32 + 1024u32)
-        + ((v109 ^ (table[((0u32 + 1280u32) + (v109 >> 8u32)) as usize] as u32)) & 255u32))
-        as usize] as u32)
-        & 4294967295u32);
-    let mut v113: u32 = (((v110 ^ (table[((0u32 + 768u32) + (v110 >> 8u32)) as usize] as u32))
-        ^ ((table[((0u32 + 512u32)
-            + (((((((v93 ^ v87) ^ v107)
-                ^ (table[((0u32 + 2304u32) + (v107 >> 8u32)) as usize] as u32))
+    registers[111] =
+        (registers[109] ^ (table[(1280u32 + (registers[109] >> 8u32)) as usize] as u32));
+    registers[112] = (table[(1024u32
+        + ((registers[109] ^ (table[(1280u32 + (registers[109] >> 8u32)) as usize] as u32))
+            & 255u32)) as usize] as u32);
+    registers[113] = ((registers[110]
+        ^ (table[(768u32 + (registers[110] >> 8u32)) as usize] as u32))
+        ^ ((table[(512u32
+            + (((((((registers[93] ^ registers[87]) ^ registers[107])
+                ^ (table[(2304u32 + (registers[107] >> 8u32)) as usize] as u32))
                 ^ 7u32)
-                ^ v90)
-                ^ (table[((0u32 + 768u32) + (v110 >> 8u32)) as usize] as u32))
+                ^ registers[90])
+                ^ (table[(768u32 + (registers[110] >> 8u32)) as usize] as u32))
                 & 255u32)) as usize] as u32)
-            << 8u32))
-        & 4294967295u32);
-    v112 = ((v112 & 4294901760u32)
-        | (((v111 ^ ((v112 & 65535u32) << 8u32))
-            ^ (table[((0u32 + 768u32) + ((v111 ^ (v112 << 8u32)) >> 8u32)) as usize] as u32))
+            << 8u32));
+    registers[112] = ((registers[112] & 4294901760u32)
+        | (((registers[111] ^ ((registers[112] & 65535u32) << 8u32))
+            ^ (table[(768u32 + ((registers[111] ^ (registers[112] << 8u32)) >> 8u32)) as usize]
+                as u32))
             & 65535u32));
-    let mut v114: u32 =
-        ((v113 ^ (table[((0u32 + 256u32) + (v113 >> 8u32)) as usize] as u32)) & 4294967295u32);
-    v112 = ((v112 & 4294901760u32)
-        | (((v96 ^ ((table[((0u32 + 512u32) + (v112 & 255u32)) as usize] as u32) << 8u32))
-            ^ v112)
+    registers[114] =
+        (registers[113] ^ (table[(256u32 + (registers[113] >> 8u32)) as usize] as u32));
+    registers[112] = ((registers[112] & 4294901760u32)
+        | (((registers[96]
+            ^ ((table[(512u32 + (registers[112] & 255u32)) as usize] as u32) << 8u32))
+            ^ registers[112])
             & 65535u32));
-    let mut v115: u32 = (((v113
-        ^ ((table[(0u32
-            + ((((((((v93 ^ v87) ^ v107)
-                ^ (table[((0u32 + 2304u32) + (v107 >> 8u32)) as usize] as u32))
-                ^ 7u32)
-                ^ v90)
-                ^ (table[((0u32 + 768u32) + (v110 >> 8u32)) as usize] as u32))
-                ^ (table[((0u32 + 256u32) + (v113 >> 8u32)) as usize] as u32))
-                & 255u32)) as usize] as u32)
+    registers[115] = ((registers[113]
+        ^ ((table[((((((((registers[93] ^ registers[87]) ^ registers[107])
+            ^ (table[(2304u32 + (registers[107] >> 8u32)) as usize] as u32))
+            ^ 7u32)
+            ^ registers[90])
+            ^ (table[(768u32 + (registers[110] >> 8u32)) as usize] as u32))
+            ^ (table[(256u32 + (registers[113] >> 8u32)) as usize] as u32))
+            & 255u32) as usize] as u32)
             << 8u32))
-        >> 8u32)
-        & 4294967295u32);
-    output[1] = (v114 & 255u32) as u8;
-    output[4] = (((v102 >> 8u32) & 255u32) & 255u32) as u8;
-    output[5] = ((v102 ^ 2u32) & 255u32) as u8;
-    output[6] = (((v108 >> 8u32) & 255u32) & 255u32) as u8;
-    output[2] = (((v112 >> 8u32) & 255u32) & 255u32) as u8;
-    output[3] = ((v112 ^ 3u32) & 255u32) as u8;
-    output[0] = (v115 & 255u32) as u8;
-    output[7] = ((v108 ^ 1u32) & 255u32) as u8;
+        >> 8u32);
+    output[1] = (registers[114] & 255u32) as u8;
+    output[4] = (((registers[102] >> 8u32) & 255u32) & 255u32) as u8;
+    output[5] = ((registers[102] ^ 2u32) & 255u32) as u8;
+    output[6] = (((registers[108] >> 8u32) & 255u32) & 255u32) as u8;
+    output[2] = (((registers[112] >> 8u32) & 255u32) & 255u32) as u8;
+    output[3] = ((registers[112] ^ 3u32) & 255u32) as u8;
+    output[0] = (registers[115] & 255u32) as u8;
+    output[7] = ((registers[108] ^ 1u32) & 255u32) as u8;
     output
 }
 

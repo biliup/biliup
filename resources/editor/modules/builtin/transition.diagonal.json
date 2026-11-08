@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.diagonal",
+  "kind": "transition",
+  "name": "Diagonal",
+  "description": "The next clip is revealed by a diagonal edge from the top left.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 4,
+    "maxFrames": 30
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "square-dashed"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "move.pulse",
+  "kind": "move",
+  "name": "Pulse",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "description": "Text, as a loop: grows and shrinks about its centre once per loop length, for as long as it shows.",
+  "params": {
+    "type": "object",
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 0.5,
+        "default": 0.08,
+        "description": "How much it grows at the top of a pulse (0.08 = 8 %)."
+      }
+    }
+  }
+}

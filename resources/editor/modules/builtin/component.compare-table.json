@@ -1,0 +1,60 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.compare-table",
+  "kind": "component",
+  "name": "Compare table",
+  "description": "A dark table comparing two to four runs: one row per metric with a label, and per run its name, a bar that grows to value ÷ the row's largest and the value as text. Rows come in one after another from `start` seconds, `step` apart, bars growing over `grow` seconds. Every run is drawn the same way (no highlighted winner).",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["names", "rows"],
+    "properties": {
+      "names": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "type": "string", "maxLength": 40 }, "description": "The runs compared, e.g. two models." },
+      "rows": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "items": {
+          "type": "object",
+          "required": ["label", "values"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": "string", "maxLength": 80 },
+            "values": { "type": "array", "maxItems": 4, "items": { "type": "number", "minimum": 0 }, "description": "One per name; bars are value ÷ the row's largest." },
+            "text": { "type": "array", "maxItems": 4, "items": { "type": "string", "maxLength": 20 }, "description": "The values as shown (default the numbers)." }
+          }
+        }
+      },
+      "start": { "type": "number", "minimum": 0, "description": "Seconds from the item's start to the first row (default 0.35)." },
+      "step": { "type": "number", "minimum": 0, "description": "Seconds between rows (default 0.55)." },
+      "grow": { "type": "number", "minimum": 0, "description": "Seconds a bar takes to grow (default 0.7)." },
+      "size": { "type": "number", "minimum": 8, "maximum": 64, "description": "The names' text size in px for a 1400 px wide box (default 24)." }
+    }
+  },
+  "component": {
+    "size": { "width": 1400, "height": 600 },
+    "animated": true,
+    "defaults": {
+      "names": ["Before", "After"],
+      "rows": [
+        { "label": "Median time", "values": [148, 95], "text": ["2:28", "1:35"] },
+        { "label": "Passed", "values": [2, 3], "text": ["2 of 3", "3 of 3"] }
+      ],
+      "start": 0.35,
+      "step": 0.55,
+      "grow": 0.7,
+      "size": 24
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "table"
+  }
+}

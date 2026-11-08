@@ -49,6 +49,12 @@ const ALPHABET_LOOKUP: [u8; 128] = build_lookup();
 /// Douyin live danmaku protocol.
 pub struct Douyin;
 
+struct Response {
+    messages: Vec<(String, Vec<u8>)>,
+    need_ack: bool,
+    internal_ext: String,
+}
+
 impl Douyin {
     /// Create a new Douyin protocol handler.
     pub fn new() -> Self {
@@ -231,7 +237,7 @@ impl Douyin {
 
     /// Parse Response.
     /// Fields: 1=messagesList, 5=internalExt, 9=needAck
-    fn parse_response(data: &[u8]) -> Option<(Vec<(String, Vec<u8>)>, bool, String)> {
+    fn parse_response(data: &[u8]) -> Option<Response> {
         let mut reader = ProtoReader::new(data);
         let fields = reader.parse_all_strict()?;
 
@@ -264,7 +270,11 @@ impl Douyin {
             None => String::new(),
         };
 
-        Some((messages, need_ack, internal_ext))
+        Some(Response {
+            messages,
+            need_ack,
+            internal_ext,
+        })
     }
 
     /// Parse ChatMessage.
@@ -463,7 +473,11 @@ impl Platform for Douyin {
         let (log_id, payload, _payload_type) = Self::parse_push_frame(msg)
             .ok_or_else(|| DanmakuError::Decode("invalid Douyin PushFrame".to_string()))?;
         let decompressed = Self::decompress_gzip(&payload)?;
-        let (messages, need_ack, internal_ext) = Self::parse_response(&decompressed)
+        let Response {
+            messages,
+            need_ack,
+            internal_ext,
+        } = Self::parse_response(&decompressed)
             .ok_or_else(|| DanmakuError::Decode("invalid Douyin Response".to_string()))?;
 
         if need_ack {

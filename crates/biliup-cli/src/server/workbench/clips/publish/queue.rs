@@ -57,7 +57,7 @@ pub enum Failure {
 }
 
 impl Failure {
-    fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> &str {
         match self {
             Failure::RateLimited(m) | Failure::Unknown(m) | Failure::Other(m) => m,
         }
@@ -157,17 +157,27 @@ impl Bilibili for Offline {
 pub struct BiliBackend {
     config: Arc<RwLock<Config>>,
     client: StatelessClient,
+    repair_audio: bool,
 }
 
 impl BiliBackend {
     pub fn new(config: Arc<RwLock<Config>>, client: StatelessClient) -> Self {
-        Self { config, client }
+        Self {
+            config,
+            client,
+            repair_audio: true,
+        }
+    }
+    pub(crate) fn preserve_files(mut self) -> Self {
+        self.repair_audio = false;
+        self
     }
 }
 
 struct BiliConnection {
     context: UploadContext,
     submit_api: Option<String>,
+    repair_audio: bool,
 }
 
 #[async_trait]
@@ -184,6 +194,7 @@ impl Bilibili for BiliBackend {
         Ok(Box::new(BiliConnection {
             context,
             submit_api: config.submit_api.clone(),
+            repair_audio: self.repair_audio,
         }))
     }
 }
@@ -195,9 +206,17 @@ impl Connection for BiliConnection {
         path: &Path,
         progress: &(dyn Fn(usize) -> bool + Send + Sync),
     ) -> Result<Video, Failure> {
-        upload_single_file_with_progress(path, &self.context, progress)
+        let result = if self.repair_audio {
+            upload_single_file_with_progress(path, &self.context, progress).await
+        } else {
+            crate::server::common::upload::upload_prepared_file_with_progress(
+                path,
+                &self.context,
+                progress,
+            )
             .await
-            .map_err(|e| describe(&e))
+        };
+        result.map_err(|e| describe(&e))
     }
 
     async fn cover(&self, path: &Path) -> Result<String, Failure> {
@@ -767,12 +786,12 @@ impl ClipPublisher {
             .iter()
             .find(|job| job.view.id == id)
             .and_then(|job| job.observation.as_ref().map(|guard| guard.observation()));
-        let outcome = if let Some(observation) = &observation {
+
+        if let Some(observation) = &observation {
             observation.scope(self.run_inner(id)).await
         } else {
             self.run_inner(id).await
-        };
-        outcome
+        }
     }
 
     fn finish_observation(&self, id: u64, outcome: &Outcome) {

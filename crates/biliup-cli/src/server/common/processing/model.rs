@@ -144,7 +144,7 @@ impl RenderRecipe {
             {
                 return Err("遮挡颜色必须是 #RRGGBB".into());
             }
-            if r.effect_type == EffectType::Image && !r.asset_id.is_some_and(|id| id > 0) {
+            if r.effect_type == EffectType::Image && r.asset_id.is_none_or(|id| id <= 0) {
                 return Err("图片遮挡需要选择图片".into());
             }
             if r.intervals.len() > 1000

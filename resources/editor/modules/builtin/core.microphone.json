@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "core.microphone",
+  "kind": "capture-source",
+  "name": "Microphone",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "capabilities": [
+    "microphone",
+    "media:write"
+  ],
+  "capture": {
+    "targets": [
+      "microphone"
+    ]
+  },
+  "ui": {
+    "panel": "capture",
+    "icon": "mic"
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.eq",
+  "kind": "audio-processor",
+  "name": "EQ",
+  "version": "0.2.0",
+  "description": "A track EQ (D84): a Butterworth high-pass (low cut), an optional low-pass (high cut), a low shelf, a peak and a high shelf. Heard in the preview (Web Audio biquads) and the export (ffmpeg highpass/lowshelf/equalizer/highshelf/lowpass) with the same Audio EQ Cookbook curves. A band at 0 dB is off.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "lowCutHz": {
+        "type": "number",
+        "minimum": 20,
+        "maximum": 1000,
+        "description": "High-pass (low cut) corner in Hz, 12 dB/octave Butterworth; absent = off."
+      },
+      "highCutHz": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 20000,
+        "description": "Low-pass (high cut) corner in Hz, 12 dB/octave Butterworth; absent = off."
+      },
+      "lowGainDb": {
+        "type": "number",
+        "minimum": -24,
+        "maximum": 24,
+        "default": 0,
+        "description": "Low shelf gain in dB (slope 1)."
+      },
+      "lowHz": {
+        "type": "number",
+        "minimum": 20,
+        "maximum": 1000,
+        "default": 120,
+        "description": "Low shelf corner in Hz."
+      },
+      "midGainDb": {
+        "type": "number",
+        "minimum": -24,
+        "maximum": 24,
+        "default": 0,
+        "description": "Peak gain in dB."
+      },
+      "midHz": {
+        "type": "number",
+        "minimum": 100,
+        "maximum": 10000,
+        "default": 1000,
+        "description": "Peak centre in Hz."
+      },
+      "midQ": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 10,
+        "default": 1,
+        "description": "Peak Q (higher = narrower)."
+      },
+      "highGainDb": {
+        "type": "number",
+        "minimum": -24,
+        "maximum": 24,
+        "default": 0,
+        "description": "High shelf gain in dB (slope 1)."
+      },
+      "highHz": {
+        "type": "number",
+        "minimum": 1000,
+        "maximum": 16000,
+        "default": 8000,
+        "description": "High shelf corner in Hz."
+      }
+    }
+  }
+}

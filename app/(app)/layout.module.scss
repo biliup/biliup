@@ -86,6 +86,21 @@
 }
 
 /* ===== 导航 ===== */
+.navDisclosure { width: 100%; border: 0; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.workbenchHeading {display:flex;align-items:center;gap:2px;}
+.workbenchHeading .navDisclosure {flex:1;min-width:0;}
+.newProjectButton {display:flex;align-items:center;justify-content:center;width:28px;height:28px;flex:none;border:0;background:transparent;color:var(--semi-color-text-2);border-radius:5px;cursor:pointer;}
+.newProjectButton:hover {background:var(--semi-color-fill-1);color:var(--semi-color-text-0);}
+.projectNavItem {display:flex;align-items:center;gap:8px;min-width:0;}
+.projectNavItem span {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.projectNavItem svg {flex:none;}
+.emptyProjects {padding:8px 10px;color:var(--semi-color-text-2);font-size:12px;}
+.navChevron { margin-left: auto; transition: transform .16s; transform: rotate(-90deg); }
+.navChevron[data-open=true] { transform: rotate(0); }
+.subnav { margin: 2px 12px 8px 28px; padding-left: 15px; border-left: 1px solid var(--semi-color-border); display: grid; gap: 2px; }
+.subnavItem { padding: 8px 10px; text-decoration: none; border-radius: 6px; color: var(--semi-color-text-1); font-size: 13px; }
+.subnavItem:hover { background: var(--semi-color-fill-0); }
+.subnavActive { color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-weight: 600; }
 .nav {
   flex: 1;
   min-height: 0;

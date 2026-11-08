@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:biliup:editor:edit-ops:1",
+  "title": "Biliup edit operations",
+  "description": "Every change to project.json, by the user or the agent, is a list of these ops. They are applied atomically, recorded in history.db with who made them, and are what the agent sees in the manual-edit log.",
+  "type": "array",
+  "minItems": 1,
+  "items": { "$ref": "#/$defs/op" },
+  "$defs": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+    "op": {
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Add an item. On the main track give an index (default: the end); on free tracks the item needs a start.",
+          "required": ["op", "track", "item"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "insert_item" }, "track": { "$ref": "#/$defs/id" }, "index": { "type": "integer", "minimum": 0 }, "item": { "type": "object" } }
+        },
+        {
+          "type": "object",
+          "description": "Change fields on an item. A null value removes the field; nested objects (transform, style, animation) and arrays (keys, gainKeys) are replaced whole. A clip's box (D75): transform {x, y, w, h (canvas pixels), fit contain|cover|fill, scale (zoom inside the box), opacity 0-1, radius}; keys [{frame, ease?, x?, y?, scale?, opacity?}] animate x, y, scale and opacity (frames from the item's start; ease linear|in|out|inOut shapes the motion to the next key, or a spring spring.snap|spring.settle|spring|spring.land|spring.bounce that runs from this key toward the next value and settles on its own time, D192); loop true repeats the media when the clip is longer. hold true keeps the media's last frame on screen when the clip is longer (a freeze). Text style (D80): preset (a text-style look; fields left out use the look's), size, weight, font, color, align, tracking, lineHeight, uppercase, case lower|title, italic, stroke {width, color}, shadow {x, y, blur, color, opacity}, background {color, opacity, padding, radius, wrap box|lines} in canvas px; false for stroke, shadow or background removes the look's. Text animation (D81): in/out {module, duration, params}: move.word-by-word {style pop|fade|rise}, move.zoom {scale, ease, fade}; ease on zoom, rise, slide-left, wipe, scale, pop, bounce and blur may also be a spring preset (D192).",
+          "required": ["op", "item", "set"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "update_item" }, "item": { "$ref": "#/$defs/id" }, "set": { "type": "object", "minProperties": 1 } }
+        },
+        {
+          "type": "object",
+          "description": "Shorten (positive) or lengthen (negative) an item from one edge. Trimming the start moves its in-point; on the main track the rest ripples.",
+          "required": ["op", "item", "edge", "frames"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "trim_item" }, "item": { "$ref": "#/$defs/id" }, "edge": { "enum": ["start", "end"] }, "frames": { "type": "integer", "not": { "const": 0 } } }
+        },
+        {
+          "type": "object",
+          "description": "Split an item at a frame counted from the item's start. The second half gets newId.",
+          "required": ["op", "item", "at", "newId"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "split_item" }, "item": { "$ref": "#/$defs/id" }, "at": { "type": "integer", "minimum": 1 }, "newId": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "type": "object",
+          "description": "Move an item in time or to another track. Main track: index. Free tracks: start.",
+          "required": ["op", "item"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "move_item" },
+            "item": { "$ref": "#/$defs/id" },
+            "track": { "$ref": "#/$defs/id" },
+            "index": { "type": "integer", "minimum": 0 },
+            "start": { "type": "integer", "minimum": 0 }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Remove an item. On the main track the rest closes the gap.",
+          "required": ["op", "item"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "delete_item" }, "item": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "type": "object",
+          "description": "Set or clear (null) the transition into a main-track item (not the first). Drawn modules: transition.crossfade (2–60 frames, the next clip fades in over this one), transition.dip-to-black (4–90 frames, needs no media handles), transition.wipe (4–30 frames, revealed from the left), transition.iris (6–30 frames, a circle opening from the centre), transition.push-left (4–30 frames, the next item pushes this one out to the left), transition.zoom (4–30 frames, the outgoing picture zooms in 20 % as the next fades in), transition.dip-to-white (4–90 frames, needs no media handles), transition.flash (2–30 frames, a white flash at the cut while the next clip fades in), transition.blur (6–60 frames, this clip blurs out as the next one fades in sharp), transition.wipe-left (4–30 frames, the next clip is revealed from the right edge), transition.wipe-up (4–30 frames, the next clip is revealed from the bottom edge), transition.wipe-down (4–30 frames, the next clip is revealed from the top edge), transition.push-right (4–30 frames, the next clip slides in from the left, pushing this one out to the right), transition.push-up (4–30 frames, the next clip slides in from below, pushing this one out the top), transition.push-down (4–30 frames, the next clip slides in from above, pushing this one out the bottom), transition.slide-left (4–30 frames, the next clip slides in from the right over this one), transition.slide-right (4–30 frames, the next clip slides in from the left over this one), transition.slide-up (4–30 frames, the next clip slides in from below over this one), transition.slide-down (4–30 frames, the next clip slides in from above over this one), transition.circle-close (6–30 frames, this clip closes into a shrinking circle over the next one), transition.clock (6–30 frames, the next clip is revealed by a hand sweeping clockwise from 12), transition.split (4–30 frames, the next clip opens from a vertical line in the middle), transition.split-horizontal (4–30 frames, the next clip opens from a horizontal line in the middle), transition.box (4–30 frames, the next clip opens in a growing rectangle from the centre), transition.diamond (6–30 frames, the next clip opens in a growing diamond from the centre), transition.diagonal (4–30 frames, the next clip is revealed by a diagonal edge from the top left), transition.blinds (6–30 frames, the next clip appears through slats that open downwards), transition.zoom-out (4–30 frames, the next clip fades in while settling from 125 % to its size). Both items must be at least twice the duration; every one but the dips to black and white needs ceil(duration/2) frames of video before the incoming clip's in-point and after the outgoing clip's out-point. transition.cut draws as a crossfade.",
+          "required": ["op", "item", "transition"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "set_transition" },
+            "item": { "$ref": "#/$defs/id" },
+            "transition": {
+              "oneOf": [
+                { "type": "null" },
+                { "type": "object", "required": ["module", "duration"], "properties": { "module": { "type": "string", "description": "A transition module id: transition.crossfade, transition.dip-to-black, transition.wipe, transition.iris, transition.push-left, transition.zoom, transition.dip-to-white, transition.flash, transition.blur, transition.wipe-left, transition.wipe-up, transition.wipe-down, transition.push-right, transition.push-up, transition.push-down, transition.slide-left, transition.slide-right, transition.slide-up, transition.slide-down, transition.circle-close, transition.clock, transition.split, transition.split-horizontal, transition.box, transition.diamond, transition.diagonal, transition.blinds, transition.zoom-out." }, "duration": { "type": "integer", "minimum": 1, "description": "Length in frames, centred on the cut." } } }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["op", "track"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "add_track" }, "track": { "type": "object" }, "index": { "type": "integer", "minimum": 0 } }
+        },
+        {
+          "type": "object",
+          "description": "Change fields on a track: name, locked, hidden or mixer. mixer is replaced whole (send the fields to keep): gainDb (-60..12, -60 silent), pan (-1 left .. 0 centre .. 1 right; the near side stays at 0 dB and the far side fades, never a boost; a balance for stereo), mute, solo (if any track is soloed only soloed tracks sound, in the preview and the export; mute wins), effects: the chain in order (D84–D88: audio.eq, audio.compressor, audio.voice-enhance, audio.denoise, audio.duck {under, amountDb, attackMs, releaseMs, thresholdDb}; {bypass: true} keeps an entry but skips it). D83.",
+          "required": ["op", "track", "set"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "update_track" }, "track": { "$ref": "#/$defs/id" }, "set": { "type": "object", "minProperties": 1 } }
+        },
+        {
+          "type": "object",
+          "required": ["op", "track"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "delete_track" }, "track": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "type": "object",
+          "required": ["op", "media"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "add_media" }, "media": { "type": "object" } }
+        },
+        {
+          "type": "object",
+          "description": "Change a media entry in place: path (another file, e.g. a re-shot recording), name, probe or source. Every clip using the media then plays the new file; clips that would run past its end must be trimmed or held in the same edit.",
+          "required": ["op", "media", "set"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "update_media" },
+            "media": { "$ref": "#/$defs/id" },
+            "set": { "type": "object", "minProperties": 1, "propertyNames": { "enum": ["path", "name", "probe", "source"] } }
+          }
+        },
+        {
+          "type": "object",
+          "description": "Remove a media entry from the project. No item may still use it (clips and sounds by media, captions by source): delete those items earlier in the same edit. The file on disk is never deleted.",
+          "required": ["op", "media"],
+          "additionalProperties": false,
+          "properties": { "op": { "const": "delete_media" }, "media": { "$ref": "#/$defs/id" } }
+        },
+        {
+          "type": "object",
+          "description": "Change project-level fields: name, canvas, theme, scenes, markers or master. master is replaced whole: gainDb is the master volume (-60..12 dB, after the tracks are summed, D83), loudness {targetLufs} (the export dialog's default target, D87: -14 Normal, -16 Quieter, -23 Broadcast or another number), effects ([{module: audio.limiter, params: {ceilingDb}}] changes the master limiter, on by default at -1 dBTP; {bypass: true} turns it off, D86). checks {disabled: [rule ids]} turns taste checks off for the project (D90; replaced whole, null removes it). motionBlur {on, samples 2-16, shutter 1-360} is the export's motion blur (D291): merged field by field (null removes one), so {\"motionBlur\":{\"samples\":12}} keeps on and shutter.",
+          "required": ["op", "set"],
+          "additionalProperties": false,
+          "properties": {
+            "op": { "const": "update_project" },
+            "set": {
+              "type": "object",
+              "minProperties": 1,
+              "propertyNames": { "enum": ["name", "canvas", "theme", "scenes", "markers", "sections", "master", "checks", "motionBlur"] },
+              "properties": { "motionBlur": { "type": ["object", "null"], "additionalProperties": false, "properties": { "on": { "type": ["boolean", "null"] }, "samples": { "type": ["integer", "null"], "minimum": 2, "maximum": 16 }, "shutter": { "type": ["number", "null"], "minimum": 1, "maximum": 360 } } } }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

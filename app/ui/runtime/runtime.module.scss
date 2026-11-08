@@ -1,0 +1,6 @@
+.tabs {display:flex;gap:24px;padding:0 24px;border-bottom:1px solid var(--semi-color-border);}
+.tabs a {display:inline-flex;align-items:center;gap:7px;padding:14px 0 12px;color:var(--semi-color-text-2);text-decoration:none;border-bottom:2px solid transparent;font-size:14px;}
+.tabs a:hover {color:var(--semi-color-text-0);}
+.tabs a[aria-current=page] {color:var(--semi-color-primary);border-bottom-color:var(--semi-color-primary);font-weight:600;}
+.tabs a:focus-visible {outline:2px solid var(--semi-color-primary);outline-offset:3px;}
+@media(max-width:640px){.tabs{padding:0 16px;}}

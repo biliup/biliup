@@ -15,7 +15,6 @@ const PACKAGES = {
   'linux-x64-musl': ['@biliup/linux-x64-musl'],
   'linux-arm64-glibc': ['@biliup/linux-arm64-gnu'],
   'linux-arm-glibc': ['@biliup/linux-arm-gnueabi'],
-  'darwin-x64': ['@biliup/darwin-x64'],
   'darwin-arm64': ['@biliup/darwin-arm64'],
   'win32-x64': ['@biliup/win32-x64'],
 }

@@ -1,0 +1,31 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.posterize",
+  "kind": "effect",
+  "name": "Posterize",
+  "description": "Few flat colour bands",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "levels": {
+        "type": "number",
+        "minimum": 2,
+        "maximum": 16,
+        "default": 5,
+        "description": "Levels"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "palette"
+  }
+}

@@ -107,10 +107,10 @@ pub async fn notify(ctx: &Context, caught_error: Option<&str>) -> AppResult<()> 
 /// Notify failed uploads too, without treating an acknowledgement as a successful
 /// upload or replacing the original error. No file cleanup runs on this path.
 pub async fn on_failure<T>(ctx: &Context, result: AppResult<T>) -> AppResult<T> {
-    if let Err(error) = &result {
-        if let Err(callback_error) = notify(ctx, Some(&format!("{error:#}"))).await {
-            tracing::warn!(error = %callback_error, "上传失败后的 webhook 回调失败");
-        }
+    if let Err(error) = &result
+        && let Err(callback_error) = notify(ctx, Some(&format!("{error:#}"))).await
+    {
+        tracing::warn!(error = %callback_error, "上传失败后的 webhook 回调失败");
     }
     result
 }

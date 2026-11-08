@@ -309,7 +309,7 @@ async fn row_exists(services: &ServiceRegister, table: &str, id: i64) -> bool {
         .is_some()
 }
 
-/// 让本地主播的暂停状态与期望一致。暂停只在内存里，重启后要重新套一遍。
+/// 让本地主播的暂停状态与控制面的期望一致。
 pub(super) async fn apply_paused(services: &ServiceRegister, local_id: i64, paused: bool) {
     let Some(worker) = services.managers.get_room_by_id(local_id).await else {
         return;
@@ -318,8 +318,10 @@ pub(super) async fn apply_paused(services: &ServiceRegister, local_id: i64, paus
         *worker.downloader_status.read().unwrap(),
         WorkerStatus::Pause
     );
-    if is_paused != paused {
-        toggle_pause(&services.managers, local_id).await;
+    if is_paused != paused
+        && let Err(error) = toggle_pause(&services.managers, local_id).await
+    {
+        warn!(local_id, ?error, "同步录制暂停状态失败");
     }
 }
 
@@ -697,8 +699,12 @@ impl Reconciler {
             // 没有配对账本（plan 为空）时期望状态自带权威，暂停照常落地；有账本时只有严格新于
             // 本机记录的版本（fresh_rooms）才动暂停：等戳的重复下发是本机已上报的旧事的回音，
             // 本机刚改的暂停还没被扫描排进队列时，它们不能把暂停位翻回去。
-            let fresh = plan.as_ref().is_none_or(|plan| plan.fresh_rooms.contains(&room.id));
-            let adopt = plan.as_ref().and_then(|plan| plan.adopt_rooms.get(&room.id).copied());
+            let fresh = plan
+                .as_ref()
+                .is_none_or(|plan| plan.fresh_rooms.contains(&room.id));
+            let adopt = plan
+                .as_ref()
+                .and_then(|plan| plan.adopt_rooms.get(&room.id).copied());
             if let Err(error) = self.upsert_room(&room, compare, fresh, adopt).await {
                 errors.insert(room.id, error);
             }
@@ -1407,7 +1413,7 @@ mod tests {
         let local_id = reconciler.state().rooms[&1].local_id;
         drop(reconciler);
 
-        // 模拟重启：监控里的房间是按库重新载入的，暂停状态丢了
+        // 按库重新载入时就保持暂停，不必等控制面再次下发。
         f.services.managers.del_room(local_id).await;
         let streamer = f.streamers().await.remove(0);
         f.services
@@ -1415,7 +1421,7 @@ mod tests {
             .add_room(f.services.worker(streamer, None))
             .await
             .unwrap();
-        assert!(!matches!(
+        assert!(matches!(
             f.status(local_id).await,
             Some(WorkerStatus::Pause)
         ));
@@ -1499,7 +1505,7 @@ mod tests {
         assert_eq!(reconciler.release_revoked(&revoked).await, 0);
         assert_eq!(revoked.ids(), ids);
 
-        // 模拟重启：监控按库重新载入，暂停丢了；按清单重新暂停
+        // 按库重新载入已保持暂停，撤销清单仍可继续管理和恢复这些房间。
         for streamer in f.streamers().await {
             f.services.managers.del_room(streamer.id).await;
             f.services
@@ -1508,7 +1514,7 @@ mod tests {
                 .await
                 .unwrap();
         }
-        assert!(!matches!(f.status(ids[0]).await, Some(WorkerStatus::Pause)));
+        assert!(matches!(f.status(ids[0]).await, Some(WorkerStatus::Pause)));
         let revoked = Revoked::load(path.clone(), f.services.clone());
         revoked.apply().await;
         for id in &ids {

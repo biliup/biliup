@@ -1,0 +1,39 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.highlight",
+  "kind": "text-style",
+  "name": "Highlight word",
+  "description": "A bold line whose accent word stands out, revealed word by word.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.09,
+    "weight": 700,
+    "font": "DM Sans",
+    "tracking": -0.03,
+    "lineHeight": 1.05,
+    "color": "fg",
+    "align": "center",
+    "span": true,
+    "x": 0.0375,
+    "y": 0.42,
+    "text": "Make it [[stand out]]",
+    "animation": {
+      "in": {
+        "module": "move.word-by-word",
+        "seconds": 0.8,
+        "params": {
+          "style": "pop"
+        }
+      }
+    }
+  }
+}

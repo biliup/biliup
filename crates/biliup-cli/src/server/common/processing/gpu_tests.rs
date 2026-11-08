@@ -467,10 +467,11 @@ async fn hardware_gpu_monitor_nvidia_sustained_encode() {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
-    if let Ok(device) = std::env::var("BILIUP_TEST_ENCODER_DEVICE") {
-        if !device.is_empty() && device.bytes().all(|byte| byte.is_ascii_digit()) {
-            encode.args(["-gpu", &device]);
-        }
+    if let Ok(device) = std::env::var("BILIUP_TEST_ENCODER_DEVICE")
+        && !device.is_empty()
+        && device.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        encode.args(["-gpu", &device]);
     }
     encode.args(["-f", "null", "-"]);
     let mut child = encode

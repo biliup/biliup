@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.dip-to-white",
+  "kind": "transition",
+  "name": "Dip to white",
+  "description": "Fades to white and back down; the sound dips with it. Needs no spare footage.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 4,
+    "maxFrames": 90
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "sun"
+  }
+}

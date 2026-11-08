@@ -219,12 +219,11 @@ impl<'a> ProtoReader<'a> {
                     WireType::LengthDelimited => {
                         self.read_bytes().map(|b| {
                             // Try to interpret as string if valid UTF-8
-                            if let Ok(s) = String::from_utf8(b.clone()) {
-                                if s.chars()
+                            if let Ok(s) = String::from_utf8(b.clone())
+                                && s.chars()
                                     .all(|c| !c.is_control() || c == '\n' || c == '\r' || c == '\t')
-                                {
-                                    return ProtoValue::String(s);
-                                }
+                            {
+                                return ProtoValue::String(s);
                             }
                             ProtoValue::Bytes(b)
                         })

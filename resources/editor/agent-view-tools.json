@@ -1,0 +1,168 @@
+{
+  "source": "Uncut spec/agent/tools.json, MIT; see licenses/uncut/LICENSE",
+  "tools": [
+    {
+      "name": "render_frames",
+      "description": "Render frames of the current edit exactly as export would, and return them as images to look at (768 px on the longest side by default; scale 1 for full size when a detail matters). Up to 12 per call: pick the moments that matter.",
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "frames"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 12,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "scale": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "phone": {
+            "type": "boolean",
+            "description": "Draw them 360 px wide, the size of a phone in a feed, to judge readability (overrides scale)."
+          }
+        }
+      },
+      "returns": "one image per frame"
+    },
+    {
+      "name": "contact_sheet",
+      "description": "One image with a grid of frames, each captioned with its frame and time: from a media file (pulled from the original) or from the edit (drawn as the export draws it). Cheaper than many render_frames for scanning footage. 'every' samples every N frames; without it, 'max' frames (default 24) are spread evenly. For a video media, at: shots samples the middle of each detected shot; if analysis is still running, call again to reuse that job. Do not combine shots with every. At most 60 cells.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string",
+            "description": "A media id from project_read. Frames and range are then in project frames of that media (like an item's in)."
+          },
+          "range": {
+            "$ref": "#/$defs/range",
+            "description": "Frames [start, end): of the edit, or of the media when media is given. Default: all of it."
+          },
+          "at": {
+            "enum": [
+              "every",
+              "shots"
+            ]
+          },
+          "every": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Frames between samples when at is 'every'."
+          },
+          "columns": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "max": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Most cells (default 24 when every isn't given)."
+          }
+        },
+        "$defs": {
+          "range": {
+            "type": "object",
+            "required": [
+              "start",
+              "end"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "returns": "one JPEG (at most 1600 px wide) and, as text, the frame and time of every cell in order (with at: shots, each shot's frames too); at: shots while the analysis still runs: { video: { state: running | queued }, note } (call again)"
+    },
+    {
+      "name": "project_check",
+      "description": "Taste checks on the current project, the same list core projectChecks finds (text timing and size, typefaces, the frame's edges, blank stretches, transitions, music and sound; docs_read production lists every rule). Each finding has the rule id, severity (warn or info), one sentence, the item ids, the frame (and range) to look at, and either fix (ops you can send as they are with timeline_edit, with a summary) or a hint. Checks never block the export; rules the project turned off (checks.disabled) are left out.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Only these rule ids (e.g. [\"text-read-time\", \"trailing-period\"])."
+          },
+          "severity": {
+            "enum": [
+              "warn",
+              "info"
+            ],
+            "description": "Only warnings, or only info notes."
+          }
+        }
+      },
+      "returns": "{ revision, warnings, notes, checks: [{ rule, severity, message, items, frame, seconds, range, fix | hint }], disabled }"
+    },
+    {
+      "name": "ui_show",
+      "description": "Point the user at something in the editor: a frame and/or an item becomes a pill over the preview (\"Agent changed 0:12–0:18\") the user clicks to jump there and select it; it never moves their playhead or selection. panel opens a panel. Use it to show a result, e.g. the cut you made with that clip.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "minProperties": 1,
+        "properties": {
+          "frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "select": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "The id of one timeline item (the editor selects one item at a time)."
+          },
+          "panel": {
+            "enum": [
+              "media",
+              "transcript",
+              "text",
+              "elements",
+              "audio",
+              "sfx",
+              "transitions",
+              "effects",
+              "capture",
+              "generate",
+              "brand",
+              "skills",
+              "inspector",
+              "agent",
+              "history"
+            ],
+            "description": "Open an existing editor panel, revealing it if hidden. Left: media, transcript, text, elements, audio, sfx, transitions, effects, capture, generate, brand or skills. Right: inspector, agent (this chat) or history. Opening capture never starts recording."
+          }
+        }
+      },
+      "returns": "what was shown"
+    }
+  ]
+}

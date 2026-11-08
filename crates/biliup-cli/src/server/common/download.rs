@@ -1152,8 +1152,10 @@ mod tests {
         let pool = ConnectionManager::new_pool(db.to_str().unwrap())
             .await
             .unwrap();
-        let mut config = Config::default();
-        config.filtering_threshold = 0;
+        let config = Config {
+            filtering_threshold: 0,
+            ..Default::default()
+        };
         let streamer = LiveStreamer {
             id: 1,
             url: "https://queue.example/1".to_string(),
@@ -1228,8 +1230,10 @@ mod tests {
         let pool = ConnectionManager::new_pool(db.to_str().unwrap())
             .await
             .unwrap();
-        let mut config = Config::default();
-        config.downloader = Some(DownloaderType::Ffmpeg);
+        let config = Config {
+            downloader: Some(DownloaderType::Ffmpeg),
+            ..Default::default()
+        };
         let streamer = LiveStreamer {
             id: 1,
             url: "https://args.example/1".to_string(),
@@ -1385,8 +1389,10 @@ mod tests {
             )
             .await
             .unwrap();
-            let mut config = Config::default();
-            config.delay = delay;
+            let config = Config {
+                delay,
+                ..Default::default()
+            };
             let streamer = LiveStreamer {
                 id: 1,
                 url: ROOM.to_string(),

@@ -221,10 +221,10 @@ async fn room_override_refresh_never_uses_global_ticket() {
         "INSERT INTO livestreamers(id,url,remark,\"override\") \
          VALUES(1,'https://www.douyu.com/1','room',?)",
     )
-        .bind(r#"{"douyu_cookie":"acf_uid=99; acf_auth=other"}"#)
-        .execute(&pool)
-        .await
-        .unwrap();
+    .bind(r#"{"douyu_cookie":"acf_uid=99; acf_auth=other"}"#)
+    .execute(&pool)
+    .await
+    .unwrap();
     let status = keeper.refresh(Some(1)).await.unwrap();
     assert!(!status.has_ltp0);
     assert_eq!(fake.refreshes.load(Ordering::SeqCst), 0);

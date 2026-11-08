@@ -69,7 +69,7 @@ export default function EstimateModal({
     setStarting(true)
     try {
       await startAutoClip(sessionId, reuse)
-      Toast.success({ content: '已开始生成候选，进度在状态里；做完后候选会出现在回看页的「候选」里', duration: 3 })
+      Toast.success({ content: '已开始生成候选，可在剪辑台素材栏的「录制选段 → 建议」中查看', duration: 3 })
       onClose()
     } catch (e) {
       if (!(e instanceof ReportedError)) Toast.error({ content: `没能开始：${autoClipError(e)}`, duration: 5 })

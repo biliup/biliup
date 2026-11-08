@@ -17,19 +17,23 @@
 </div>
 
 ## 🛠️ 功能
-* 提供 skill，让你的 Agent 成为 up 主: `npx skills add biliup/biliup`
-* 开箱即用，多种安装方式，提供可视化 WebUi 界面
-* 多主播录制/上传，24X7 无人值守运行，高自定义元信息
-* 录制同时抓取弹幕，输出 XML 弹幕文件
-* 正在录制的直播间可在 WebUI 内直接预览：复用正在写盘的那一路流（不另外拉流），带封面、实时弹幕与写盘码率曲线，支持多路同屏监视
-* 按场次回看录像，选段即剪，切片直接投稿
-* 多机录制（Fleet）：控制面统一分派房间，节点凭票据加入
-* 多用户，三种角色分级权限
-* 自动切片：大模型挑出高光候选，人工确认后再切
-* 作为自动化流程中的命令行工具封装使用
-* 边录边传 0 落盘
+
+- **全天候录制与实时监控**：多主播 24×7 无人值守录制，同步保存 XML 弹幕；复用录制流实时预览，展示封面、弹幕与写盘码率，支持多路同屏监视。
+- **一体化剪辑台**：按场次回看、选段或导入本地素材，在同一工程中完成多轨剪辑、字幕、打码、弹幕叠加、转场与特效，支持工程管理、撤销重做和中英文切换。
+- **压制、导出与投稿**：集中查看自动转封装（remux）、压制和工程导出的任务进度，成片可直接投稿；支持自定义投稿元信息及边录边传、0 落盘。
+- **AI 与流程自动化**：大模型推荐高光片段，人工确认后切片；支持剪辑助手、命令行和 Agent skill，让你的 Agent 成为 up 主：`npx skills add biliup/biliup`。
+- **灵活部署与多机协作**：提供多种安装方式和可视化 WebUI；Fleet 控制面统一分派录制房间，节点凭票据加入，并支持多用户、三种角色分级权限。
 
 论坛：[BBS](https://bbs.biliup.rs)
+
+## 🖥️ UI 展示
+
+<table>
+  <tr>
+    <td width="50%"><img src=".github/resource/webui-overview.webp" alt="biliup WebUI 概览：系统状态、直播录制与最近事件" /></td>
+    <td width="50%"><img src=".github/resource/webui-editor.webp" alt="biliup 剪辑台：素材、画面预览、字幕、多轨时间轴和助手" /></td>
+  </tr>
+</table>
 
 ## 📺 支持平台
 
@@ -422,7 +426,7 @@ cargo test -p biliup -p biliup-cli -p danmaku
 
 
 ## 💴捐赠
-<img src=".github/resource/Image.jpg" width="200" />
+<img src=".github/resource/Image.webp" width="200" />
 
 [爱发电 »](https://afdian.com/a/biliup)
 

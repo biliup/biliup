@@ -93,10 +93,8 @@ impl WbiSigner {
         // Check if update is needed
         {
             let last = *self.last_update.read().await;
-            if now - last < UPDATE_INTERVAL {
-                if self.key.read().await.is_some() {
-                    return Ok(());
-                }
+            if now - last < UPDATE_INTERVAL && self.key.read().await.is_some() {
+                return Ok(());
             }
         }
 

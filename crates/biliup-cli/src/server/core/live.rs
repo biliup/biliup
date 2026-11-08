@@ -191,7 +191,7 @@ pub fn downloader_runtime(
             .trim_start_matches('.')
             .eq_ignore_ascii_case("mp4")
     });
-    let downloader_type = config_type.unwrap_or_else(|| match stream.downloader_hint {
+    let downloader_type = config_type.unwrap_or(match stream.downloader_hint {
         // 要求 MP4 输出时改用 ffmpeg 真正转封装
         DownloaderHint::StreamGears if wants_mp4 => DownloaderType::Ffmpeg,
         // 未配置下载器时用 mesio：写出的 FLV 带 onMetaData.keyframes、每段时间戳从 0 开始，
@@ -282,7 +282,7 @@ fn ytdlp_runtime(stream: &LiveStream, downloader_type: DownloaderType) -> Downlo
             ..Default::default()
         },
     };
-    DownloaderRuntime::YtDlp(YtDlpDownloader::new(cfg))
+    DownloaderRuntime::YtDlp(Box::new(YtDlpDownloader::new(cfg)))
 }
 
 fn ytdlp_config(options: &YtDlpOptions, downloader_type: DownloaderType) -> YtDlpConfig {

@@ -48,8 +48,7 @@ pub async fn add_streamer(
     Ok(live_streamers)
 }
 
-/// 整体覆盖保存主播，并用新设置重建它的监控。暂停只在内存里，重建时带过去：
-/// 否则给暂停中的主播改个备注，它就又开始检测、开播即录。
+/// 整体覆盖保存主播，并用新设置重建它的监控。暂停状态独立于表单保存，重建时恢复。
 pub async fn update_streamer(
     services: &ServiceRegister,
     streamer: LiveStreamer,
@@ -105,33 +104,28 @@ pub async fn delete_streamer(
 
 /// 暂停或恢复主播的监控：暂停中的恢复，其他状态（包括正在录制）一律暂停。
 /// 主播不在监控里时什么也不做。
-pub async fn toggle_pause(managers: &DownloadManager, id: i64) {
+pub async fn toggle_pause(managers: &DownloadManager, id: i64) -> AppResult<()> {
     let worker = managers.get_room_by_id(id).await;
     if let Some(w) = worker {
+        let _control = w.recording_control.lock().await;
         let worker_status = w.downloader_status.read().unwrap().clone();
+        managers
+            .persist_pause(id, !matches!(worker_status, WorkerStatus::Pause))
+            .await?;
         match worker_status {
-            WorkerStatus::Working(_) => {
-                w.change_status(Stage::Download, WorkerStatus::Pause).await;
-                info!(url=?&w.live_streamer.url, "successfully pause live streamers");
-                managers.make_waker(id).await;
-            }
             WorkerStatus::Pause => {
                 w.change_status(Stage::Download, WorkerStatus::Idle).await;
                 managers.resume_room(id).await;
                 info!(url=?&w.live_streamer.url, "successfully start live streamers");
             }
-            WorkerStatus::Pending => {
-                w.change_status(Stage::Download, WorkerStatus::Pause).await;
-                managers.make_waker(id).await;
-                info!(url=?&w.live_streamer.url, "successfully pause live streamers");
-            }
-            WorkerStatus::Idle => {
+            WorkerStatus::Working(_) | WorkerStatus::Pending | WorkerStatus::Idle => {
                 w.change_status(Stage::Download, WorkerStatus::Pause).await;
                 managers.make_waker(id).await;
                 info!(url=?&w.live_streamer.url, "successfully pause live streamers");
             }
         };
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -258,6 +252,107 @@ mod tests {
             .unwrap()
     }
 
+    async fn saved_pause(pool: &ConnectionPool, id: i64) -> bool {
+        sqlx::query_scalar("SELECT recording_paused FROM livestreamers WHERE id = ?")
+            .bind(id)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn restart(f: &mut Fixture) {
+        let pool =
+            ConnectionManager::new_pool(f._dir.path().join("data.sqlite3").to_str().unwrap())
+                .await
+                .unwrap();
+        let managers = DownloadManager::new(1, 1, pool.clone());
+        f.probe_gate.as_ref().unwrap().close();
+        let gate = Arc::new(Semaphore::new(0));
+        managers.set_probe_gate(gate.clone());
+        f.probe_gate = Some(gate);
+        let (probed_tx, probed) = mpsc::unbounded_channel();
+        managers
+            .add_plugin(Arc::new(StuckPlatform { probed: probed_tx }))
+            .await;
+        f.services.managers = Arc::new(managers);
+        f.services.pool = pool;
+        f.probed = probed;
+        for streamer in LiveStreamer::select()
+            .fetch_all(&f.services.pool)
+            .await
+            .unwrap()
+        {
+            f.services
+                .managers
+                .add_room(f.services.worker(streamer, None))
+                .await
+                .unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn pause_and_resume_survive_restart_without_affecting_other_rooms() {
+        let gate = Arc::new(Semaphore::new(0));
+        let mut f = fixture_with_probe_gate(Some(gate.clone())).await;
+        let first = add_streamer(&f.services, insert("https://stuck.example/1"))
+            .await
+            .unwrap();
+        let other = add_streamer(&f.services, insert("https://stuck.example/2"))
+            .await
+            .unwrap();
+        assert!(!saved_pause(&f.services.pool, first.id).await);
+        toggle_pause(&f.services.managers, first.id).await.unwrap();
+        assert!(saved_pause(&f.services.pool, first.id).await);
+        assert!(!saved_pause(&f.services.pool, other.id).await);
+
+        restart(&mut f).await;
+        let room = f.services.managers.get_room_by_id(first.id).await.unwrap();
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pause
+        ));
+        // Only the unpaused room may enter the first check after restart.
+        f.probe_gate.as_ref().unwrap().add_permits(1);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
+                .await
+                .unwrap(),
+            Some(other.url)
+        );
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Pause
+        ));
+
+        toggle_pause(&f.services.managers, first.id).await.unwrap();
+        assert!(!saved_pause(&f.services.pool, first.id).await);
+        restart(&mut f).await;
+        let room = f.services.managers.get_room_by_id(first.id).await.unwrap();
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Idle
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_failed_pause_save_keeps_the_runtime_state_unchanged() {
+        let mut f = fixture_with_probe_gate(Some(Arc::new(Semaphore::new(0)))).await;
+        let row = add_streamer(&f.services, insert("https://stuck.example/1"))
+            .await
+            .unwrap();
+        let room = f.services.managers.get_room_by_id(row.id).await.unwrap();
+        sqlx::query("ALTER TABLE livestreamers DROP COLUMN recording_paused")
+            .execute(&f.services.pool)
+            .await
+            .unwrap();
+        assert!(toggle_pause(&f.services.managers, row.id).await.is_err());
+        assert!(matches!(
+            *room.downloader_status.read().unwrap(),
+            WorkerStatus::Idle
+        ));
+        assert!(f.probed.try_recv().is_err());
+    }
+
     #[tokio::test]
     async fn adding_a_streamer_saves_it_and_starts_monitoring() {
         let mut f = fixture().await;
@@ -319,7 +414,7 @@ mod tests {
         assert_eq!(rooms[0].live_streamer.remark, "新备注");
     }
 
-    /// 暂停只在内存里：保存设置会重建监控，暂停必须带过去，不能改个备注就又开始检测、开录
+    /// 保存设置不能清掉暂停状态，改个备注后仍保持暂停。
     #[tokio::test]
     async fn updating_a_paused_streamer_keeps_it_paused() {
         let probe_gate = Arc::new(Semaphore::new(0));
@@ -332,7 +427,7 @@ mod tests {
             .await
             .expect("新房间应很快轮到检测");
         let managers = &f.services.managers;
-        toggle_pause(managers, added.id).await;
+        toggle_pause(managers, added.id).await.unwrap();
 
         let edited = LiveStreamer {
             remark: "新备注".to_string(),
@@ -342,6 +437,7 @@ mod tests {
 
         let room = managers.get_room_by_id(added.id).await.unwrap();
         assert_eq!(room.live_streamer.remark, "新备注");
+        assert!(saved_pause(&f.services.pool, added.id).await);
         let status = || room.downloader_status.read().unwrap().clone();
         assert!(
             matches!(status(), WorkerStatus::Pause),
@@ -349,7 +445,7 @@ mod tests {
             status()
         );
         // 恢复照常可用
-        toggle_pause(managers, added.id).await;
+        toggle_pause(managers, added.id).await.unwrap();
         assert!(matches!(status(), WorkerStatus::Idle));
         probe_gate.add_permits(1);
         let restarted = tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
@@ -398,10 +494,10 @@ mod tests {
         let status = || room.downloader_status.read().unwrap().clone();
         assert!(matches!(status(), WorkerStatus::Pending));
 
-        toggle_pause(managers, added.id).await;
+        toggle_pause(managers, added.id).await.unwrap();
         assert!(matches!(status(), WorkerStatus::Pause));
 
-        toggle_pause(managers, added.id).await;
+        toggle_pause(managers, added.id).await.unwrap();
         assert!(matches!(status(), WorkerStatus::Idle));
         probe_gate.add_permits(1);
         let restarted = tokio::time::timeout(Duration::from_secs(5), f.probed.recv())
@@ -410,10 +506,10 @@ mod tests {
         assert_eq!(restarted.as_deref(), Some(added.url.as_str()));
         assert!(matches!(status(), WorkerStatus::Pending));
 
-        toggle_pause(managers, added.id).await;
+        toggle_pause(managers, added.id).await.unwrap();
         assert!(matches!(status(), WorkerStatus::Pause));
 
         // 不在监控里的主播什么也不做
-        toggle_pause(managers, added.id + 1).await;
+        toggle_pause(managers, added.id + 1).await.unwrap();
     }
 }

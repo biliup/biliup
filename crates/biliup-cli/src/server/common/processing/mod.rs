@@ -46,10 +46,12 @@ mod tests {
     use super::*;
     #[test]
     fn legacy_masks_and_native_danmaku_share_one_step() {
-        let mut config = Config::default();
-        config.mosaic_config = Some(serde_json::json!({"enabled":true,"regions":[{
+        let mut config = Config {
+            mosaic_config: Some(serde_json::json!({"enabled":true,"regions":[{
             "id":"private","x":0.1,"y":0.1,"width":0.2,"height":0.2,
-            "effectType":"solid","strength":0,"color":"#000000"}]}));
+            "effectType":"solid","strength":0,"color":"#000000"}]})),
+            ..Default::default()
+        };
         let configured: Vec<HookStep> = serde_json::from_value(serde_json::json!([
             {"render":{"danmaku":{"enabled":true}}},{"remux":"mp4"}]))
         .unwrap();

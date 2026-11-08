@@ -1,0 +1,24 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "analyze.audio",
+  "kind": "analyzer",
+  "name": "Loudness, beats and silence",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "analyzer": {
+    "inputs": [
+      "audio"
+    ],
+    "outputs": [
+      "loudness",
+      "beats",
+      "silence"
+    ],
+    "backend": "signal"
+  }
+}

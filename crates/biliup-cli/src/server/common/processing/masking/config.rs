@@ -166,7 +166,7 @@ pub struct PixelRegion {
 }
 
 /// 马赛克完整配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MosaicConfig {
     /// 是否启用
     pub enabled: bool,
@@ -210,16 +210,6 @@ impl MosaicConfig {
     /// 序列化为 JSON 字符串
     pub fn to_json(&self) -> Result<String, String> {
         serde_json::to_string(self).map_err(|e| format!("序列化 JSON 失败: {}", e))
-    }
-}
-
-impl Default for MosaicConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            regions: Vec::new(),
-            mode: None,
-        }
     }
 }
 

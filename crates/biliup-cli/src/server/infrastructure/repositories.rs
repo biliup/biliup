@@ -507,12 +507,12 @@ async fn delete_bilibili_cookie_from(
             bail!(AppError::Custom("B 站用户不存在".into()));
         }
         Err(error) => {
-            if let Some(quarantine) = quarantine.as_ref() {
-                if let Err(restore_error) = std::fs::rename(quarantine, &target_path) {
-                    bail!(AppError::Custom(format!(
-                        "数据库删除失败且无法恢复已隔离的凭据文件: {error}; {restore_error}"
-                    )));
-                }
+            if let Some(quarantine) = quarantine.as_ref()
+                && let Err(restore_error) = std::fs::rename(quarantine, &target_path)
+            {
+                bail!(AppError::Custom(format!(
+                    "数据库删除失败且无法恢复已隔离的凭据文件: {error}; {restore_error}"
+                )));
             }
             return Err(error).change_context(AppError::Unknown);
         }

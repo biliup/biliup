@@ -25,10 +25,11 @@ struct SupersededMigration {
     repair: &'static [&'static str],
 }
 
-/// 迁移文件是只读历史：sqlx 会用文件内容的 SHA-384 校验每条已应用的迁移，一旦
+/// 已发布的迁移文件是只读历史：sqlx 会用文件内容的 SHA-384 校验每条已应用的迁移，一旦
 /// 就地改写，所有老库都会在启动时以
 /// `migration N was previously applied but has been modified` 整体失败 —— 服务起不来，
-/// 容器无限重启（#1701 / #1702）。修 SQL 的正确做法始终是新增一个迁移文件。
+/// 容器无限重启（#1701 / #1702）。修改已发布结构须新增迁移；未发布功能的中间迁移
+/// 应合并成最终结构，不登记开发过程中的摘要或为临时工程添加升级路径。
 ///
 /// 这张表只给**已经发生过**的改写兜底，不是继续改写的许可。登记一条的前提是：
 /// 对已经跑过旧内容的库来说，新旧内容的差异能用下面这组幂等语句补齐。
@@ -507,8 +508,22 @@ mod tests {
                 15,
                 "651bdccbe5c26daf608c9edcaf49ff21070e1918a03747fc9f04448c80d19d8925b93f95adc89daf0944ace4adcc906c",
             ),
-            (16, "d535d3f1d70a8d59f0cf03f9cc320a998c0c7c713da0064f340206891fcb6453293cbc0692f618f79213fba6aee7512a"),
-            (17, "7186a4ca1c54defbcab04f485f2365fb1677e346703c0f5d5bfd3cd6b7d8208895be4608024585dbb73a7e0463b548ec"),
+            (
+                16,
+                "d535d3f1d70a8d59f0cf03f9cc320a998c0c7c713da0064f340206891fcb6453293cbc0692f618f79213fba6aee7512a",
+            ),
+            (
+                17,
+                "7186a4ca1c54defbcab04f485f2365fb1677e346703c0f5d5bfd3cd6b7d8208895be4608024585dbb73a7e0463b548ec",
+            ),
+            (
+                18,
+                "dd77be0c39401b245fb8291a6db4b0b3a7c56c9ca62ebf4ad0764afdb3f937b121bb25feb6c0febb79abd7b5c5aa8f18",
+            ),
+            (
+                19,
+                "517da1681f3b9277489924d659e02874800b5c59a97f014e7fbd86eadf11634b90db7e5aaff398147157244d7afde462",
+            ),
         ];
         let embedded = sqlx::migrate!();
         let actual: Vec<(i64, String)> = embedded
@@ -573,12 +588,12 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
+        let embedded = sqlx::migrate!();
         assert_eq!(
             migrations.iter().map(|m| m.0).collect::<Vec<_>>(),
-            (1..=17).collect::<Vec<_>>(),
+            embedded.iter().map(|m| m.version).collect::<Vec<_>>(),
             "待应用的迁移必须补齐"
         );
-        let embedded = sqlx::migrate!();
         for (version, checksum) in &migrations {
             let expected = embedded.iter().find(|m| m.version == *version).unwrap();
             assert_eq!(
@@ -647,7 +662,10 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(applied, (1..=17).collect::<Vec<_>>());
+        assert_eq!(
+            applied,
+            embedded.iter().map(|m| m.version).collect::<Vec<_>>()
+        );
         let seeded: Vec<i64> = sqlx::query_scalar("SELECT id FROM stream_session_ids ORDER BY id")
             .fetch_all(&pool)
             .await
@@ -893,7 +911,13 @@ mod tests {
                 .fetch_all(&pool)
                 .await
                 .unwrap();
-        assert_eq!(versions, (1..=17).collect::<Vec<_>>());
+        assert_eq!(
+            versions,
+            sqlx::migrate!()
+                .iter()
+                .map(|m| m.version)
+                .collect::<Vec<_>>()
+        );
         let tables: Vec<String> = sqlx::query_scalar(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN \
              ('streamerinfo', 'stream_sessions', 'session_streamerinfo', 'segments') ORDER BY name",

@@ -156,6 +156,70 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         }
         "/v1/ws/live-rates" | "/v1/live-rates" if get => StreamerView,
         "/v1/sessions" | "/v1/sessions/{id}" | "/v1/sessions/{id}/keyframes" if get => FileView,
+        "/v1/editor/projects"
+        | "/v1/editor/projects/{id}"
+        | "/v1/editor/projects/{id}/revisions/{revision}"
+        | "/v1/editor/projects/{id}/revisions"
+        | "/v1/editor/projects/{id}/history"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/editor/projects" if method == Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/history" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/agent/screen-take" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/imports" if method == Method::POST => ClipEdit,
+        "/v1/outputs" | "/v1/outputs/processing" | "/v1/editor/projects/{id}/exports" | "/v1/editor/projects/{id}/exports/{job}/download"
+            if get =>
+        {
+            FileView
+        }
+        "/v1/editor/projects/{id}/exports/loudness" if method==Method::POST => FileView,
+        "/v1/editor/projects/{id}/library/items/{item}" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/exports" | "/v1/editor/projects/{id}/exports/{job}/cancel" | "/v1/editor/projects/{id}/exports/{job}/retry"
+            if method == Method::POST =>
+        {
+            ClipEdit
+        }
+        "/v1/editor/projects/{id}/media/{media}/{kind}" if get => FileView,
+        "/v1/editor/projects/{id}/analysis" | "/v1/editor/projects/{id}/analysis/media/{media}" if get => FileView,
+        "/v1/editor/setup" | "/v1/editor/transcription" if get => FileView,
+        "/v1/editor/projects/{id}/resources/{kind}" if get => FileView,
+        "/v1/editor/keys" if get => FileView,
+        "/v1/editor/projects/{id}/graphics/{name}" if get => FileView,
+        "/v1/editor/projects/{id}/graphic-media/{media}" if get => FileView,
+        "/v1/editor/projects/{id}/render-assets" if get => FileView,
+        "/v1/editor/projects/{id}/fonts" if get => FileView,
+        "/v1/editor/projects/{id}/proxies" if get => FileView,
+        "/v1/editor/projects/{id}/recent" | "/v1/editor/projects/{id}/recent/{media}/thumb" if get => FileView,
+        "/v1/editor/projects/{id}/links" if get => FileView,
+        "/v1/editor/projects/{id}/agent" if get => FileView,
+        "/v1/editor/projects/{id}/shaders" if get => FileView,
+        "/v1/editor/projects/{id}/agent/plan" | "/v1/editor/projects/{id}/agent/images/{image}" | "/v1/editor/projects/{id}/agent/files/{file}" if get => FileView,
+        "/v1/editor/projects/{id}/agent/plan" if method==Method::PUT => ClipEdit,
+        "/v1/editor/projects/{id}/agent" | "/v1/editor/projects/{id}/agent/cancel" | "/v1/editor/projects/{id}/agent/approve" | "/v1/editor/projects/{id}/agent/thread" | "/v1/editor/projects/{id}/agent/turns/{turn}/undo" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/links" | "/v1/editor/projects/{id}/links/check" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/recent/{media}/import" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/proxies" | "/v1/editor/projects/{id}/proxies/{media}/cancel" | "/v1/editor/projects/{id}/proxies/{media}/retry" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/fonts" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/graphics" if method==Method::POST => ClipEdit,
+        "/v1/editor/model" if get => FileView,
+        "/v1/editor/model" if method==Method::PUT => ConfigEdit,
+        "/v1/editor/generators" | "/v1/editor/projects/{id}/generation" | "/v1/editor/projects/{id}/generation/{job}" if get => FileView,
+        "/v1/editor/projects/{id}/generation" | "/v1/editor/projects/{id}/generation/{job}" if method==Method::POST || method==Method::DELETE => ClipEdit,
+        "/v1/editor/library/state" | "/v1/editor/library/preview/{source}/{sound}" if get => FileView,
+        "/v1/editor/library/search" if method==Method::POST => FileView,
+        "/v1/editor/projects/{id}/library/online/{source}/{sound}" if method==Method::POST => ClipEdit,
+        "/v1/editor/keys/{provider}" if method==Method::PUT || method==Method::DELETE => ConfigEdit,
+        "/v1/editor/projects/{id}/library/folders" | "/v1/editor/projects/{id}/library/sounds/{sound}/{kind}" if get => FileView,
+        "/v1/editor/projects/{id}/library/folders" | "/v1/editor/projects/{id}/library/folders/{folder}" if method==Method::PUT || method==Method::DELETE => ClipEdit,
+        "/v1/editor/projects/{id}/brand" | "/v1/editor/projects/{id}/brand/files" | "/v1/editor/projects/{id}/brand/{scope}/{kit}/files/{name}" if get => FileView,
+        "/v1/editor/projects/{id}/brand/{scope}/{kit}/files" | "/v1/editor/projects/{id}/brand/{scope}/{kit}/import" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/resources/{kind}" if method==Method::PUT || method==Method::DELETE => ClipEdit,
+        "/v1/editor/transcription/download" | "/v1/editor/transcription/cancel" | "/v1/editor/transcription/select" if method==Method::POST => ClipEdit,
+        "/v1/editor/projects/{id}/analysis" | "/v1/editor/projects/{id}/analysis/{job}/cancel" if method==Method::POST => ClipEdit,
+        "/v1/editor/sessions/{id}/media/{media}/{kind}" if get => FileView,
+        "/v1/editor/projects/{id}" if method == Method::PUT || method == Method::DELETE => ClipEdit,
         "/v1/sessions/{id}/media" if get => PreviewView,
         "/v1/sessions/{id}/markers" if get => FileView,
         "/v1/sessions/{id}/markers" if method == Method::POST => ClipEdit,
@@ -207,7 +271,11 @@ pub fn required_permission(method: &Method, route: &str, raw_path: &str) -> Opti
         // Preview converts a recipe snapshot but does not persist a change.
         "/v1/sessions/{id}/render-preview" if method == Method::POST => FileView,
         "/v1/render-tools" | "/v1/render-capabilities" if get => StreamerView,
+        "/v1/outputs/{kind}/{id}/publish/covers" if method==Method::POST||method==Method::PUT => UploadSubmit,
+        "/v1/outputs/{kind}/{id}/publish/covers/{cover}" if get => UploadSubmit,
         "/v1/clips/{cid}/publish"
+        | "/v1/outputs/{kind}/{id}/publish/preview"
+        | "/v1/outputs/{kind}/{id}/publish"
         | "/v1/publish-jobs"
         | "/v1/publish-jobs/preview"
         | "/v1/publish-jobs/resume"

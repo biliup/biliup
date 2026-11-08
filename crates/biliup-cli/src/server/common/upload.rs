@@ -123,7 +123,7 @@ where
         recorder.filename_prefix = upload_config.title.clone();
 
         let studio = build_studio(
-            &upload_config,
+            upload_config,
             &upload_context.bilibili,
             uploaded_videos.videos,
             &recorder,
@@ -424,6 +424,14 @@ where
                 Ok(replaced) => replaced,
                 Err(error) => {
                     error!(%error, file = ?original, "segment_processor 失败，本段停止投稿");
+                    if let Some(task) = TaskObservation::current() {
+                        task.file(
+                            &original.file_name().unwrap_or_default().to_string_lossy(),
+                            original_bytes,
+                        )
+                        .finish(Some(&format!("分段后处理失败：{error}")));
+                        task.phase("waiting_segment");
+                    }
                     continue;
                 }
             };
@@ -602,6 +610,23 @@ pub(crate) async fn upload_single_file_with_progress(
     context: &UploadContext,
     progress: impl Fn(usize) -> bool + Send + Sync,
 ) -> AppResult<Video> {
+    upload_observed_file(file_path, context, progress, true).await
+}
+
+/// Completed renders already have their final audio; uploading must not rewrite that artifact.
+pub(crate) async fn upload_prepared_file_with_progress(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) -> bool + Send + Sync,
+) -> AppResult<Video> {
+    upload_observed_file(file_path, context, progress, false).await
+}
+async fn upload_observed_file(
+    file_path: &Path,
+    context: &UploadContext,
+    progress: impl Fn(usize) -> bool + Send + Sync,
+    repair_audio: bool,
+) -> AppResult<Video> {
     let name = file_path.file_name().unwrap_or_default().to_string_lossy();
     let observation = TaskObservation::current().map(|task| {
         task.file(
@@ -611,7 +636,14 @@ pub(crate) async fn upload_single_file_with_progress(
                 .map(|metadata| metadata.len()),
         )
     });
-    let result = upload_file_inner(file_path, context, &progress, observation.as_ref()).await;
+    let result = upload_file_inner(
+        file_path,
+        context,
+        &progress,
+        observation.as_ref(),
+        repair_audio,
+    )
+    .await;
     if let Some(observation) = observation {
         observation.finish(
             result
@@ -655,11 +687,14 @@ async fn upload_file_inner(
     context: &UploadContext,
     progress: &(impl Fn(usize) -> bool + Send + Sync),
     observation: Option<&FileObservation>,
+    repair_audio: bool,
 ) -> AppResult<Video> {
     if crate::server::common::processing::masking::is_unmasked(file_path) {
         return Err(AppError::Custom("未遮挡录像禁止上传，请先完成画面遮挡".into()).into());
     }
-    prepare_upload_audio(file_path).await?;
+    if repair_audio {
+        prepare_upload_audio(file_path).await?;
+    }
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -837,10 +872,10 @@ where
         )
         .await
         .change_context(AppError::Unknown);
-    if let Some(observation) = &observation {
-        if let Ok(uploaded) = &uploaded {
-            observation.total_bytes(uploaded.uploaded_size());
-        }
+    if let Some(observation) = &observation
+        && let Ok(uploaded) = &uploaded
+    {
+        observation.total_bytes(uploaded.uploaded_size());
     }
     let uploaded = uploaded?;
     let t = instant.elapsed().as_millis().max(1);
@@ -1303,8 +1338,10 @@ mod tests {
                 format!("bad-{i}.unmasked.flv")
             } else { format!("bad-{i}.flv.unmasked") });
             std::fs::write(&path, b"raw recording").unwrap();
-            let mut config = Config::default();
-            config.mosaic_config = Some(value);
+            let config = Config {
+mosaic_config: Some(value),
+..Default::default()
+};
             let ctx = test_context(config);
             let calls = std::sync::atomic::AtomicUsize::new(0);
             let result = pipeline_upload_videos(
@@ -1371,11 +1408,13 @@ mod tests {
             crate::tools::note_skipped_test("FFmpeg libx264 unavailable");
             return;
         }
-        let mut config = Config::default();
-        config.filtering_threshold = 0;
-        config.mosaic_config = Some(
-            json!({"enabled": true, "regions": [{"id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,"effectType":"solid","strength":0,"color":"#000000"}]}),
-        );
+        let config = Config {
+            filtering_threshold: 0,
+            mosaic_config: Some(
+                json!({"enabled": true, "regions": [{"id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,"effectType":"solid","strength":0,"color":"#000000"}]}),
+            ),
+            ..Default::default()
+        };
         let ctx = test_context(config);
         // The fixture needs only the persistence tables used by the processing
         // pipeline, avoiding a network/real uploader dependency in this test.
@@ -1501,12 +1540,14 @@ mod tests {
             }
             let original_bytes = std::fs::metadata(&raw).unwrap().len();
             assert!(original_bytes < 20_000_000);
-            let mut config = Config::default();
-            config.filtering_threshold = 20;
-            config.mosaic_config = Some(json!({"enabled":true,"regions":[{
-                "id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,
-                "effectType":"solid","strength":0,"color":"#000000"
-            }]}));
+            let config = Config {
+                filtering_threshold: 20,
+                mosaic_config: Some(json!({"enabled":true,"regions":[{
+                    "id":"solid","x":0.25,"y":0.25,"width":0.5,"height":0.5,
+                    "effectType":"solid","strength":0,"color":"#000000"
+                }]})),
+                ..Default::default()
+            };
             let base = test_context(config);
             let pool =
                 ConnectionManager::new_pool(dir.path().join("data.sqlite3").to_str().unwrap())
@@ -2024,15 +2065,19 @@ pub(crate) fn observe_context(
     let template = ctx
         .upload_config()
         .as_ref()
-        .filter(|template| !template.is_noop_uploader())?;
+        .filter(|template| !template.is_noop_uploader());
     ctx.upload_observations().map(|registry| {
         registry.register(NewTask {
-            source,
+            source: if template.is_some() {
+                source
+            } else {
+                "processing"
+            },
             scheduler_group: group,
             title: &ctx.streamer_info().title,
             streamer_name: Some(&ctx.live_streamer().remark),
             session_id: Some(ctx.id()),
-            template_name: Some(&template.template_name),
+            template_name: template.map(|template| template.template_name.as_str()),
             fifo,
         })
     })

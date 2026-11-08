@@ -2,7 +2,7 @@
 //!
 //! 被移除的节点，房间多半已被改派给别的节点，它接着录就会与新节点重复录制、重复投稿。节点发现自己被吊销
 //! （连接以 `revoked` 关闭，或重连时 relay 以 `revoked` 拒绝）时，把此刻托管的主播记进
-//! `data/fleet-revoked.json` 并暂停。本机的暂停只在内存里，所以每次启动按这份清单重新暂停；
+//! `data/fleet-revoked.json` 并持久化暂停；每次启动按清单核对等待确认的房间；
 //! 管理员恢复某个主播、删掉它、或点「全部恢复」/「知道了」时从清单里拿掉，清单空了删文件。
 //!
 //! 只有真的被吊销过才会有这个文件；`biliup node leave`（节点主人主动离开）不经过这里，房间照常录。
@@ -286,7 +286,7 @@ impl Revoked {
         ids
     }
 
-    /// 「知道了」：只清空清单，主播保持此刻的暂停状态（与本机其他主播一样，暂停不跨重启）
+    /// 「知道了」：只清空提示清单，主播保持已保存的暂停状态。
     pub fn dismiss(&self) {
         let ids = self.ids();
         self.remove(&ids);
@@ -308,7 +308,7 @@ enum Tracked {
     Toggle(i64),
     /// `DELETE /v1/streamers/{id}`
     Delete(i64),
-    /// `PUT /v1/streamers`：保存会重建监控，暂停随之丢失
+    /// `PUT /v1/streamers`：保存后核对清单内房间的暂停状态。
     Save,
 }
 
@@ -462,7 +462,7 @@ mod tests {
             .route(
                 "/v1/streamers/{id}/pause",
                 put(move |UrlPath(id): UrlPath<i64>| async move {
-                    toggle_pause(&toggle.managers, id).await;
+                    toggle_pause(&toggle.managers, id).await.unwrap();
                     StatusCode::OK
                 }),
             )
@@ -596,7 +596,7 @@ mod tests {
             },
         )
         .unwrap();
-        toggle_pause(&services.managers, a.id).await;
+        toggle_pause(&services.managers, a.id).await.unwrap();
         let revoked = Revoked::resume_if_present(path.clone(), &services).await;
         assert!(revoked.is_none());
         assert!(!path.exists());

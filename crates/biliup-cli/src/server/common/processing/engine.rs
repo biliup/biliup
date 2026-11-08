@@ -1,4 +1,29 @@
 //! Shared video effects: source inputs -> one filter graph -> one final encode.
+struct FilterGraph<'a> {
+    source: &'a SourceSpan,
+    settings: &'a RenderRecipe,
+    media: &'a MediaInfo,
+    target: (u32, u32),
+    origin: i64,
+    ass: Option<&'a Path>,
+    font_dir: Option<&'a Path>,
+    repair_audio: bool,
+    image_inputs: &'a HashMap<i64, usize>,
+    audio_input: usize,
+    frame_rate: &'a str,
+    input: usize,
+    prefix: &'a str,
+}
+
+pub(crate) struct DanmakuLayer<'a> {
+    pub(crate) source: &'a SourceSpan,
+    pub(crate) settings: &'a super::model::DanmakuSettings,
+    pub(crate) size: (u32, u32),
+    pub(crate) fps: f64,
+    pub(crate) window: (u64, u64),
+    pub(crate) output: &'a Path,
+}
+
 use super::encoding::{self, EncoderCapability, SelectedEncoder};
 use super::model::{EffectType, MaskRegion, RenderRecipe, RenderSource};
 use serde::Serialize;
@@ -167,20 +192,49 @@ fn engine_progress(
 }
 
 #[derive(Debug, Clone)]
-struct MediaInfo {
-    width: u32,
-    height: u32,
-    has_audio: bool,
-    duration_ms: Option<i64>,
+pub(crate) struct MediaInfo {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) has_audio: bool,
+    pub(crate) duration_ms: Option<i64>,
     format_start_seconds: f64,
     video_origin_seconds: f64,
-    frame_rate: String,
+    pub(crate) frame_rate: String,
+}
+
+/// Original mix position from the named filter placed before an export range's trim.
+/// Ordinary log messages never keep the watchdog alive.
+fn audio_processing_time(line: &[u8]) -> Option<i64> {
+    let line = std::str::from_utf8(line).ok()?;
+    let line = line.strip_prefix("[ashowinfo@biliup_audio_progress @")?;
+    let (_, fields) = line.split_once("] ")?;
+    let number = |key: &str| {
+        fields
+            .split_whitespace()
+            .find_map(|part| part.strip_prefix(key))?
+            .parse::<f64>()
+            .ok()
+    };
+    let seconds = number("pts_time:")?;
+    let rate = number("rate:")?;
+    let samples = number("nb_samples:")?;
+    if !seconds.is_finite()
+        || seconds < 0.
+        || !rate.is_finite()
+        || rate <= 0.
+        || !samples.is_finite()
+        || samples <= 0.
+    {
+        return None;
+    }
+    let millis = (seconds + samples / rate) * 1000.;
+    (millis.is_finite() && millis < i64::MAX as f64).then_some(millis.round() as i64)
 }
 
 /// Child stdout progress and stderr are drained concurrently and bounded. The
-/// watchdog accepts advancing media time or output frames, so an hours-long
-/// encode is fine while a hung child is stopped. Cancellation kills and reaps.
-pub(super) async fn run_process(
+/// watchdog accepts advancing media time, output frames, or the named audio
+/// processing filter before range trimming. Cancellation kills and reaps.
+pub(crate) async fn run_process(
     mut command: Command,
     cancel: &CancellationToken,
     stall: Duration,
@@ -198,10 +252,14 @@ pub(super) async fn run_process(
         .map_err(|e| format!("启动处理程序失败：{e}"))?;
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
+    let (audio_progress, mut audio_updates) = tokio::sync::watch::channel(None::<i64>);
     let errors = tokio::spawn(async move {
         let mut stderr = stderr;
         let mut tail = Vec::new();
         let mut buffer = [0u8; 4096];
+        let mut line = Vec::new();
+        let mut oversized = false;
+        let mut last_audio = -1;
         while let Ok(n) = stderr.read(&mut buffer).await {
             if n == 0 {
                 break;
@@ -210,12 +268,34 @@ pub(super) async fn run_process(
             if tail.len() > MAX_DIAGNOSTICS {
                 tail.drain(..tail.len() - MAX_DIAGNOSTICS);
             }
+            for part in buffer[..n].split_inclusive(|byte| *byte == b'\n') {
+                if !oversized {
+                    if line.len() + part.len() <= MAX_DIAGNOSTICS {
+                        line.extend_from_slice(part);
+                    } else {
+                        line.clear();
+                        oversized = true;
+                    }
+                }
+                if part.last() == Some(&b'\n') {
+                    if !oversized
+                        && let Some(at) = audio_processing_time(&line).filter(|at| *at > last_audio)
+                    {
+                        last_audio = at;
+                        let _ = audio_progress.send_replace(Some(at));
+                    }
+                    line.clear();
+                    oversized = false;
+                }
+            }
         }
         String::from_utf8_lossy(&tail).into_owned()
     });
     let mut lines = BufReader::new(stdout).lines();
     let mut latest = -1i64;
     let mut latest_frame = -1i64;
+    let mut latest_audio = -1i64;
+    let mut audio_updates_open = true;
     let mut stdout_open = true;
     let mut block = String::new();
     let mut exit_status = None;
@@ -224,25 +304,31 @@ pub(super) async fn run_process(
     let outcome = loop {
         // Drain the final progress=end block even if wait() becomes ready
         // before the pipe. Otherwise fast encodes can lose all telemetry.
-        if !stdout_open {
-            if let Some(status) = exit_status.take() {
-                break status;
-            }
+        if !stdout_open && let Some(status) = exit_status.take() {
+            break status;
         }
         tokio::select! {
             _ = cancel.cancelled() => { break Err("合成已取消".to_string()); }
             _ = &mut watch => { break Err(format!("处理程序连续 {} 秒没有推进，任务已停止；可重试", stall.as_secs())); }
+            changed = audio_updates.changed(), if audio_updates_open => {
+                if changed.is_err() { audio_updates_open = false; }
+                let at = *audio_updates.borrow_and_update();
+                if let Some(at) = at.filter(|at| *at > latest_audio) {
+                    latest_audio = at;
+                    watch.as_mut().reset(tokio::time::Instant::now() + stall);
+                    report(at, "");
+                }
+            }
             line = lines.next_line(), if stdout_open => {
                 match line {
                     Ok(Some(line)) => {
                         let at = line.strip_prefix("out_time_us=").or_else(|| line.strip_prefix("out_time_ms="))
                             .and_then(|v| v.parse::<i64>().ok()).map(|v| v / 1000);
-                        if let Some(at) = at {
-                            if at > latest {
+                        if let Some(at) = at
+                            && at > latest {
                                 latest = at;
                                 watch.as_mut().reset(tokio::time::Instant::now() + stall);
                             }
-                        }
                         let frame = line.strip_prefix("frame=").and_then(|v| v.trim().parse::<i64>().ok());
                         if let Some(frame) = frame.filter(|frame| *frame > latest_frame) {
                             latest_frame = frame;
@@ -290,7 +376,7 @@ pub(super) async fn run_process(
     Ok(stderr)
 }
 
-async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, String> {
+pub(crate) async fn probe(path: &Path, cancel: &CancellationToken) -> Result<MediaInfo, String> {
     let mut command = crate::tools::ffmpeg_command();
     command
         .args(["-nostdin", "-hide_banner", "-copyts", "-i"])
@@ -431,7 +517,8 @@ pub async fn capabilities() -> RenderCapabilities {
     }
     status.available = status.ffmpeg && status.libass && status.danmaku_factory && status.font;
     if status.error.is_none() && !status.available {
-        status.error = Some("未找到弹幕字体：请在配置里填写 render_fonts_dir，或安装随包字体".into());
+        status.error =
+            Some("未找到弹幕字体：请在配置里填写 render_fonts_dir，或安装随包字体".into());
     }
     status
 }
@@ -480,19 +567,21 @@ fn enable(region: &MaskRegion, source: &SourceSpan, origin: i64) -> Option<Strin
 /// Coordinates refer to the actual source frame; scaling/padding is performed
 /// after masks so a changing aspect ratio cannot expose a strip underneath.
 fn filter_graph(
-    source: &SourceSpan,
-    settings: &RenderRecipe,
-    media: &MediaInfo,
-    target: (u32, u32),
-    origin: i64,
-    ass: Option<&Path>,
-    font_dir: Option<&Path>,
-    repair_audio: bool,
-    image_inputs: &HashMap<i64, usize>,
-    audio_input: usize,
-    frame_rate: &str,
-    input: usize,
-    prefix: &str,
+    FilterGraph {
+        source,
+        settings,
+        media,
+        target,
+        origin,
+        ass,
+        font_dir,
+        repair_audio,
+        image_inputs,
+        audio_input,
+        frame_rate,
+        input,
+        prefix,
+    }: FilterGraph<'_>,
 ) -> String {
     let mut parts = vec![format!(
         "[SOURCE:v:0]setpts=PTS-({:.9})/TB-({})/TB,format=rgb24[v0]",
@@ -620,8 +709,97 @@ pub async fn render(
 pub(crate) async fn render_with_permit(
     request: EngineRequest,
     cancel: CancellationToken,
-    mut report: impl FnMut(EngineProgress) + Send,
+    report: impl FnMut(EngineProgress) + Send,
     _permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<EngineOutput, String> {
+    render_internal(request, cancel, report).await
+}
+
+/// A source-clock text layer, retaining alpha for the editor's track compositor.
+pub(crate) async fn render_danmaku_layer(
+    DanmakuLayer {
+        source,
+        settings,
+        size,
+        fps,
+        window,
+        output,
+    }: DanmakuLayer<'_>,
+
+    cancel: &CancellationToken,
+    mut report: impl FnMut(i64) + Send,
+) -> Result<(), String> {
+    let (first, last) = window;
+    if !fps.is_finite() || fps <= 0. || last <= first {
+        return Err("弹幕源时间范围无效".into());
+    }
+    let _permit = super::transcode::acquire(cancel).await?;
+    let parent = output.parent().ok_or("弹幕输出目录不存在")?;
+    let (ass, metadata) =
+        super::danmaku::generate_for_render(source, settings, size.0, size.1, parent, cancel)
+            .await?;
+    let fonts = crate::tools::render_fonts_dir()
+        .map(|p| format!(":fontsdir={}", filter_path(&p)))
+        .unwrap_or_default();
+    let source_time = first as f64 / fps - metadata.time_origin_ms as f64 / 1000.;
+    let graph = format!(
+        "format=rgba,setpts=PTS+({source_time:.9})/TB,ass=filename={}{}:alpha=1,setpts=PTS-STARTPTS",
+        filter_path(ass.path()),
+        fonts
+    );
+    let mut command = crate::tools::low_priority_ffmpeg_command();
+    command
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostats",
+            "-progress",
+            "pipe:1",
+            "-f",
+            "lavfi",
+            "-i",
+        ])
+        .arg(format!(
+            "color=c=black@0:s={}x{}:r={fps}:d={:.9},format=rgba",
+            size.0,
+            size.1,
+            (last - first) as f64 / fps
+        ))
+        .args([
+            "-vf",
+            &graph,
+            "-an",
+            "-c:v",
+            "ffv1",
+            "-level",
+            "3",
+            "-pix_fmt",
+            "bgra",
+            "-colorspace",
+            "bt709",
+            "-color_primaries",
+            "bt709",
+            "-color_trc",
+            "bt709",
+            "-y",
+        ])
+        .arg("-frames:v")
+        .arg((last - first).to_string())
+        .arg(output);
+    run_process(command, cancel, PROCESS_STALL, |_, block| {
+        let stats = FfmpegProgress::parse(block);
+        report(stats.encoded_time(&fps.to_string()));
+    })
+    .await?;
+    Ok(())
+}
+
+async fn render_internal(
+    request: EngineRequest,
+    cancel: CancellationToken,
+    mut report: impl FnMut(EngineProgress) + Send,
 ) -> Result<EngineOutput, String> {
     request.settings.validate()?;
     if request.sources.is_empty() {
@@ -777,21 +955,21 @@ pub(crate) async fn render_with_permit(
         } else {
             None
         };
-        graph.push(filter_graph(
+        graph.push(filter_graph(FilterGraph {
             source,
-            &request.settings,
-            &media[n],
+            settings: &request.settings,
+            media: &media[n],
             target,
             origin,
             ass,
-            font_dir.as_deref(),
-            audio_repair[n],
-            &images,
-            silent,
-            &first.frame_rate,
-            n,
-            &format!("s{n}"),
-        ));
+            font_dir: font_dir.as_deref(),
+            repair_audio: audio_repair[n],
+            image_inputs: &images,
+            audio_input: silent,
+            frame_rate: &first.frame_rate,
+            input: n,
+            prefix: &format!("s{n}"),
+        }));
         links.push_str(&format!("[s{n}video][s{n}audio]"));
     }
     graph.push(format!(
@@ -850,17 +1028,16 @@ pub(crate) async fn render_with_permit(
     command
         .args(["-filter_complex_threads", "1", file_option])
         .arg(script.path())
-        .args(["-map", "[video]", "-map", "[audio]"])
+        .args(["-map", "[video]", "-map", "[audio]"]);
+    command
         .args(selected.output_args_with_quality(request.settings.encoding.quality))
+        .args(["-c:a", "aac", "-b:a", "192k"]);
+    command
         .args([
-            "-c:a",
-            "aac",
             "-ar",
             "48000",
             "-ac",
             "2",
-            "-b:a",
-            "192k",
             "-t",
             &secs(total),
             "-f",
@@ -925,6 +1102,25 @@ pub async fn process_video(
     settings: &RenderRecipe,
     source: Option<&SourceSpan>,
 ) -> Result<PathBuf, String> {
+    let mut observation = crate::server::common::upload_observation::TaskObservation::current()
+        .map(|task| task.begin_processing("rendering", input));
+    let result = process_video_observed(input, xml, settings, source, observation.as_ref()).await;
+    if let Some(observation) = observation.as_mut() {
+        match &result {
+            Ok(path) => observation.finish(Some(path), None),
+            Err(error) => observation.finish(None, Some(error)),
+        }
+    }
+    result
+}
+
+async fn process_video_observed(
+    input: &Path,
+    xml: Option<&Path>,
+    settings: &RenderRecipe,
+    source: Option<&SourceSpan>,
+    observation: Option<&crate::server::common::upload_observation::ProcessingObservation>,
+) -> Result<PathBuf, String> {
     if super::masking::is_unmasked(input) && settings.regions.is_empty() {
         return Err("隔离原片需要有效遮挡配置，禁止发布为普通录像".into());
     }
@@ -952,6 +1148,9 @@ pub async fn process_video(
     span.path = input.to_owned();
     span.danmaku_path = xml.map(Path::to_owned).or(span.danmaku_path);
     let output = automatic_output_path(input, span.source_session_id);
+    if let Some(task) = observation {
+        task.progress(0, Some(span.trim_end_ms - span.trim_start_ms));
+    }
     render(
         EngineRequest {
             sources: vec![span],
@@ -961,7 +1160,11 @@ pub async fn process_video(
             font_path: None,
         },
         cancel,
-        |_| {},
+        |progress| {
+            if let Some(task) = observation {
+                task.progress(progress.processed_ms.unwrap_or(0), progress.total_ms);
+            }
+        },
     )
     .await?;
     Ok(output)

@@ -299,8 +299,10 @@ impl ClipExports {
         let _permit = slots.acquire().await.map_err(|e| e.to_string())?;
         let _encoder = if mode == Mode::Precise {
             Some(
-                crate::server::common::processing::transcode::acquire(&tokio_util::sync::CancellationToken::new())
-                    .await?,
+                crate::server::common::processing::transcode::acquire(
+                    &tokio_util::sync::CancellationToken::new(),
+                )
+                .await?,
             )
         } else {
             None

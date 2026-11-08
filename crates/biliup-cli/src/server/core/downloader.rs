@@ -149,7 +149,7 @@ pub enum DownloaderRuntime {
     Ffmpeg(FfmpegDownloader),
     StreamGears(StreamGears),
     StreamLink(Streamlink),
-    YtDlp(YouTubeDownloader),
+    YtDlp(Box<YouTubeDownloader>),
     Sync(SyncDownloader),
     Mesio(Mesio),
 }

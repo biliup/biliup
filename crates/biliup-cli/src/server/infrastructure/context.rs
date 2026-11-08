@@ -61,7 +61,7 @@ impl Context {
     }
 
     pub fn live_streamer(&self) -> &LiveStreamer {
-        &self.worker.get_streamer()
+        self.worker.get_streamer()
     }
 
     pub fn stateless_client(&self) -> &StatelessClient {
@@ -147,6 +147,8 @@ impl Context {
 /// 工作器结构体，管理单个主播的录制和上传任务
 #[derive(Debug)]
 pub struct Worker {
+    /// 串行处理同一房间的暂停/恢复，保持持久化状态与运行状态一致。
+    pub(crate) recording_control: tokio::sync::Mutex<()>,
     /// 下载器状态
     pub downloader_status: RwLock<WorkerStatus>,
     /// 上传器状态
@@ -185,6 +187,7 @@ impl Worker {
         client: StatelessClient,
     ) -> Self {
         Self {
+            recording_control: tokio::sync::Mutex::new(()),
             downloader_status: RwLock::new(Default::default()),
             uploader_status: Default::default(),
             live_streamer,

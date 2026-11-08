@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false # don't fail other jobs if one fails
       matrix:
-        build: [x86_64-linux, x86_64-linux-musl, aarch64-linux, arm-linux, x86_64-macos, x86_64-windows, aarch64-macos, aarch64-android] #, x86_64-win-gnu, win32-msvc
+        build: [x86_64-linux, x86_64-linux-musl, aarch64-linux, arm-linux, x86_64-windows, aarch64-macos, aarch64-android] #, x86_64-win-gnu, win32-msvc
         include:
           - build: x86_64-linux
             os: ubuntu-22.04
@@ -82,11 +82,6 @@ jobs:
             rust: stable
             target: arm-unknown-linux-gnueabi
             cross: true
-          - build: x86_64-macos
-            os: macos-latest
-            rust: stable
-            target: x86_64-apple-darwin
-            cross: false
           - build: x86_64-windows
             os: windows-latest
             rust: stable
@@ -176,8 +171,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo ndk -t arm64-v8a --platform 24 build --release --locked --target ${{ matrix.target }} --bin biliup
         
-      - name: Strip release binary (linux and macos)
-        if: matrix.build == 'x86_64-linux' || matrix.build == 'x86_64-macos'
+      - name: Strip release binary (linux)
+        if: matrix.build == 'x86_64-linux'
         run: strip "target/${{ matrix.target }}/release/$BIN_NAME"
 
       - name: Strip release binary (arm)

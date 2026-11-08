@@ -1,0 +1,56 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.solid",
+  "kind": "component",
+  "name": "Background",
+  "description": "A full-frame background: one colour, or a gradient from color (through via) to `to`, linear at angle or radial from the centre, with optional film grain (noise 0-1). Colours are theme tokens (bg, fg, accent) or CSS colours. Put it on the main track (a title card) or a free video track under the text.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The colour (or the gradient's first colour): a theme token or a CSS colour."
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Makes it a gradient from color to this colour."
+      },
+      "angle": {
+        "type": "number",
+        "description": "A linear gradient's direction in degrees, CSS-style (180 = top to bottom, the default)."
+      },
+      "via": {
+        "type": "string",
+        "minLength": 1,
+        "description": "A gradient's middle colour (D131)."
+      },
+      "gradient": {
+        "enum": [
+          "linear",
+          "radial"
+        ],
+        "description": "With `to`: linear (the default, along angle) or radial (from the centre out). D131."
+      },
+      "noise": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Film grain over the fill, 0 (none) to 1. D131."
+      }
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "square"
+  }
+}

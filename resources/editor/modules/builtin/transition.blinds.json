@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "transition.blinds",
+  "kind": "transition",
+  "name": "Blinds",
+  "description": "The next clip appears through slats that open downwards.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "transition": {
+    "minFrames": 6,
+    "maxFrames": 30
+  },
+  "ui": {
+    "panel": "transitions",
+    "icon": "square-dashed"
+  }
+}

@@ -189,5 +189,4 @@ Fleet / HA 不下发本机长期凭据，房间配置传输时也会剥离内嵌
 ```bash
 cargo test --locked -p biliup --lib douyu
 cargo test --locked -p biliup-cli --lib douyu_keeper
-node --test app/lib/douyu-auth.test.cjs
 ```

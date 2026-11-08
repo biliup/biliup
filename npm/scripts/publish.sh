@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 按 prepare.mjs 写下的顺序发布（先 7 个平台子包，最后根包 @biliup/cli）：
+# 按 prepare.mjs 写下的顺序发布（先平台子包，最后根包 @biliup/cli）：
 #   npm/scripts/publish.sh npm/dist [npm publish 的额外参数，如 --provenance / --dry-run]
 # registry 上已有同版本的包会跳过，所以中途失败后可以直接重跑。
 # 补发旧版本（registry 上 latest 比它新）时改打 backport 标签，不把 latest 拉回旧版本。

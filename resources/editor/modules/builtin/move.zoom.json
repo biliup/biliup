@@ -1,0 +1,45 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "move.zoom",
+  "kind": "move",
+  "name": "Zoom",
+  "description": "Text: scales from `scale` to its size (in), or from its size to `scale` (out), about the text box's centre, with an ease; fades too unless fade is false.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "properties": {
+      "scale": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 4,
+        "default": 0.7,
+        "description": "The size at the start of the move in (the end of the move out): below 1 zooms in, above 1 zooms out."
+      },
+      "ease": {
+        "enum": [
+          "linear",
+          "in",
+          "out",
+          "inOut",
+          "spring",
+          "spring.snap",
+          "spring.settle",
+          "spring.land",
+          "spring.bounce"
+        ],
+        "default": "out",
+        "description": "How the scale moves: linear, in, out, inOut (cubic) or a spring (spring.snap, spring.settle or spring, spring.land, spring.bounce: fitted to the move's duration, may overshoot) (D192)."
+      },
+      "fade": {
+        "type": "boolean",
+        "default": true
+      }
+    }
+  }
+}

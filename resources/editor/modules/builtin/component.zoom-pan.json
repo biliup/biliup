@@ -1,0 +1,29 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.zoom-pan",
+  "kind": "component",
+  "name": "Zoom and pan",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "from": {
+        "type": "object"
+      },
+      "to": {
+        "type": "object"
+      }
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "scan"
+  }
+}

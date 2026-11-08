@@ -89,10 +89,9 @@ async fn default_startup_keeps_local_work_and_accepts_remote_nodes() {
                 .await
                 .unwrap();
             assert_eq!(response.status(), axum::http::StatusCode::OK);
-            let body: serde_json::Value = serde_json::from_slice(
-                &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-            )
-            .unwrap();
+            let body: serde_json::Value =
+                serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                    .unwrap();
             assert_eq!(body["fleet_controller"], controller);
             assert_eq!(body["auth_enabled"], false);
             assert!(body.get("fleet_node").is_none());
@@ -100,7 +99,12 @@ async fn default_startup_keeps_local_work_and_accepts_remote_nodes() {
         }
         assert_eq!(permissions[0], permissions[1]);
         for permission in ["file.view", "account.manage", "config.view", "log.view"] {
-            assert!(permissions[1].as_array().unwrap().contains(&serde_json::json!(permission)));
+            assert!(
+                permissions[1]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!(permission))
+            );
         }
     }
     let super::Role::Controller(controller, _) = &fleet.role else {
@@ -2315,7 +2319,7 @@ async fn a_paired_standby_edits_rooms_and_the_pair_converges() {
     )
     .await;
     landed(&member()).await;
-    toggle_pause(&s.managers, local_id).await;
+    toggle_pause(&s.managers, local_id).await.unwrap();
     member().scan().await;
     eventually(
         "a standby pause reaches the controller",

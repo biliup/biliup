@@ -170,13 +170,13 @@ export function LiveAvatar({ src }: { src: string }) {
  */
 function LiveDuration({ since }: { since: number }) {
   const now = useNowSec()
-  return <span className={styles.liveInfo}>{formatDuration(now - since)}</span>
+  return <span className={styles.liveDuration}>{formatDuration(now - since)}</span>
 }
 
 /**
  * 全局统一的直播间卡片:
- * 封面（平台主播名 / 头像、直播标题、状态、平台）+ 录播备注 / 选择框 + URL + 上传状态。
- * 时长、写盘速率 / 最近录制放在底部左侧，操作按钮放右侧。主页与直播管理页共用。
+ * 封面（平台主播名 / 头像、直播标题、状态、平台）+ 录播备注 / 选择框 + URL。
+ * 上传状态放在录播备注前，时长并入直播状态；写盘速率 / 最近录制与操作按钮放在底部。主页与直播管理页共用。
  */
 export default function StreamerCard({
   streamer,
@@ -235,6 +235,7 @@ export default function StreamerCard({
     <span className={`${styles.badge} ${styles[meta.cls]}`}>
       <span className={styles.bdot} />
       {meta.label}
+      {live && info?.date ? <LiveDuration since={info.date} /> : null}
     </span>
   )
   const platformTag = (
@@ -274,6 +275,7 @@ export default function StreamerCard({
 
       {/* 录播备注与平台主播名独立；选择框放在备注后，点击不会触发直播预览。 */}
       <div className={styles.remarkRow}>
+        {uploadTag}
         <div className={styles.remark} title={remark}>{remark}</div>
         {selectable ? (
           <label className={styles.selection} title={`选择 ${remark}`}>
@@ -300,12 +302,10 @@ export default function StreamerCard({
       >
         {streamer.url}
       </a>
-      {uploadTag ? <div className={styles.meta}>{uploadTag}</div> : null}
       {live || lastRec || actions ? (
         <div className={styles.footer}>
           {live ? (
             <span className={styles.liveStats}>
-              {info?.date ? <LiveDuration since={info.date} /> : null}
               <span
                 className={styles.rate}
                 title={rate ? '写盘速率(最近 10 秒平均)' : '写盘速率:尚无采样'}

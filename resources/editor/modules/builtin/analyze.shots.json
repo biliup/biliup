@@ -1,0 +1,22 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "analyze.shots",
+  "kind": "analyzer",
+  "name": "Shot boundaries",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "analyzer": {
+    "inputs": [
+      "video"
+    ],
+    "outputs": [
+      "shots"
+    ],
+    "backend": "signal"
+  }
+}

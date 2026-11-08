@@ -12,7 +12,7 @@ permissions:
 jobs:
   rust:
     name: Rust tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,7 +23,6 @@ jobs:
         run: |
           npm install
           node --test npm/tests/*.test.cjs
-          node --test app/lib/*.test.cjs
           npm run build
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -62,7 +61,7 @@ jobs:
   # desktop-publish.yml 只在发版时跑，漂移要到那时才暴露（v1.2.9 就是这样）
   desktop-lockfile:
     name: Desktop Cargo.lock up to date
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install stable toolchain

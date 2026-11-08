@@ -4,9 +4,12 @@
 //! frequently unavailable to an unprivileged process.
 
 use serde::Serialize;
+#[cfg(any(target_os = "linux", test))]
+use std::path::Path;
+#[cfg(target_os = "linux")]
+use std::path::PathBuf;
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -61,17 +64,17 @@ static SAMPLE_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 /// run once per cache window, even when several API requests arrive together.
 pub async fn snapshot() -> GpuSnapshot {
     let cache = CACHE.get_or_init(|| Mutex::new(None));
-    if let Some(cached) = cache.lock().ok().and_then(|c| c.clone()) {
-        if cached.at.elapsed() < CACHE_TTL {
-            return cached.value;
-        }
+    if let Some(cached) = cache.lock().ok().and_then(|c| c.clone())
+        && cached.at.elapsed() < CACHE_TTL
+    {
+        return cached.value;
     }
 
     let _guard = SAMPLE_LOCK.get_or_init(|| AsyncMutex::new(())).lock().await;
-    if let Some(cached) = cache.lock().ok().and_then(|c| c.clone()) {
-        if cached.at.elapsed() < CACHE_TTL {
-            return cached.value;
-        }
+    if let Some(cached) = cache.lock().ok().and_then(|c| c.clone())
+        && cached.at.elapsed() < CACHE_TTL
+    {
+        return cached.value;
     }
     let value = collect().await;
     if let Ok(mut slot) = cache.lock() {
@@ -239,10 +242,12 @@ async fn collect() -> GpuSnapshot {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn linux_drm_devices() -> Vec<GpuDevice> {
     linux_drm_devices_at(Path::new("/sys/class/drm"))
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn linux_drm_devices_at(root: &Path) -> Vec<GpuDevice> {
     let mut result = Vec::new();
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -301,6 +306,7 @@ fn linux_drm_devices_at(root: &Path) -> Vec<GpuDevice> {
     result
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn device_name(vendor: &str, pci_id: Option<u32>) -> String {
     match (vendor, pci_id) {
         ("intel", Some(0x4682)) => "Intel UHD Graphics 730 (device 0x4682)".into(),
@@ -366,6 +372,7 @@ async fn windows_gpu_inventory() -> Vec<GpuDevice> {
         .collect()
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn read_hex(path: &Path) -> Result<u32, ()> {
     std::fs::read_to_string(path)
         .map_err(|_| ())?
@@ -410,12 +417,14 @@ fn parse_pci_hex(value: &str, max_digits: usize) -> Option<u32> {
     u32::from_str_radix(value, 16).ok()
 }
 
+#[cfg(target_os = "linux")]
 fn render_device_path(node: &str) -> Option<PathBuf> {
     let name = Path::new(node).file_name()?;
     let drm_path = Path::new("/sys/class/drm").join(name).join("device");
     std::fs::canonicalize(drm_path).ok()
 }
 
+#[cfg(target_os = "linux")]
 fn apply_amd_sysfs(device: &mut GpuDevice, path: &Path) {
     device.utilization_percent =
         read_number(&path.join("gpu_busy_percent")).filter(|n| (0.0..=100.0).contains(n));
@@ -432,11 +441,13 @@ fn apply_amd_sysfs(device: &mut GpuDevice, path: &Path) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn read_number(path: &Path) -> Option<f64> {
     let value: f64 = std::fs::read_to_string(path).ok()?.trim().parse().ok()?;
     (value.is_finite() && value >= 0.0).then_some(value)
 }
 
+#[cfg(target_os = "linux")]
 fn read_bytes(path: &Path) -> Option<u64> {
     let value = read_number(path)?;
     (value.fract() == 0.0 && value <= u64::MAX as f64).then_some(value as u64)
@@ -595,16 +606,19 @@ fn parse_i915_memory(bytes: &[u8], privileged: bool) -> Option<IntelMemory> {
 }
 
 #[derive(Default)]
+#[cfg(any(target_os = "linux", test))]
 struct IntelMetrics {
     overall: Option<f64>,
     video: Option<f64>,
     engines: Vec<GpuEngine>,
 }
 
+#[cfg(target_os = "linux")]
 async fn intel_gpu_top(render_node: Option<&str>) -> Result<IntelMetrics, String> {
     intel_gpu_top_at(Path::new("intel_gpu_top"), render_node).await
 }
 
+#[cfg(any(target_os = "linux", all(test, unix)))]
 async fn intel_gpu_top_at(
     program: &Path,
     render_node: Option<&str>,
@@ -622,6 +636,7 @@ async fn intel_gpu_top_at(
 
 /// Read samples until two are complete, then stop the tool. The first sample
 /// only covers start-up, so the last complete one is returned.
+#[cfg(any(target_os = "linux", all(test, unix)))]
 async fn intel_gpu_top_sample(
     mut cmd: Command,
     limit: Duration,
@@ -689,6 +704,7 @@ async fn intel_gpu_top_sample(
 /// Complete top-level objects in `intel_gpu_top -J` output. IGT 1.28+ only
 /// closes its `[` array when it exits and older releases print bare
 /// comma-separated objects, so the stream is not a valid JSON document.
+#[cfg(any(target_os = "linux", test))]
 fn intel_gpu_top_samples(bytes: &[u8]) -> Vec<&[u8]> {
     let mut samples = Vec::new();
     let (mut depth, mut start) = (0usize, 0);
@@ -789,6 +805,7 @@ async fn read_capped(reader: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result
     Ok(bytes)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn parse_intel_metrics(value: &serde_json::Value) -> IntelMetrics {
     // intel_gpu_top reports per-engine busy percentages. Do not sum the
     // independent engines into a pretend overall percentage. The Video class
@@ -839,6 +856,7 @@ fn parse_intel_metrics(value: &serde_json::Value) -> IntelMetrics {
     }
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn intel_engine_class(name: &str) -> Option<u8> {
     let name = name.to_ascii_lowercase();
     ["render/3d", "blitter", "video", "videoenhance", "compute"]
@@ -852,6 +870,7 @@ fn intel_engine_class(name: &str) -> Option<u8> {
         .map(|class| class as u8)
 }
 
+#[cfg(any(target_os = "linux", test))]
 fn as_percent(value: &serde_json::Value) -> Option<f64> {
     let number = value.as_f64()?;
     (number.is_finite() && (0.0..=100.0).contains(&number)).then_some(number)
@@ -886,12 +905,11 @@ async fn nvidia_rows() -> Option<(Vec<NvidiaRow>, Option<String>)> {
     };
     let text = String::from_utf8_lossy(&bytes);
     let rows = parse_nvidia_csv(&text);
-    if rows.is_empty() {
-        if let Some((xml_rows, error)) = nvidia_xml_rows().await {
-            if !xml_rows.is_empty() {
-                return Some((xml_rows, error));
-            }
-        }
+    if rows.is_empty()
+        && let Some((xml_rows, error)) = nvidia_xml_rows().await
+        && !xml_rows.is_empty()
+    {
+        return Some((xml_rows, error));
     }
     if rows.is_empty() {
         Some((rows, Some("nvidia-smi 未返回可解析的 GPU 数据".into())))
@@ -903,16 +921,13 @@ async fn nvidia_rows() -> Option<(Vec<NvidiaRow>, Option<String>)> {
 async fn nvidia_encoder_rows() -> Result<std::collections::HashMap<String, f64>, String> {
     let mut cmd = crate::tools::command("nvidia-smi");
     cmd.args(["dmon", "-s", "u", "-c", "1"]);
-    match bounded_command_output(cmd, COMMAND_TIMEOUT).await {
-        Ok(bytes) => {
-            if let Some(values) = parse_nvidia_dmon(&String::from_utf8_lossy(&bytes)) {
-                return Ok(values
-                    .into_iter()
-                    .map(|(index, value)| (format!("index:{index}"), value))
-                    .collect());
-            }
-        }
-        Err(_) => {}
+    if let Ok(bytes) = bounded_command_output(cmd, COMMAND_TIMEOUT).await
+        && let Some(values) = parse_nvidia_dmon(&String::from_utf8_lossy(&bytes))
+    {
+        return Ok(values
+            .into_iter()
+            .map(|(index, value)| (format!("index:{index}"), value))
+            .collect());
     }
     let Some((rows, _)) = nvidia_xml_rows().await else {
         return Err("nvidia-smi dmon 不可用，XML 查询也未返回编码引擎利用率".into());
@@ -1027,12 +1042,11 @@ fn parse_nvidia_xml(bytes: &[u8]) -> Vec<NvidiaRow> {
             }
             Ok(Event::End(event)) => {
                 let tag = String::from_utf8_lossy(event.name().as_ref()).into_owned();
-                if tag == "gpu" {
-                    if let Some(gpu) = row.take() {
-                        if !gpu.bus_id.is_empty() || !gpu.index.is_empty() {
-                            rows.push(gpu);
-                        }
-                    }
+                if tag == "gpu"
+                    && let Some(gpu) = row.take()
+                    && (!gpu.bus_id.is_empty() || !gpu.index.is_empty())
+                {
+                    rows.push(gpu);
                 }
                 if stack.last().is_some_and(|last| last == &tag) {
                     stack.pop();
@@ -1074,7 +1088,7 @@ fn parse_nvidia_dmon(text: &str) -> Option<std::collections::HashMap<String, f64
     let mut values = std::collections::HashMap::new();
     for line in text.lines() {
         let fields: Vec<_> = line.split_whitespace().collect();
-        if fields.first() == Some(&"#") && fields.iter().any(|f| *f == "gpu") {
+        if fields.first() == Some(&"#") && fields.contains(&"gpu") {
             encoder_col = fields.iter().position(|f| *f == "enc");
             continue;
         }

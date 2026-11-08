@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.limiter",
+  "kind": "audio-processor",
+  "name": "Limiter",
+  "version": "0.2.0",
+  "description": "The master limiter (D86): a brickwall limiter after the master volume, on by default at −1 dBTP (the master effects list holds it only to change or bypass it). Export: ffmpeg alimiter at 4× oversampling with a small true-peak margin; preview: a hard-knee DynamicsCompressor and a clip at the ceiling.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ceilingDb": {
+        "type": "number",
+        "maximum": 0,
+        "default": -1,
+        "description": "Ceiling in dBTP. Used down to −12 (clamped)."
+      }
+    }
+  }
+}

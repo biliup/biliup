@@ -1,0 +1,54 @@
+{
+  "attribution": "Uncut, MIT; see licenses/uncut/LICENSE",
+  "tools": [
+    {
+      "name": "review_submit",
+      "description": "Request an independent review using a fresh model conversation with no tools or builder history. The service renders current evidence itself. First inspect contact_sheet with no media and render_frames with phone:true after the last edit. Fix claims must reference last review IDs and have newly rendered frames near each moment. Missing evidence never counts as passed; unavailable temporal scan/export rehearsal is reported as incomplete. Never provide your own scores.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "fixes": {
+            "type": "array",
+            "maxItems": 10,
+            "description": "What you fixed since the last round, by the review's ids.",
+            "items": {
+              "type": "object",
+              "required": [
+                "defect",
+                "what"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "defect": {
+                  "type": "string",
+                  "maxLength": 20,
+                  "description": "A blocker or defect id from the last review (d1, d2, …)."
+                },
+                "what": {
+                  "type": "string",
+                  "maxLength": 300,
+                  "description": "What you changed."
+                }
+              }
+            }
+          },
+          "scores": {
+            "type": "object",
+            "description": "Ignored: Biliup's critic scores the video, not you."
+          },
+          "defects": {
+            "type": "array",
+            "description": "Ignored: the critic lists the defects."
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Ignored by the critic (it never sees your reasoning)."
+          }
+        }
+      },
+      "returns": "the critic's round: scores with evidence, blockers and defects with ids, each claimed fix verified or not, the determinism check and what to do next"
+    }
+  ]
+}

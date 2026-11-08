@@ -55,8 +55,13 @@ cookies.json
 .serena/
 .cargo/*
 logs/
+!/app/(app)/runtime/logs/
 .claude/
 /public/jassub/
+/public/editor/
+/public/editor-workers/
+/resources/editor/export-runtime.js
+/app/lib/editor/core/timeline/builtin-modules.ts
 /tauri-app/src-tauri/render-tools/
 # 随包中文字体按固定 SHA-256 获取，见 crates/biliup-cli/assets/render-tools/README.txt
 /crates/biliup-cli/assets/render-tools/fonts/*.otf

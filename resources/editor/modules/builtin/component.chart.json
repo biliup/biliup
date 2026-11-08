@@ -1,0 +1,46 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.chart",
+  "kind": "component",
+  "name": "Chart",
+  "description": "A bar chart in neutral greys: one column per bar, its value on top and its label under it. accent marks the bar to look at.",
+  "version": "0.2.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "bars": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 12,
+        "items": {
+          "type": "object",
+          "required": ["label", "value"],
+          "additionalProperties": false,
+          "properties": {
+            "label": { "type": "string", "maxLength": 60 },
+            "value": { "type": "number", "minimum": 0 },
+            "accent": { "type": "boolean" }
+          }
+        }
+      },
+      "unit": { "type": "string", "maxLength": 12, "description": "After each value, e.g. \" s\" or \"%\"." },
+      "max": { "type": "number", "exclusiveMinimum": 0, "description": "The value of a full-height bar (default: the largest bar)." }
+    },
+    "required": ["bars"]
+  },
+  "component": {
+    "size": { "width": 1000, "height": 600 },
+    "defaults": { "bars": [{ "label": "Before", "value": 42 }, { "label": "After", "value": 12, "accent": true }], "unit": " s" }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "chart-column"
+  }
+}

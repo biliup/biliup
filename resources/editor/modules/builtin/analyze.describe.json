@@ -1,0 +1,23 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "analyze.describe",
+  "kind": "analyzer",
+  "name": "Describe shots",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "agent"
+  },
+  "analyzer": {
+    "inputs": [
+      "video",
+      "image"
+    ],
+    "outputs": [
+      "description"
+    ],
+    "backend": "subscription-agent"
+  }
+}

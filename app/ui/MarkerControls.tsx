@@ -5,7 +5,7 @@ import { IconDownload, IconFlag, IconHistory, IconScissors, IconSend } from '@do
 import type { LiveStreamerEntity } from '@/app/lib/api-streamer'
 import { useMe } from '@/app/lib/use-me'
 import { formatSize } from '@/app/lib/use-dashboard'
-import { replayHref } from '@/app/lib/sessions'
+import { savedSelectionEditorHref } from '@/app/lib/workbench'
 import { type Clip, createLiveClip, downloadClip, exportClip, LAST_CLIP_OPTIONS, useClip } from '@/app/lib/clips'
 import {
   createLiveMarker,
@@ -203,7 +203,7 @@ export function showMarkerToast(marker: Marker) {
 }
 
 /**
- * 「剪下刚才 N 秒」之后的 Toast：跟着导出进度走；剪好了给下载、「发布」和「在回看里打开」，失败了给原因和重试。
+ * 「剪下刚才 N 秒」之后的 Toast：跟着导出进度走；剪好了给下载、发布和剪辑台入口，失败了给原因和重试。
  * 导出中、失败时一直留着（右上角可关），剪好后停留一会儿自动关。`onPublish` 为 null 表示没有发布权限。
  */
 function ClipToast({
@@ -314,9 +314,9 @@ function ClipToast({
               size="small"
               theme="borderless"
               icon={<IconHistory />}
-              onClick={() => window.open(replayHref(clip.session_id, clip.in_ms, clip.id), '_blank', 'noopener')}
+              onClick={() => window.open(savedSelectionEditorHref(clip.id), '_blank', 'noopener')}
             >
-              在回看里打开
+              在剪辑台打开
             </Button>
           </span>
         )}

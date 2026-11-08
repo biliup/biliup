@@ -1,0 +1,114 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.image-frame",
+  "kind": "component",
+  "name": "Image frame",
+  "description": "An image in a rounded frame with an optional border and shadow.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "type": "object",
+        "required": [
+          "media"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "media": {
+            "type": "string"
+          }
+        },
+        "x-group": "Content",
+        "description": "An image media item (PNG, JPEG, WebP, GIF, BMP or SVG)."
+      },
+      "fit": {
+        "enum": [
+          "cover",
+          "contain"
+        ],
+        "x-group": "Layout",
+        "description": "Fill the frame (cropped) or show the whole image."
+      },
+      "zoom": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 4,
+        "x-unit": "×",
+        "x-group": "Layout",
+        "description": "Crop in: scales the picture inside the frame about its focus."
+      },
+      "focusX": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "x-unit": "%",
+        "x-group": "Layout",
+        "description": "The crop's focus across the picture (0 = its left edge)."
+      },
+      "focusY": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "x-unit": "%",
+        "x-group": "Layout",
+        "description": "The crop's focus down the picture (0 = its top edge)."
+      },
+      "radius": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 400,
+        "x-unit": "px",
+        "x-group": "Style",
+        "description": "Corner radius."
+      },
+      "border": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The border's colour."
+      },
+      "borderWidth": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 60,
+        "x-unit": "px",
+        "x-group": "Style",
+        "description": "The border's width."
+      },
+      "shadow": {
+        "type": "boolean",
+        "x-group": "Style",
+        "description": "A soft drop shadow."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 800,
+      "height": 500
+    },
+    "defaults": {
+      "fit": "cover",
+      "radius": 24,
+      "border": "#FFFFFF",
+      "borderWidth": 0,
+      "shadow": true,
+      "zoom": 1,
+      "focusX": 50,
+      "focusY": 50
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "image"
+  }
+}

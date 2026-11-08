@@ -1,0 +1,127 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "component.steps",
+  "kind": "component",
+  "name": "Steps",
+  "description": "A numbered list of steps that appear one after another, a line joining their numbers; earlier steps dim so the newest one stands out.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "type": "string",
+        "maxLength": 80,
+        "x-group": "Content",
+        "description": "A heading over the steps; empty = none."
+      },
+      "steps": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 8,
+        "x-group": "Content",
+        "description": "The steps, in order.",
+        "items": {
+          "type": "object",
+          "required": [
+            "text"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "detail": {
+              "type": "string",
+              "maxLength": 120,
+              "description": "A smaller line under the step."
+            }
+          }
+        }
+      },
+      "color": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The numbers' colour."
+      },
+      "background": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The card's colour."
+      },
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "x-control": "color",
+        "x-group": "Style",
+        "description": "The words' colour."
+      },
+      "focus": {
+        "type": "boolean",
+        "x-group": "Style",
+        "description": "Dim the earlier steps when the next one appears."
+      },
+      "start": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 30,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "When the first step appears."
+      },
+      "step": {
+        "type": "number",
+        "minimum": 0.1,
+        "maximum": 10,
+        "x-unit": "s",
+        "x-group": "Motion",
+        "description": "Time between steps."
+      }
+    }
+  },
+  "component": {
+    "size": {
+      "width": 820,
+      "height": 560
+    },
+    "animated": true,
+    "defaults": {
+      "title": "How it works",
+      "steps": [
+        {
+          "text": "Pick a spot",
+          "detail": "Wide open, no crowds"
+        },
+        {
+          "text": "Fly the route",
+          "detail": "Low and slow at golden hour"
+        },
+        {
+          "text": "Cut to the beat",
+          "detail": "One idea per shot"
+        }
+      ],
+      "color": "#2F80FF",
+      "background": "#0A0A0BCC",
+      "text": "#FFFFFF",
+      "focus": true,
+      "start": 0.4,
+      "step": 0.8
+    }
+  },
+  "ui": {
+    "panel": "components",
+    "icon": "list-ordered"
+  }
+}

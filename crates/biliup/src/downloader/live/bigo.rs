@@ -106,8 +106,7 @@ impl BigoLive {
     fn room_id(&self) -> LiveResult<String> {
         self.url
             .split('/')
-            .filter(|part| !part.is_empty())
-            .next_back()
+            .rfind(|part| !part.is_empty())
             .and_then(|part| part.split(['?', '#']).next())
             .filter(|part| !part.is_empty())
             .map(str::to_string)

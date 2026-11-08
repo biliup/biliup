@@ -1,22 +1,16 @@
 /* 「直播场次」Tab：每场的「回看」入口 */
-.replayLink,
-.fileReplay {
+.replayLink {
   color: var(--semi-color-link);
   text-decoration: none;
   white-space: nowrap;
 }
-.replayLink:hover,
-.fileReplay:hover {
+.replayLink:hover {
   text-decoration: underline;
 }
 
 .replayOff {
   cursor: not-allowed;
   white-space: nowrap;
-}
-
-.fileReplay {
-  margin-left: 12px;
 }
 
 .actions {
@@ -132,3 +126,21 @@
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+.recordingFiles {width:100%;box-sizing:border-box;padding:4px 0;color:var(--semi-color-text-1);font-size:13px;}
+.sessionPage :global(.semi-table-row-expand>.semi-table-row-cell) {background:var(--semi-color-fill-0);}
+.recordingFile {display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--semi-color-bg-1);border:1px solid var(--semi-color-border);border-radius:8px;}
+.recordingFile+.recordingFile {margin-top:8px;}
+.fileIcon {display:flex;align-items:center;justify-content:center;flex-shrink:0;width:40px;height:44px;border-radius:7px;background:var(--semi-color-primary-light-default);color:var(--semi-color-primary);}
+.fileInfo {flex:1;min-width:0;}
+.fileInfo strong {display:block;font-weight:500;color:var(--semi-color-text-0);overflow-wrap:anywhere;line-height:1.5;}
+.fileMeta {display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:5px;font-size:12px;color:var(--semi-color-text-2);font-variant-numeric:tabular-nums;}
+.fileFormat {font-size:10px;letter-spacing:.04em;border:1px solid var(--semi-color-border);border-radius:3px;padding:1px 4px;}
+.fileRecording {color:var(--semi-color-success);}
+.fileUnavailable {color:var(--semi-color-warning);}
+.fileActions {display:flex;align-items:center;gap:8px;flex-shrink:0;}
+.fileAction {display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:7px 10px;border:1px solid var(--semi-color-border);border-radius:6px;background:var(--semi-color-bg-1);color:var(--semi-color-text-0);cursor:pointer;text-decoration:none;font:inherit;white-space:nowrap;}
+.fileAction:hover {color:var(--semi-color-primary);background:var(--semi-color-primary-light-default);border-color:var(--semi-color-primary-light-active);}
+.fileAction:focus-visible {outline:2px solid var(--semi-color-primary);outline-offset:2px;}
+.fileListStatus {padding:20px;text-align:center;color:var(--semi-color-text-2);}
+@media(max-width:640px){.recordingFile{flex-wrap:wrap;gap:10px;padding:12px;}.fileActions{margin-left:50px;}.fileInfo{min-width:calc(100% - 50px);}}

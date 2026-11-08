@@ -120,28 +120,27 @@ impl Platform for Twitch {
             }
 
             // Try to parse PRIVMSG
-            if let Some(content_cap) = self.privmsg_regex.captures(line) {
-                if let Some(content) = content_cap.get(1) {
-                    let mut chat = ChatMessage::new(content.as_str().to_string());
+            if let Some(content_cap) = self.privmsg_regex.captures(line)
+                && let Some(content) = content_cap.get(1)
+            {
+                let mut chat = ChatMessage::new(content.as_str().to_string());
 
-                    // Extract display name
-                    if let Some(name_cap) = self.display_name_regex.captures(line) {
-                        if let Some(name) = name_cap.get(1) {
-                            chat = chat.with_name(name.as_str());
-                        }
-                    }
-
-                    // Extract color
-                    if let Some(color_cap) = self.color_regex.captures(line) {
-                        if let Some(color_hex) = color_cap.get(1) {
-                            if let Ok(color) = u32::from_str_radix(color_hex.as_str(), 16) {
-                                chat = chat.with_color(color);
-                            }
-                        }
-                    }
-
-                    events.push(DanmakuEvent::Chat(chat));
+                // Extract display name
+                if let Some(name_cap) = self.display_name_regex.captures(line)
+                    && let Some(name) = name_cap.get(1)
+                {
+                    chat = chat.with_name(name.as_str());
                 }
+
+                // Extract color
+                if let Some(color_cap) = self.color_regex.captures(line)
+                    && let Some(color_hex) = color_cap.get(1)
+                    && let Ok(color) = u32::from_str_radix(color_hex.as_str(), 16)
+                {
+                    chat = chat.with_color(color);
+                }
+
+                events.push(DanmakuEvent::Chat(chat));
             }
         }
 

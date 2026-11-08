@@ -18,6 +18,7 @@ import { formatVersion } from '../lib/status'
 import { SLOW_REFRESH_MS } from '../lib/use-dashboard'
 import { useIsMobile } from '../lib/useIsMobile'
 import styles from './layout.module.scss'
+import WorkbenchNavigation from '../ui/WorkbenchNavigation'
 
 /* ============ 导航信息架构:5 组 10 项,按当前角色的权限点过滤 ============ */
 
@@ -51,6 +52,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         label: '概览',
         icon: <Ic d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" />,
       },
+      {
+        href: '/monitor',
+        perm: 'preview.view',
+        label: '监控大屏',
+        icon: <Ic d="M3 4h18v13H3zM8 21h8M12 17v4" extra="M7 8h3v3H7zM14 8h3v3h-3z" />,
+      },
     ],
   },
   {
@@ -63,6 +70,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         icon: <Ic d="M3 6h13v12H3zM16 9.5l5-2.5v10l-5-2.5" />,
       },
       {
+        href: '/sessions',
+        perm: 'file.view',
+        label: '直播场次',
+        icon: <Ic d="M4 5h16v16H4zM4 10h16M8 3v4M16 3v4M8 14h3M8 17h6" />,
+      },
+      {
         href: '/workbench',
         perm: 'file.view',
         label: '剪辑台',
@@ -70,10 +83,11 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
         icon: <Ic d="M6 9a3 3 0 100-6 3 3 0 000 6zM6 21a3 3 0 100-6 3 3 0 000 6z" extra="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" />,
       },
       {
-        href: '/renders',
+        href: '/outputs',
         perm: 'file.view',
-        label: '压制任务',
-        icon: <Ic d="M4 5h16v14H4z" extra="M8 9h8M8 13h5M8 16h3" />,
+        label: '压制与导出',
+        activeOn: ['/renders'],
+        icon: <Ic d="M4 3h16v18H4zM4 8h16M4 16h16M8 3v5M16 3v5M8 16v5M16 16v5" />,
       },
     ],
   },
@@ -103,6 +117,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: '设置',
     items: [
+      { href: '/runtime', perm: 'streamer.view', label: '运行状态', icon: <Ic d="M3 12h4l3-8 4 16 3-8h4" /> },
       {
         href: '/dashboard',
         perm: 'config.view',
@@ -114,12 +129,6 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: '系统',
     items: [
-      {
-        href: '/logviewer',
-        perm: 'log.view',
-        label: '实时日志',
-        icon: <Ic d="M4 5h16M4 12h16M4 19h10" extra="M18 15l3 3-3 3" />,
-      },
       {
         href: '/status',
         perm: 'streamer.view',
@@ -144,11 +153,15 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
 
 /** 不在侧栏里、但同样需要权限的子页面（按前缀匹配，先匹配到的生效） */
 const EXTRA_PAGE_PERMS: { prefix: string; perm: Permission }[] = [
+  { prefix: '/runtime/logs', perm: 'log.view' },
+  { prefix: '/logviewer', perm: 'log.view' },
   { prefix: '/nodes', perm: 'streamer.view' },
   { prefix: '/live', perm: 'preview.view' },
   { prefix: '/upload-manager/add', perm: 'template.edit' },
   { prefix: '/upload-manager/edit', perm: 'template.edit' },
   { prefix: '/replay', perm: 'file.view' },
+  { prefix: '/renders', perm: 'file.view' },
+  { prefix: '/outputs', perm: 'file.view' },
 ]
 
 const matches = (pathname: string, href: string) =>
@@ -364,7 +377,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const visibleGroups = me
     ? NAV_GROUPS.map((group) => ({
         ...group,
-        items: group.items.filter(item => can(item.perm)),
+        items: group.items.filter(item => can(item.perm)||(item.href==='/runtime'&&can('log.view')))
+          .map(item=>item.href==='/runtime'&&!can('streamer.view')?{...item,href:'/runtime/logs'}:item),
       })).filter((group) => group.items.length > 0)
     : NAV_GROUPS.map((group) => ({
         ...group,
@@ -467,6 +481,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               {!navCollapsed && <div className={styles.groupTitle}>{group.title}</div>}
               {group.items.map((item) => {
                 const active = isActive(item)
+                if (item.href === '/workbench') return <WorkbenchNavigation key={item.href} icon={item.icon}
+                  collapsed={navCollapsed} expand={() => setSiderPref('0')} onNavigate={() => isMobile && setMobileNavOpen(false)} />
                 return (
                   <Link
                     key={item.href}

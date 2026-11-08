@@ -142,14 +142,13 @@ fn validate(files: &[HookFile]) -> AppResult<()> {
                 "下载后脚本返回了空文件、目录或重复视频".into()
             ));
         }
-        if let Some(path) = &file.danmaku {
-            if !path.is_file()
+        if let Some(path) = &file.danmaku
+            && (!path.is_file()
                 || !path
                     .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("xml"))
-            {
-                bail!(AppError::Custom("下载后脚本返回的弹幕文件无效".into()));
-            }
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("xml")))
+        {
+            bail!(AppError::Custom("下载后脚本返回的弹幕文件无效".into()));
         }
     }
     Ok(())

@@ -2,13 +2,15 @@ use crate::server::common::upload::UActor;
 use crate::server::common::upload_observation::UploadObservations;
 use crate::server::core::monitor::Monitor;
 use crate::server::core::slots::Slots;
+use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
 use async_channel::bounded;
 use biliup::downloader::live::LivePlugin;
+use error_stack::ResultExt;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::info;
+use tracing::{error, info};
 
 /// 下载管理器
 /// 负责管理特定平台的下载任务，包括监控器和插件
@@ -16,6 +18,7 @@ pub struct DownloadManager {
     /// 下载插件
     // plugins: Vec<Arc<dyn LivePlugin + Send + Sync>>,
     rooms_handle: Arc<Monitor>,
+    pool: ConnectionPool,
 
     /// 下载池（pool1_size）：同时录制的直播间上限，由 Monitor 在检测开播前占用。
     download_slots: Arc<Slots>,
@@ -40,13 +43,14 @@ impl DownloadManager {
         let download_slots = Arc::new(Slots::new(pool1_size as usize));
         let upload_slots = Arc::new(Slots::new(pool2_size as usize));
 
-        let rooms_handle = Arc::new(Monitor::new(up_tx, download_slots.clone(), pool));
+        let rooms_handle = Arc::new(Monitor::new(up_tx, download_slots.clone(), pool.clone()));
         // 创建上传Actor
         let u_actor = UActor::new(up_rx, upload_slots.clone());
         let u_kill = tokio::spawn(u_actor.run());
 
         Self {
             rooms_handle,
+            pool,
             download_slots,
             upload_slots,
             u_kill,
@@ -102,9 +106,38 @@ impl DownloadManager {
     }
 
     pub async fn add_room(&self, worker: Worker) -> Option<()> {
+        // 在加入检测队列之前恢复暂停，避免重启时短暂开录。
+        match sqlx::query_scalar::<_, bool>(
+            "SELECT recording_paused FROM livestreamers WHERE id = ?",
+        )
+        .bind(worker.id())
+        .fetch_optional(&self.pool)
+        .await
+        {
+            Ok(Some(true)) => {
+                worker
+                    .change_status(Stage::Download, WorkerStatus::Pause)
+                    .await
+            }
+            Ok(_) => {}
+            Err(error) => {
+                error!(id = worker.id(), %error, "读取录制暂停状态失败，未加入监控");
+                return None;
+            }
+        }
         let arc = Arc::new(worker);
         self.rooms_handle.add(arc.clone()).await?;
         Some(())
+    }
+
+    pub(crate) async fn persist_pause(&self, id: i64, paused: bool) -> AppResult<()> {
+        sqlx::query("UPDATE livestreamers SET recording_paused = ? WHERE id = ?")
+            .bind(paused)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .change_context(AppError::Custom("保存录制暂停状态失败".into()))?;
+        Ok(())
     }
 
     pub async fn del_room(&self, id: i64) {

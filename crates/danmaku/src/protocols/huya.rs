@@ -160,10 +160,10 @@ impl Huya {
 
                 if msg_type == 1400 {
                     // Danmaku message - read message body at tag 2
-                    if let Some(msg_data) = inner_ios.read_bytes(2) {
-                        if let Some(event) = Self::parse_danmaku(&msg_data) {
-                            events.push(event);
-                        }
+                    if let Some(msg_data) = inner_ios.read_bytes(2)
+                        && let Some(event) = Self::parse_danmaku(&msg_data)
+                    {
+                        events.push(event);
                     }
                 }
             }

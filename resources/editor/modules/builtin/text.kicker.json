@@ -1,0 +1,29 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "text.kicker",
+  "kind": "text-style",
+  "name": "Kicker",
+  "description": "A small spaced-out label in accent colour, set above a title.",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  },
+  "ui": {
+    "panel": "text"
+  },
+  "look": {
+    "size": 0.032,
+    "weight": 500,
+    "font": "DM Mono",
+    "tracking": 0.14,
+    "lineHeight": 1.2,
+    "color": "accent",
+    "uppercase": true,
+    "x": 0.08,
+    "y": 0.355,
+    "text": "Chapter one"
+  }
+}

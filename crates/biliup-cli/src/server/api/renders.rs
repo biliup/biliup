@@ -366,6 +366,12 @@ pub async fn retry_render(
     State(publisher): State<Arc<ClipPublisher>>,
     Path(jid): Path<i64>,
 ) -> Response {
+    // A lost response can be retried even if the clip is already being published afterwards.
+    match store::retry_for(&pool,jid).await{
+        Ok(Some(record))=>return (StatusCode::ACCEPTED,Json(record.view)).into_response(),
+        Ok(None)=>{},
+        Err(error)=>return internal(error),
+    }
     match store::get(&pool, jid).await {
         Ok(Some(record)) => {
             if record

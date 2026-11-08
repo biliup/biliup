@@ -1,4 +1,5 @@
-//! H.264 encoder selection. Every advertised encoder has encoded real frames;
+//! Encoder/device selection and shared probes for processing and editor exports.
+//! Every advertised encoder has encoded real frames;
 //! FFmpeg's compiled-in encoder list alone does not prove a working driver.
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -182,14 +183,44 @@ pub struct EncoderCapability {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum VideoCodec {
+    H264,
+    Hevc,
+}
+
+impl VideoCodec {
+    fn decoder(self) -> &'static str {
+        match self { Self::H264 => "h264", Self::Hevc => "hevc" }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub(super) struct SelectedEncoder {
+pub(crate) struct SelectedEncoder {
     pub encoder: VideoEncoder,
     pub device: Option<String>,
     pub fallback_reason: Option<String>,
 }
 
 impl SelectedEncoder {
+    pub fn codec_name(&self, codec: VideoCodec) -> &'static str {
+        if codec == VideoCodec::H264 { return self.encoder.name(); }
+        match self.encoder {
+            VideoEncoder::Libx264 | VideoEncoder::Auto => "libx265",
+            VideoEncoder::H264Nvenc => "hevc_nvenc",
+            VideoEncoder::H264Qsv => "hevc_qsv",
+            VideoEncoder::H264Vaapi => "hevc_vaapi",
+            VideoEncoder::H264Amf => "hevc_amf",
+        }
+    }
+
+    pub fn device_output_args(&self) -> Vec<String> {
+        match (self.encoder, &self.device) {
+            (VideoEncoder::H264Nvenc, Some(device)) => vec!["-gpu".into(), device.clone()],
+            _ => vec![],
+        }
+    }
+
     /// Device creation precedes all inputs; software filters run first and
     /// only their final result is uploaded to the encoder's hardware context.
     pub fn input_args(&self) -> Vec<String> {
@@ -312,11 +343,7 @@ impl SelectedEncoder {
             ],
         };
         args.extend(options.iter().map(|option| (*option).to_owned()));
-        if self.encoder == VideoEncoder::H264Nvenc {
-            if let Some(device) = &self.device {
-                args.extend(["-gpu".into(), device.clone()]);
-            }
-        }
+        args.extend(self.device_output_args());
         args
     }
 }
@@ -326,6 +353,8 @@ struct ProbeKey {
     program: PathBuf,
     program_version: Option<(u64, std::time::SystemTime)>,
     encoder: VideoEncoder,
+    codec: VideoCodec,
+    output_args: Vec<String>,
     device: Option<String>,
     width: u32,
     height: u32,
@@ -359,6 +388,18 @@ async fn test_encoder(
     frame_rate: &str,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
+    test_encoder_with_args(selected, VideoCodec::H264, target, frame_rate, &selected.output_args(), cancel).await
+}
+
+/// The actual export codec and rate-control settings participate in the cached probe.
+pub(crate) async fn test_encoder_with_args(
+    selected: &SelectedEncoder,
+    codec: VideoCodec,
+    target: (u32, u32),
+    frame_rate: &str,
+    output_args: &[String],
+    cancel: &CancellationToken,
+) -> Result<(), String> {
     if cancel.is_cancelled() {
         return Err("合成已取消".into());
     }
@@ -369,6 +410,8 @@ async fn test_encoder(
         program_version: metadata
             .and_then(|m| m.modified().ok().map(|modified| (m.len(), modified))),
         encoder: selected.encoder,
+        codec,
+        output_args: output_args.to_vec(),
         device: selected.device.clone(),
         width: target.0,
         height: target.1,
@@ -409,7 +452,7 @@ async fn test_encoder(
             &format!("color=s={}x{}:r={frame_rate}", target.0, target.1),
         ])
         .args(["-vf", selected.video_filter(), "-frames:v", "8", "-an"])
-        .args(selected.output_args())
+        .args(output_args)
         .args(["-f", "mp4", "-y"])
         .arg(probe.path());
     // The probe emits no FFmpeg progress, making run_process's watchdog an
@@ -427,7 +470,7 @@ async fn test_encoder(
                 "error",
                 "-xerror",
                 "-c:v",
-                "h264",
+                codec.decoder(),
                 "-i",
             ])
             .arg(probe.path())
@@ -611,7 +654,7 @@ async fn nvidia_indexes(cancel: &CancellationToken) -> Result<Vec<String>, Strin
     Ok(indexes)
 }
 
-async fn candidates(
+pub(crate) async fn candidates(
     encoder: VideoEncoder,
     requested_device: Option<&str>,
     cancel: &CancellationToken,
@@ -656,7 +699,7 @@ async fn candidates(
     }
 }
 
-const HARDWARE_ORDER: [VideoEncoder; 4] = [
+pub(crate) const HARDWARE_ORDER: [VideoEncoder; 4] = [
     VideoEncoder::H264Nvenc,
     VideoEncoder::H264Qsv,
     VideoEncoder::H264Vaapi,

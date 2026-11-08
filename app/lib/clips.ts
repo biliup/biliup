@@ -142,6 +142,7 @@ export function refresh(clip: Pick<Clip, 'id' | 'session_id' | 'view_session_id'
   void mutate(clipsUrl(clip.session_id))
   void mutate(clipUrl(clip.id))
   if (clip.view_session_id != null && clip.view_session_id !== clip.session_id) void mutate(clipsUrl(clip.view_session_id))
+  void mutate(key=>typeof key==='string'&&key.startsWith('/v1/outputs?'))
 }
 
 /** 按入点、出点建一个切片；给了 `export` 就建好立即导出，否则是草稿 */

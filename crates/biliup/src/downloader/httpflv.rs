@@ -1417,7 +1417,7 @@ mod tests {
     /// 落盘，视频 tag 不是被跳过、也不会录出一个只有音频的文件。
     #[tokio::test]
     async fn hevc_and_av1_streams_are_recorded_verbatim() {
-        let cases: [(&str, Vec<u8>, Vec<u8>, Vec<u8>); 4] = [
+        let cases = [
             // 国内 CDN 常用的 HEVC / AV1 codec id：载荷与 AVC 同构（序列头 / 关键帧 / 普通帧）
             (
                 "HEVC (codec id 12)",

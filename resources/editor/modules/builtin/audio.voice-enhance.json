@@ -1,0 +1,27 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "audio.voice-enhance",
+  "kind": "audio-processor",
+  "name": "Voice enhance",
+  "version": "0.2.0",
+  "description": "Voice (D84): one slot for a voice chain (high-pass at 80 Hz, a presence lift around 3.5 kHz, gentle compression), heard in the preview and the export. The Mixer's Voice preset adds the same as an editable EQ and compressor.",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "default": 0.5,
+        "description": "How strong: presence +2…+6 dB, ratio 1.5…3.5."
+      }
+    }
+  }
+}

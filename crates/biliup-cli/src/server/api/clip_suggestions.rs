@@ -55,6 +55,7 @@ async fn require_session(pool: &ConnectionPool, id: i64) -> Result<(), Rejection
 #[derive(Debug, Serialize)]
 pub struct SuggestionList {
     pub suggestions: Vec<Suggestion>,
+    pub editor_uses: Vec<crate::server::workbench::editor::suggestions::Use>,
 }
 
 /// `GET /v1/sessions/{id}/suggestions`
@@ -83,7 +84,9 @@ pub async fn list_suggestions(
         );
     }
     suggestions.sort_by_key(|s| (s.in_ms, s.id));
-    Ok(Json(SuggestionList { suggestions }))
+    let editor_uses = crate::server::workbench::editor::suggestions::list(&pool,id).await
+        .map_err(|error| reject(StatusCode::INTERNAL_SERVER_ERROR,error.to_string()))?;
+    Ok(Json(SuggestionList { suggestions, editor_uses }))
 }
 
 /// `POST …/accept` 的请求体：都可以不给，不给就用候选自己的。

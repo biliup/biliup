@@ -27,7 +27,6 @@
   },
   "optionalDependencies": {
     "@biliup/darwin-arm64": "0.0.0",
-    "@biliup/darwin-x64": "0.0.0",
     "@biliup/linux-arm-gnueabi": "0.0.0",
     "@biliup/linux-arm64-gnu": "0.0.0",
     "@biliup/linux-x64-gnu": "0.0.0",

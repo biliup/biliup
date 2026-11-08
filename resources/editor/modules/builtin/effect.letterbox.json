@@ -1,0 +1,31 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.letterbox",
+  "kind": "effect",
+  "name": "Letterbox",
+  "description": "Black cinema bars",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ratio": {
+        "type": "number",
+        "minimum": 1.6,
+        "maximum": 3,
+        "default": 2.39,
+        "description": "Ratio"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "rectangle-horizontal"
+  }
+}

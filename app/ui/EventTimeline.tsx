@@ -2,6 +2,7 @@
 import React from 'react'
 import { DashboardEvent } from '@/app/lib/use-dashboard'
 import Link from 'next/link'
+import { recordingEditorHref } from '@/app/lib/workbench'
 import styles from './event-timeline.module.scss'
 
 const dateFormat = new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -36,7 +37,7 @@ export default function EventTimeline({ events, error = false }: { events: Dashb
                   <time className={styles.time} dateTime={Number.isFinite(new Date(e.ts).getTime()) ? new Date(e.ts).toISOString() : undefined}>
                     {Number.isFinite(new Date(e.ts).getTime()) ? timeFormat.format(new Date(e.ts)) : '时间未知'}
                   </time>
-                  {e.session_id != null ? <Link className={styles.link} href={`/replay?session=${e.session_id}`} prefetch={false}>打开场次</Link> : null}
+                  {e.session_id != null ? <Link className={styles.link} href={recordingEditorHref(e.session_id)} prefetch={false}>打开场次</Link> : null}
                 </div>
                 <div className={styles.text}>{e.text}</div>
                 {e.sub ? <div className={styles.tag}>{e.sub}</div> : null}

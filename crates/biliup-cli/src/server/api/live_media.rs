@@ -61,11 +61,7 @@ pub async fn get_live_cover(
     }
     if let Some(stored) = cover_store().load(id).await {
         return match cover_store().read_thumbnail(id, &stored).await {
-            Ok(image) => image_response(
-                &image.content_type,
-                image.body,
-                "private, max-age=300",
-            ),
+            Ok(image) => image_response(&image.content_type, image.body, "private, max-age=300"),
             Err(error) => {
                 warn!(id, error = %error, "读取本地直播间封面失败");
                 (StatusCode::INTERNAL_SERVER_ERROR, "读取本地直播间封面失败").into_response()
@@ -105,11 +101,7 @@ async fn serve_avatar(worker: &Worker, store: &AvatarStore) -> Response {
         return (StatusCode::NOT_FOUND, "该直播间没有可用的头像").into_response();
     };
     match store.read_thumbnail(id, &stored).await {
-        Ok(image) => image_response(
-            &image.content_type,
-            image.body,
-            "private, max-age=3600",
-        ),
+        Ok(image) => image_response(&image.content_type, image.body, "private, max-age=3600"),
         Err(e) => {
             warn!(id, error = %e, "读取本地头像失败");
             (StatusCode::INTERNAL_SERVER_ERROR, "读取本地头像失败").into_response()

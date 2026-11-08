@@ -1,0 +1,31 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "effect.rgb-split",
+  "kind": "effect",
+  "name": "RGB split",
+  "description": "Red and blue pulled apart",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "native"
+  },
+  "params": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 40,
+        "default": 6,
+        "description": "Amount (canvas px)"
+      }
+    }
+  },
+  "ui": {
+    "panel": "effects",
+    "icon": "layers"
+  }
+}

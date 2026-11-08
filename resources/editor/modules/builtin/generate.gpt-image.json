@@ -1,0 +1,26 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "generate.gpt-image",
+  "kind": "generator",
+  "name": "GPT Image",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "process"
+  },
+  "capabilities": [
+    "network",
+    "api-key",
+    "media:write"
+  ],
+  "generator": {
+    "media": "image",
+    "provider": "openai",
+    "model": "gpt-image-2"
+  },
+  "ui": {
+    "panel": "generate"
+  }
+}

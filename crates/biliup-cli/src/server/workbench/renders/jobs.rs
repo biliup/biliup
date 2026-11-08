@@ -8,6 +8,12 @@ use std::sync::{Arc, Mutex, PoisonError};
 use tokio_util::sync::CancellationToken;
 
 pub struct RenderJobs {
+    pub(crate) editor_agent: Arc<crate::server::workbench::editor::agent::service::Service>,
+    pub editor_proxies: Arc<crate::server::workbench::editor::proxies::Jobs>,
+    pub editor_generate: Arc<crate::server::workbench::editor::generate::Jobs>,
+    pub editor_library: Arc<crate::server::workbench::editor::online_library::Library>,
+    pub editor_analysis: Arc<crate::server::workbench::editor::analysis::Jobs>,
+    pub editor_exports: Arc<crate::server::workbench::editor::export::jobs::Jobs>,
     pool: ConnectionPool,
     root: PathBuf,
     tokens: Mutex<HashMap<i64, CancellationToken>>,
@@ -73,9 +79,46 @@ fn output_file_name(name: Option<&str>, id: i64) -> String {
 }
 impl RenderJobs {
     pub fn new(pool: ConnectionPool, root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        let editor_analysis = Arc::new(crate::server::workbench::editor::analysis::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_generate = Arc::new(crate::server::workbench::editor::generate::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_exports = Arc::new(crate::server::workbench::editor::export::jobs::Jobs::new(
+            pool.clone(),
+            root.clone(),
+        ));
+        let editor_library = Arc::new(
+            crate::server::workbench::editor::online_library::Library::new(
+                pool.clone(),
+                root.clone(),
+            ),
+        );
         Self {
+            editor_agent: Arc::new(
+                crate::server::workbench::editor::agent::service::Service::new(
+                    pool.clone(),
+                    root.clone(),
+                    editor_analysis.clone(),
+                    editor_generate.clone(),
+                    editor_exports.clone(),
+                    editor_library.clone(),
+                ),
+            ),
+            editor_proxies: Arc::new(crate::server::workbench::editor::proxies::Jobs::new(
+                pool.clone(),
+                root.clone(),
+            )),
+            editor_generate,
+            editor_library,
+            editor_analysis,
+            editor_exports,
             pool,
-            root: root.into(),
+            root,
             tokens: Mutex::new(HashMap::new()),
         }
     }
@@ -83,6 +126,12 @@ impl RenderJobs {
         &self.root
     }
     pub async fn initialize(&self) -> sqlx::Result<()> {
+        super::super::output_publish::recover(&self.pool).await?;
+        self.editor_agent.initialize().await?;
+        self.editor_proxies.initialize().await?;
+        self.editor_generate.initialize().await?;
+        self.editor_exports.initialize().await?;
+        self.editor_analysis.initialize().await?;
         store::recover(&self.pool, recorder::now_ms()).await?;
         self.cleanup_unreferenced_snapshots().await?;
         Ok(())
@@ -298,12 +347,23 @@ impl RenderJobs {
         })
     }
     pub async fn enqueue(self: &Arc<Self>, spec: RenderSpec) -> Result<JobView, String> {
+        self.enqueue_attempt(spec, None).await
+    }
+    async fn enqueue_attempt(
+        self: &Arc<Self>,
+        spec: RenderSpec,
+        retry_of: Option<i64>,
+    ) -> Result<JobView, String> {
         for asset in &spec.assets {
             assets::verify(asset).await?;
         }
-        let record = store::insert(&self.pool, &spec, recorder::now_ms())
-            .await
-            .map_err(|e| e.to_string())?;
+        let (record, created) =
+            store::insert_attempt(&self.pool, &spec, recorder::now_ms(), retry_of)
+                .await
+                .map_err(|e| e.to_string())?;
+        if !created {
+            return Ok(record.view);
+        }
         lock(&self.tokens).insert(record.view.id, CancellationToken::new());
         if let Some(cid) = spec.clip_id {
             match clips::begin_render_export(&self.pool, cid, record.view.id, recorder::now_ms())
@@ -531,12 +591,11 @@ impl RenderJobs {
         let writer = tokio::spawn(async move {
             while progress_rx.changed().await.is_ok() {
                 let progress = progress_rx.borrow_and_update().clone();
-                if let Some(progress) = progress {
-                    if let Err(error) =
+                if let Some(progress) = progress
+                    && let Err(error) =
                         store::progress_snapshot(&pool, id, &progress, recorder::now_ms()).await
-                    {
-                        tracing::warn!(%error, id, "保存合成进度失败");
-                    }
+                {
+                    tracing::warn!(%error, id, "保存合成进度失败");
                 }
             }
         });
@@ -588,6 +647,12 @@ impl RenderJobs {
             .is_some_and(|job| job.view.state == "cancelled"))
     }
     pub async fn retry(self: &Arc<Self>, id: i64) -> Result<JobView, String> {
+        if let Some(existing) = store::retry_for(&self.pool, id)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(existing.view);
+        }
         let job = store::get(&self.pool, id)
             .await
             .map_err(|e| e.to_string())?
@@ -601,10 +666,13 @@ impl RenderJobs {
                 return Err(format!("分段 {} 的源文件已丢失", s.segment_id));
             }
         }
-        self.enqueue(job.spec).await
+        self.enqueue_attempt(job.spec, Some(id)).await
     }
     pub async fn shutdown(&self) {
         self.stop();
+        self.editor_agent.shutdown().await;
+        self.editor_generate.shutdown().await;
+        self.editor_proxies.shutdown().await;
         for _ in 0..600 {
             if lock(&self.tokens).is_empty() {
                 return;
@@ -613,6 +681,10 @@ impl RenderJobs {
         }
     }
     pub fn stop(&self) {
+        self.editor_agent.stop();
+        self.editor_generate.stop();
+        self.editor_analysis.stop();
+        self.editor_proxies.stop();
         for token in lock(&self.tokens).values() {
             token.cancel();
         }

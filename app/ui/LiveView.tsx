@@ -18,6 +18,7 @@ import {
 } from '@/app/lib/use-dashboard'
 import { useBoolPref } from '@/app/lib/use-local-pref'
 import { useMe } from '@/app/lib/use-me'
+import { recordingEditorHref as replayHref } from '@/app/lib/workbench'
 import { useDanmakuFeed } from '@/app/lib/danmaku-feed'
 import { type LatencyProfile, RELAY_PROFILES, RELAY_PROFILES_SEGMENTED } from '@/app/lib/live-buffer'
 import PageHeader from '@/app/(app)/components/PageHeader'
@@ -31,11 +32,6 @@ import styles from './live-view.module.scss'
 const DANMAKU_KEY = 'biliup.preview.danmaku'
 /** 播放器下方的码率折线默认展开，折叠状态记在本地（键名同上沿用） */
 const RATE_CHART_KEY = 'biliup.preview.rateChart'
-
-/** 录像回看页的地址（见 `app/(app)/replay/page.tsx`） */
-function replayHref(sessionId: number): string {
-  return `/replay?session=${sessionId}`
-}
 
 /**
  * 直播预览页 `/live?streamer=<id>` 的主体。

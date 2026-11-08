@@ -165,13 +165,13 @@ impl HookStep {
 
     /// Path-mutating variant: lets steps swap entries in the working set
     /// (e.g. Remux replaces .ts with the newly-created .mp4).
-    pub async fn execute_paths(&self, video_paths: &mut Vec<PathBuf>) -> AppResult<()> {
+    pub async fn execute_paths(&self, video_paths: &mut [PathBuf]) -> AppResult<()> {
         self.execute_paths_with_source(video_paths, None).await
     }
 
     pub async fn execute_paths_with_source(
         &self,
-        video_paths: &mut Vec<PathBuf>,
+        video_paths: &mut [PathBuf],
         source: Option<&crate::server::common::processing::model::RenderSource>,
     ) -> AppResult<()> {
         match self {
@@ -236,14 +236,50 @@ impl HookStep {
     }
 
     async fn ffmpeg_remux_to_mp4(src: &Path, dst: &Path) -> AppResult<()> {
+        let mut observation = crate::server::common::upload_observation::TaskObservation::current()
+            .map(|task| task.begin_processing("remux", src));
+        let result = Self::ffmpeg_remux_observed(src, dst, observation.as_ref()).await;
+        if let Some(observation) = observation.as_mut() {
+            match &result {
+                Ok(()) => observation.finish(Some(dst), None),
+                Err(error) => observation.finish(None, Some(&error.to_string())),
+            }
+        }
+        result
+    }
+
+    async fn ffmpeg_remux_observed(
+        src: &Path,
+        dst: &Path,
+        task: Option<&crate::server::common::upload_observation::ProcessingObservation>,
+    ) -> AppResult<()> {
         info!("remux ts→mp4: {} → {}", src.display(), dst.display());
-        let started = std::time::Instant::now();
-        let status = tools::ffmpeg_command()
+        use crate::server::common::processing::engine;
+        let cancel = tokio_util::sync::CancellationToken::new();
+        let duration = engine::probe(src, &cancel)
+            .await
+            .map_err(AppError::Custom)?
+            .duration_ms;
+        if let Some(task) = task {
+            task.progress(0, duration);
+        }
+        // Publish only a completed container; failed/interrupted writes must not be mistaken for reusable MP4s.
+        let temp = tempfile::Builder::new()
+            .prefix(".biliup-remux-")
+            .suffix(".mp4")
+            .tempfile_in(dst.parent().unwrap_or_else(|| Path::new(".")))
+            .map_err(|e| AppError::Custom(e.to_string()))?
+            .into_temp_path();
+        let mut command = tools::ffmpeg_command();
+        command
             .args([
                 "-hide_banner",
+                "-nostdin",
                 "-loglevel",
                 "warning",
                 "-y",
+                "-progress",
+                "pipe:1",
                 "-fflags",
                 "+genpts+igndts",
                 "-i",
@@ -259,39 +295,35 @@ impl HookStep {
                 "-avoid_negative_ts",
                 "make_zero",
             ])
-            .arg(dst)
-            .kill_on_drop(true)
-            .status()
+            .arg(&temp);
+        engine::run_process(
+            command,
+            &cancel,
+            Duration::from_secs(180),
+            |processed, _| {
+                if let Some(task) = task {
+                    task.progress(processed, duration);
+                }
+            },
+        )
+        .await
+        .map_err(AppError::Custom)?;
+        let meta = tokio::fs::metadata(&temp)
             .await
-            .change_context(AppError::Custom("failed to spawn ffmpeg".into()))?;
-        if !status.success() {
-            // Clean up partial output so a retry restarts cleanly.
-            let _ = tokio::fs::remove_file(dst).await;
-            bail!(AppError::Custom(format!(
-                "ffmpeg remux failed (status {:?}) for {}",
-                status,
-                src.display()
-            )));
-        }
-        let meta = tokio::fs::metadata(dst).await.change_context_lazy(|| {
-            AppError::Custom(format!("remux output missing: {}", dst.display()))
-        })?;
+            .map_err(|e| AppError::Custom(e.to_string()))?;
         if meta.len() == 0 {
-            let _ = tokio::fs::remove_file(dst).await;
-            bail!(AppError::Custom(format!(
-                "ffmpeg produced empty mp4: {}",
-                dst.display()
-            )));
+            bail!(AppError::Custom("remux produced an empty MP4".into()));
+        }
+        temp.persist_noclobber(dst)
+            .map_err(|e| AppError::Custom(e.to_string()))?;
+        if let Some(task) = task {
+            task.progress(duration.unwrap_or(0), duration);
         }
         info!(
-            "remux done {} ({:.1} MiB) in {:.1}s",
+            "remux done {} ({:.1} MiB)",
             dst.display(),
-            meta.len() as f64 / 1048576.0,
-            started.elapsed().as_secs_f64()
+            meta.len() as f64 / 1048576.0
         );
-        // Suppress unused-import warning for Duration on platforms that don't
-        // need it (kept for future timeout work).
-        let _ = Duration::from_secs(0);
         Ok(())
     }
 
@@ -597,7 +629,7 @@ pub async fn process_video(
 /// in-place transforms (e.g. Remux replaces .ts with .mp4). Callers can read the
 /// final paths to find the actual files to upload / postprocess.
 pub async fn process_video_paths(
-    video_paths: &mut Vec<PathBuf>,
+    video_paths: &mut [PathBuf],
     processors: &[HookStep],
 ) -> AppResult<()> {
     process_video_paths_with_source(video_paths, processors, None)
@@ -608,14 +640,14 @@ pub async fn process_video_paths(
 /// Return the replaced inputs separately from the paths passed to upload and
 /// user hooks. The caller persists them as cleanup dependencies of the output.
 pub async fn process_video_paths_with_source(
-    video_paths: &mut Vec<PathBuf>,
+    video_paths: &mut [PathBuf],
     processors: &[HookStep],
     source: Option<&crate::server::common::processing::model::RenderSource>,
 ) -> AppResult<Vec<PathBuf>> {
     info!("Starting video processing (path-mutating)...");
     let mut replaced = Vec::new();
     for processor in processors {
-        let before = video_paths.clone();
+        let before = video_paths.to_vec();
         processor
             .execute_paths_with_source(video_paths, source)
             .await?;
@@ -627,6 +659,19 @@ pub async fn process_video_paths_with_source(
     }
     info!("Video processing completed");
     Ok(replaced)
+}
+
+pub async fn process(input: &[u8], processors: &Option<Vec<HookStep>>) {
+    if let Some(hooks) = processors {
+        // 依次执行每个处理器步骤
+        for processor in hooks {
+            info!(processor=?processor, "Starting processing...");
+            if let Err(e) = processor.execute_with(input).await {
+                error!(error=?e, "自定义处理执行出错");
+            }
+            info!(processor=?processor, "processing completed");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -763,18 +808,5 @@ mod tests {
         );
         // 失败时不要把破损的 mp4 留在磁盘上（idempotent retry 前提）
         assert!(!bogus.with_extension("mp4").exists());
-    }
-}
-
-pub async fn process(input: &[u8], processors: &Option<Vec<HookStep>>) {
-    if let Some(hooks) = processors {
-        // 依次执行每个处理器步骤
-        for processor in hooks {
-            info!(processor=?processor, "Starting processing...");
-            if let Err(e) = processor.execute_with(input).await {
-                error!(error=?e, "自定义处理执行出错");
-            }
-            info!(processor=?processor, "processing completed");
-        }
     }
 }

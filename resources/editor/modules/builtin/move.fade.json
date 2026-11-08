@@ -1,0 +1,13 @@
+{
+  "manifest": "biliup.module/1",
+  "id": "move.fade",
+  "kind": "move",
+  "name": "Fade",
+  "version": "0.1.0",
+  "author": "Biliup",
+  "license": "MIT",
+  "builtin": true,
+  "runtime": {
+    "type": "html"
+  }
+}
