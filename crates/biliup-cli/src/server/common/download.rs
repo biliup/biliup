@@ -484,6 +484,7 @@ impl DownloadTask {
             stream.danmaku.as_ref(),
             filename_prefix.as_deref(),
             &stream.name,
+            ctx.config().bilibili_danmaku_preview.unwrap_or(false),
             self.danmaku_tx.clone(),
         );
         // 启动弹幕客户端

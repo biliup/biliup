@@ -60,6 +60,7 @@ export const DELIVERABLE_KEYS = [
   'bilibili_danmaku',
   'bilibili_danmaku_detail',
   'bilibili_danmaku_raw',
+  'bilibili_danmaku_preview',
   'bili_protocol',
   'bili_cdn',
   'bili_force_source',
