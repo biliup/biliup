@@ -20,6 +20,7 @@ use chrono::Utc;
 use quick_xml::Writer;
 use quick_xml::escape::escape;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
+use serde_json::Value;
 
 use crate::error::Result;
 use crate::message::{ChatMessage, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage};
@@ -100,6 +101,25 @@ fn push_json_attribute(elem: &mut BytesStart<'_>, key: &str, json: &str) {
     };
     push_line_attribute(elem, key, &json);
 }
+
+fn push_scalar_attributes(elem: &mut BytesStart<'_>, data: &Value) {
+    let Some(fields) = data.as_object() else {
+        return;
+    };
+    for (key, value) in fields {
+        match value {
+            Value::String(text) => push_line_attribute(elem, key, text),
+            Value::Number(number) => {
+                elem.push_attribute((key.as_str(), number.to_string().as_str()));
+            }
+            Value::Bool(flag) => {
+                elem.push_attribute((key.as_str(), if *flag { "true" } else { "false" }));
+            }
+            _ => {}
+        }
+    }
+}
+
 /// XML writer for danmaku output.
 pub struct XmlWriter {
     /// Output file path.
@@ -186,17 +206,15 @@ impl XmlWriter {
         let mut elem = BytesStart::new(tag);
         elem.push_attribute(("timestamp", Utc::now().timestamp().to_string().as_str()));
         elem.push_attribute(("ts", self.elapsed().as_str()));
-        if let Some((kind, data)) = detail {
+        if let Some((kind, _)) = detail {
             elem.push_attribute(("type", *kind));
-            if let Some(uid) = data["uid"].as_u64() {
-                elem.push_attribute(("uid", uid.to_string().as_str()));
-            }
-            if let Some(user) = data["user"].as_str() {
-                push_line_attribute(&mut elem, "username", user);
-            }
         }
         self.push_notification_attributes(&mut elem, Some(notification));
-        self.writer.write_event(Event::Empty(elem))?;
+        if let Some(items) = detail.and_then(|(_, data)| data["items"].as_array()) {
+            self.write_gift_batch(elem, items)?;
+        } else {
+            self.writer.write_event(Event::Empty(elem))?;
+        }
         self.finish_event(true)
     }
 
@@ -262,13 +280,27 @@ impl XmlWriter {
         if self.config.save_detail
             && let Some((_, detail)) = &notification.detail
         {
-            push_json_attribute(elem, "detail", &detail.to_string());
+            push_scalar_attributes(elem, detail);
         }
         if self.config.save_raw
             && let Some(raw) = &notification.raw
         {
             push_json_attribute(elem, "raw", raw);
         }
+    }
+
+    fn write_gift_batch(&mut self, elem: BytesStart<'_>, items: &[Value]) -> Result<()> {
+        self.writer.write_event(Event::Start(elem))?;
+        let mut inline = Writer::new(self.writer.get_mut());
+        for item in items {
+            let mut element = BytesStart::new("item");
+            push_scalar_attributes(&mut element, item);
+            inline.write_event(Event::Empty(element))?;
+        }
+        // Keep the closing tag on the same line as the batch.
+        self.writer.write_event(Event::Text(BytesText::new("")))?;
+        self.writer.write_event(Event::End(BytesEnd::new("s")))?;
+        Ok(())
     }
 
     fn write_text_element(&mut self, elem: BytesStart<'_>, tag: &str, content: &str) -> Result<()> {

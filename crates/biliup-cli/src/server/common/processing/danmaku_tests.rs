@@ -186,7 +186,7 @@ fn reads_precise_origin_and_estimates_old_origin_by_median() {
 #[test]
 fn extended_recording_and_recorder_milliseconds_keep_the_same_ass() {
     let plain = br#"<i><d p="1,1,25,16777215,1794528000,0,123,0">A &amp; B</d></i>"#;
-    let extended = br#"<i><d p="1,1,25,16777215,1794528000000,0,123,0" user="sender" detail="{&quot;uid&quot;:123}" raw="{&quot;cmd&quot;:&quot;DANMU_MSG&quot;}">A &amp; B</d><s type="gift" detail="{&quot;items&quot;:[]}"/><o raw="{&quot;cmd&quot;:&quot;COMBO_SEND&quot;}"/></i>"#;
+    let extended = br#"<i><d p="1,1,25,16777215,1794528000000,0,123,0" user="sender" is_admin="false" raw="{&quot;cmd&quot;:&quot;DANMU_MSG&quot;}">A &amp; B</d><s type="gift"><item giftname="rose" num="1"/><item giftname="star" num="2"/></s><o raw="{&quot;cmd&quot;:&quot;COMBO_SEND&quot;}"/></i>"#;
     let plain = parse_xml(plain).unwrap();
     let extended = parse_xml(extended).unwrap();
     assert_eq!(plain.comments, extended.comments);
