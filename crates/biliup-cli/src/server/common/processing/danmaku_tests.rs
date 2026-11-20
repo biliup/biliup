@@ -184,6 +184,37 @@ fn reads_precise_origin_and_estimates_old_origin_by_median() {
 }
 
 #[test]
+fn extended_recording_and_recorder_milliseconds_keep_the_same_ass() {
+    let plain = br#"<i><d p="1,1,25,16777215,1794528000,0,123,0">A &amp; B</d></i>"#;
+    let extended = br#"<i><d p="1,1,25,16777215,1794528000000,0,123,0" user="sender" detail="{&quot;uid&quot;:123}" raw="{&quot;cmd&quot;:&quot;DANMU_MSG&quot;}">A &amp; B</d><s type="gift" detail="{&quot;items&quot;:[]}"/><o raw="{&quot;cmd&quot;:&quot;COMBO_SEND&quot;}"/></i>"#;
+    let plain = parse_xml(plain).unwrap();
+    let extended = parse_xml(extended).unwrap();
+    assert_eq!(plain.comments, extended.comments);
+    assert_eq!(timing_origin(&plain), (Some(1794527999000), true));
+    assert_eq!(timing_origin(&plain), timing_origin(&extended));
+
+    let convert = |parsed: &ParsedXml| {
+        let comments: Vec<_> = parsed
+            .comments
+            .iter()
+            .map(|row| (row, row.elapsed_ms))
+            .collect();
+        let xml = normalize_xml(&comments, 0).unwrap();
+        let mut ass = Vec::new();
+        danmaku_factory::convert_normalized_xml_to_writer(
+            xml.as_bytes(),
+            &mut ass,
+            &Default::default(),
+        )
+        .unwrap();
+        ass
+    };
+    let ass = convert(&plain);
+    assert!(String::from_utf8_lossy(&ass).contains("Dialogue:"));
+    assert_eq!(ass, convert(&extended));
+}
+
+#[test]
 fn emoji_fallback_marks_only_dialogue_runs_and_keeps_zwj_sequences() {
     let input = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:00:00.00,0:00:01.00,Default,,0000,0000,0000,,中文 😡👩‍💻 end,with comma\nComment: 0,0:00:00.00,0:00:01.00,Default,,0000,0000,0000,,😡";
     let output = add_emoji_font_fallback(input);

@@ -25,29 +25,8 @@ use crate::message::DanmakuEvent;
 use crate::output::xml::{XmlWriter, XmlWriterConfig};
 use crate::protocols::{
     ConnectionInfo, ConnectionTransport, DecodeResult, HeartbeatData, Platform, PlatformContext,
-    RegistrationData, create_platform,
+    RecordingDecodeResult, RegistrationData, create_platform,
 };
-
-/// 捕获平台解码器的 panic，降级为解码错误：
-/// 录制任务在 tokio::spawn 中运行，panic 会直接杀死任务且没有任何
-/// 重启机制，一条畸形消息就会让弹幕录制静默永久停止。
-fn decode_message_guarded(
-    platform: &dyn Platform,
-    data: &[u8],
-    platform_name: &str,
-) -> Result<DecodeResult> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        platform.decode_message(data)
-    }))
-    .unwrap_or_else(|_| {
-        error!(
-            "{}: decoder panicked on a {}-byte message, skipping it",
-            platform_name,
-            data.len()
-        );
-        Err(DanmakuError::Decode("decoder panicked".to_string()))
-    })
-}
 
 /// Configuration for the danmaku recorder.
 #[derive(Debug, Clone)]
@@ -169,6 +148,47 @@ impl DanmakuRecorder {
         if let Some(tx) = &self.config.live_tx {
             let _ = tx.send(event.clone());
         }
+    }
+
+    /// Catch malformed input that would otherwise terminate the recorder task.
+    fn decode_message_guarded(&self, data: &[u8]) -> Result<RecordingDecodeResult> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.platform.decode_recording_message(
+                data,
+                self.config.save_detail,
+                self.config.save_raw,
+            )
+        }))
+        .unwrap_or_else(|_| {
+            error!(
+                "{}: decoder panicked on a {}-byte message, skipping it",
+                self.platform.name(),
+                data.len()
+            );
+            Err(DanmakuError::Decode("decoder panicked".to_string()))
+        })
+    }
+
+    fn write_decoded(&self, result: RecordingDecodeResult, writer: &mut XmlWriter) -> DecodeResult {
+        let RecordingDecodeResult {
+            mut decoded,
+            notifications,
+        } = result;
+        for event in decoded.events.drain(..) {
+            self.emit_live(&event);
+            if let Err(e) = writer.write_event(&event) {
+                warn!("Failed to write event: {}", e);
+            }
+        }
+        for notification in notifications {
+            if let Some(event) = &notification.event {
+                self.emit_live(event);
+            }
+            if let Err(e) = writer.write_bilibili_notification(&notification) {
+                warn!("Failed to write event: {}", e);
+            }
+        }
+        decoded
     }
 
     /// Start recording in a background task.
@@ -485,16 +505,10 @@ impl DanmakuRecorder {
                             };
 
                             // Decode message
-                            match decode_message_guarded(self.platform.as_ref(), &data, platform_name) {
+                            match self.decode_message_guarded(&data) {
                                 Ok(result) => {
                                     consecutive_decode_errors = 0;
-                                    // Write decoded events
-                                    for event in result.events {
-                                        self.emit_live(&event);
-                                        if let Err(e) = xml_writer.write_event(&event) {
-                                            warn!("Failed to write event: {}", e);
-                                        }
-                                    }
+                                    let result = self.write_decoded(result, xml_writer);
 
                                     // Send ack if needed
                                     if let Some(ack) = result.ack {
@@ -613,15 +627,10 @@ impl DanmakuRecorder {
 
                 frame = frame_reader.read_frame(&mut tcp_reader) => {
                     let frame = frame?;
-                    match decode_message_guarded(self.platform.as_ref(), &frame, platform_name) {
+                    match self.decode_message_guarded(&frame) {
                         Ok(result) => {
                             consecutive_decode_errors = 0;
-                            for event in result.events {
-                                self.emit_live(&event);
-                                if let Err(e) = xml_writer.write_event(&event) {
-                                    warn!("Failed to write event: {}", e);
-                                }
-                            }
+                            let result = self.write_decoded(result, xml_writer);
 
                             if let Some(ack) = result.ack {
                                 tcp_writer.write_all(&ack).await?;
