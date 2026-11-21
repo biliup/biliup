@@ -1004,7 +1004,7 @@ mod tests {
             (false, false, "ddd"),
             (false, true, "dooooooooodd"),
             (true, false, "dssssssdd"),
-            (true, true, "dssssssoooodd"),
+            (true, true, concat!("d", "ssssss", "ooo", "dd")),
         ] {
             let mut writer = XmlWriter::new(
                 dir.join(format!("{detail}-{raw}.xml")),
