@@ -444,9 +444,17 @@ impl Bilibili {
         let json: Value = serde_json::from_str(text).ok()?;
         let cmd = json.get("cmd")?.as_str()?;
         let cmd_base = cmd.split(':').next().unwrap_or(cmd);
+        let extra = if cmd_base == "DANMU_MSG" {
+            json["info"][0][15]["extra"]
+                .as_str()
+                .and_then(|text| serde_json::from_str(text).ok())
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
 
         let event = match cmd_base {
-            "DANMU_MSG" => Self::parse_danmu_msg(&json),
+            "DANMU_MSG" => Self::parse_danmu_msg(&json, &extra),
             "SEND_GIFT" => Self::parse_gift(&json),
             "SUPER_CHAT_MESSAGE" | "SUPER_CHAT_MESSAGE_JP" => Self::parse_super_chat(&json),
             "GUARD_BUY" => Self::parse_guard_buy(&json),
@@ -454,7 +462,7 @@ impl Bilibili {
             _ => None,
         };
         let detail = if save_detail {
-            Self::notification_detail(cmd_base, &json, event.as_ref())
+            Self::notification_detail(cmd_base, &json, event.as_ref(), &extra)
         } else {
             None
         };
@@ -491,19 +499,38 @@ impl Bilibili {
         cmd: &str,
         message: &Value,
         event: Option<&DanmakuEvent>,
+        extra: &Value,
     ) -> Option<(&'static str, Value)> {
         let data = &message["data"];
         match event {
             Some(DanmakuEvent::Chat(_)) => {
                 let user = &message["info"][2];
-                Some((
-                    "danmaku",
-                    json!({
-                        "is_admin": user.get(2).and_then(Value::as_u64).map(|n| n == 1),
-                        "is_vip": user.get(3).and_then(Value::as_u64).map(|n| n == 1),
-                        "guard_level": message["info"].get(7).and_then(Value::as_u64),
-                    }),
-                ))
+                let emoji_url = [
+                    &message["info"][0][13]["url"],
+                    &extra["emoticon"]["url"],
+                    &data["emoji_img_url"],
+                ]
+                .into_iter()
+                .filter_map(Value::as_str)
+                .find(|url| !url.is_empty());
+                let mut detail = json!({
+                    "is_admin": user.get(2).and_then(Value::as_u64).map(|n| n == 1),
+                    "is_vip": user.get(3).and_then(Value::as_u64).map(|n| n == 1),
+                    "guard_level": message["info"].get(7).and_then(Value::as_u64),
+                    "emoji_url": emoji_url,
+                });
+                if let Some(emojis) = extra["emots"].as_object() {
+                    // Keep inline emoji tokens and URLs as scalar XML attributes.
+                    let images = emojis.iter().filter_map(|(token, image)| {
+                        let url = image["url"].as_str()?;
+                        (!url.is_empty()).then_some((token, url))
+                    });
+                    for (index, (token, url)) in (1..).zip(images) {
+                        detail[format!("emoji_{index}_text")] = json!(token);
+                        detail[format!("emoji_{index}_url")] = json!(url);
+                    }
+                }
+                Some(("danmaku", detail))
             }
             Some(DanmakuEvent::Gift(_)) => Some((
                 "gift",
@@ -581,11 +608,11 @@ impl Bilibili {
     }
 
     /// Parse DANMU_MSG.
-    fn parse_danmu_msg(json: &Value) -> Option<DanmakuEvent> {
+    fn parse_danmu_msg(json: &Value, extra: &Value) -> Option<DanmakuEvent> {
         let info = json.get("info")?.as_array()?;
 
         // info[1] = content
-        let content = info.get(1)?.as_str()?.to_string();
+        let content = info.get(1)?.as_str()?;
 
         // info[2][0] = uid, info[2][1] = name
         let user_info = info.get(2)?.as_array()?;
@@ -600,27 +627,12 @@ impl Bilibili {
             .map(|c| c as u32)
             .unwrap_or(DEFAULT_COLOR);
 
-        // Check for emoticon
-        let content = if let Some(extra_obj) = meta.get(15) {
-            if let Some(extra_str) = extra_obj.get("extra").and_then(|v| v.as_str()) {
-                if let Ok(extra) = serde_json::from_str::<Value>(extra_str) {
-                    if let Some(emoticon) = extra.get("emoticon_unique").and_then(|v| v.as_str()) {
-                        if !emoticon.is_empty() {
-                            format!("表情【{}】", emoticon)
-                        } else {
-                            content
-                        }
-                    } else {
-                        content
-                    }
-                } else {
-                    content
-                }
-            } else {
-                content
-            }
-        } else {
-            content
+        let content = match extra["emoticon_unique"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+        {
+            Some(id) => format!("表情【{id}】"),
+            None => content.to_owned(),
         };
 
         let mut chat = ChatMessage::new(content).with_color(color);
@@ -944,6 +956,25 @@ mod tests {
         let combo = r#"{"cmd":"COMBO_SEND","data":{"total_num":18}}"#;
         let bad_v2 = r#"{"cmd":"SEND_GIFT_V2","data":{"pb":"not base64"}}"#;
         let duplicate_sc = sc.replace("SUPER_CHAT_MESSAGE_JP", "SUPER_CHAT_MESSAGE");
+        let room_url = "https://i0.hdslb.com/bfs/live/room.png?width=80&height=80";
+        let cat_url = "https://i0.hdslb.com/bfs/live/cat.png";
+        let dog_url = "https://i0.hdslb.com/bfs/live/dog.png";
+        let emoji_chat = |image: Value, extra: Value, text: &str| {
+            let mut meta = vec![Value::Null; 16];
+            meta[13] = image;
+            meta[15] = json!({"extra": extra.to_string()});
+            json!({"cmd": "DANMU_MSG", "info": [meta, text, [123, "sender"]]}).to_string()
+        };
+        let room_emoji = emoji_chat(
+            json!({"url": room_url}),
+            json!({"emoticon_unique": "room_emoji"}),
+            "room emoji",
+        );
+        let inline_emoji = emoji_chat(
+            Value::Null,
+            json!({"emots": {"[cat]": {"url": cat_url}, "[dog]": {"url": dog_url}, "[empty]": {"url": ""}}}),
+            "A [cat] and a [dog]",
+        );
         let messages = [
             chat,
             &v2,
@@ -955,6 +986,8 @@ mod tests {
             combo,
             bad_v2,
             &duplicate_sc,
+            &room_emoji,
+            &inline_emoji,
         ];
         let mut frame: Vec<u8> = messages
             .iter()
@@ -968,10 +1001,10 @@ mod tests {
             chrono::Utc::now().timestamp_nanos_opt().unwrap()
         ));
         for (detail, raw, expected) in [
-            (false, false, "d"),
-            (false, true, "dooooooooo"),
-            (true, false, "dssssss"),
-            (true, true, "dssssssooo"),
+            (false, false, "ddd"),
+            (false, true, "dooooooooodd"),
+            (true, false, "dssssssdd"),
+            (true, true, "dssssssoooodd"),
         ] {
             let mut writer = XmlWriter::new(
                 dir.join(format!("{detail}-{raw}.xml")),
@@ -1026,6 +1059,24 @@ mod tests {
             let (_, fields) = rows[0].1["p"].split_once(',').unwrap();
             assert_eq!(fields, "4,18,16777215,1795151935316,0,123,0");
             assert!(xml.contains("A &amp; B&#10;second line</d>"));
+            assert!(xml.contains("表情【room_emoji】</d>"));
+            assert!(xml.contains("A [cat] and a [dog]</d>"));
+            assert!(!rows[0].1.contains_key("emoji_url"));
+            let room = &rows[rows.len() - 2].1;
+            let inline = &rows[rows.len() - 1].1;
+            assert_eq!(
+                room.get("emoji_url").map(String::as_str),
+                detail.then_some(room_url)
+            );
+            for (key, value) in [
+                ("emoji_1_text", "[cat]"),
+                ("emoji_1_url", cat_url),
+                ("emoji_2_text", "[dog]"),
+                ("emoji_2_url", dog_url),
+            ] {
+                assert_eq!(inline.get(key).map(String::as_str), detail.then_some(value));
+            }
+            assert!(!inline.contains_key("emoji_3_url"));
             for (_, attrs) in &rows {
                 assert_eq!(attrs.contains_key("raw"), raw);
                 assert!(!attrs.contains_key("detail"));
@@ -1219,7 +1270,7 @@ mod tests {
             ]
         });
 
-        let event = Bilibili::parse_danmu_msg(&json);
+        let event = Bilibili::parse_danmu_msg(&json, &Value::Null);
         assert!(event.is_some());
 
         if let Some(DanmakuEvent::Chat(chat)) = event {
