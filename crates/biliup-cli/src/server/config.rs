@@ -290,6 +290,9 @@ pub struct Config {
     /// B站弹幕原始数据
     #[serde(default)]
     pub bilibili_danmaku_raw: Option<bool>,
+    /// B站弹幕文件浏览器预览
+    #[serde(default)]
+    pub bilibili_danmaku_preview: Option<bool>,
     /// B站协议类型：stream | hls_ts | hls_fmp4
     #[serde(default)]
     pub bili_protocol: Option<String>,

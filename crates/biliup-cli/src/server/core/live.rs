@@ -315,12 +315,18 @@ fn ytdlp_backend(
     }
 }
 
+const DANMAKU_PREVIEW_XML: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../build/danmaku-preview.xml"
+));
+
 /// 构造弹幕客户端。`live_tx` 为直播预览的实时弹幕广播：客户端每解出一条就 `send` 一份
 /// （不等待、无订阅者时丢弃），XML 录制不受影响。
 pub fn danmaku_client(
     source: Option<&DanmakuSource>,
     filename_prefix: Option<&str>,
     name: &str,
+    embed_preview: bool,
     live_tx: Option<tokio::sync::broadcast::Sender<danmaku_client::DanmakuEvent>>,
 ) -> Option<Arc<dyn crate::server::core::downloader::DanmakuClient + Send + Sync>> {
     let source = source?;
@@ -341,7 +347,10 @@ pub fn danmaku_client(
     )
     .with_context(context)
     .with_raw(source.raw)
-    .with_detail(source.detail);
+    .with_detail(source.detail)
+    .with_xml_preview(
+        (embed_preview && source.platform == "bilibili").then_some(DANMAKU_PREVIEW_XML),
+    );
     if let Some(tx) = live_tx {
         config = config.with_live_tx(tx);
     }

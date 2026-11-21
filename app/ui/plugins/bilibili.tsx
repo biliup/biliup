@@ -105,6 +105,15 @@ const Bilibili: React.FC<Props> = props => {
             padding: 0,
           }}
         />
+        <Form.Switch
+          field="bilibili_danmaku_preview"
+          extraText="用浏览器打开弹幕 XML，可查看统计、热力图并筛选弹幕。需开启「录制弹幕」，默认关闭。每份 XML 约增加 10 KB。"
+          label="弹幕文件浏览器预览（bilibili_danmaku_preview）"
+          fieldStyle={{
+            alignSelf: 'stretch',
+            padding: 0,
+          }}
+        />
         <Form.Input
           field="user.bili_cookie"
           extraText={
