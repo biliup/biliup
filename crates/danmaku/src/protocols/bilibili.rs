@@ -7,10 +7,12 @@
 //! - Version 3: brotli compressed payload
 //! - JSON messages for chat, gifts, super chat, etc.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use byteorder::{BigEndian, ByteOrder};
 use flate2::read::ZlibDecoder;
 use regex::Regex;
@@ -19,9 +21,10 @@ use reqwest::header::{
     USER_AGENT,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::{debug, info};
 
+use crate::codec::protobuf::{ProtoReader, ProtoValue};
 use crate::codec::{MAX_DECOMPRESSED_SIZE, decompress_limited};
 use crate::error::{DanmakuError, Result};
 use crate::message::{
@@ -29,7 +32,8 @@ use crate::message::{
 };
 use crate::protocols::wbi::WbiSigner;
 use crate::protocols::{
-    ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext, RegistrationData,
+    ConnectionInfo, DecodeResult, HeartbeatConfig, Platform, PlatformContext,
+    RecordingDecodeResult, RegistrationData,
 };
 
 /// User agent for Bilibili requests.
@@ -100,10 +104,38 @@ struct AuthData {
     key: String,
 }
 
+/// One application-level packet. The XML recorder keeps its representations together.
+pub(crate) struct Notification {
+    pub(crate) event: Option<DanmakuEvent>,
+    pub(crate) detail: Option<(&'static str, Value)>,
+    pub(crate) raw: Option<String>,
+    pub(crate) chat_metadata: Option<ChatMetadata>,
+}
+
+pub(crate) struct ChatMetadata {
+    pub(crate) mode: u64,
+    pub(crate) size: u64,
+    pub(crate) timestamp_ms: i64,
+}
+
+#[derive(Serialize)]
+struct GiftItem {
+    gift_id: u64,
+    giftname: String,
+    num: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    price: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_coin: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tid: Option<String>,
+}
+
 /// Bilibili live danmaku protocol.
 pub struct Bilibili {
     client: reqwest::Client,
     wbi_signer: WbiSigner,
+    super_chat_ids: Mutex<HashSet<u64>>,
 }
 
 impl Bilibili {
@@ -111,7 +143,11 @@ impl Bilibili {
     pub fn new() -> Self {
         let client = reqwest::Client::new();
         let wbi_signer = WbiSigner::new(client.clone());
-        Self { client, wbi_signer }
+        Self {
+            client,
+            wbi_signer,
+            super_chat_ids: Mutex::default(),
+        }
     }
 
     fn auth_uid(context: &PlatformContext) -> Result<u64> {
@@ -402,30 +438,181 @@ impl Bilibili {
         packets
     }
 
-    /// Parse a notification message (op=5) into danmaku events.
-    fn parse_notification(body: &[u8]) -> Option<DanmakuEvent> {
-        let json: Value = serde_json::from_slice(body).ok()?;
+    /// Parse a notification (op=5) without losing the original JSON.
+    fn parse_notification(body: &[u8], save_detail: bool, save_raw: bool) -> Option<Notification> {
+        let text = std::str::from_utf8(body).ok()?;
+        let json: Value = serde_json::from_str(text).ok()?;
         let cmd = json.get("cmd")?.as_str()?;
-
-        // Handle DANMU_MSG variants (e.g., "DANMU_MSG:4:0:2:2:2:0")
         let cmd_base = cmd.split(':').next().unwrap_or(cmd);
+        let extra = if cmd_base == "DANMU_MSG" {
+            json["info"][0][15]["extra"]
+                .as_str()
+                .and_then(|text| serde_json::from_str(text).ok())
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
 
-        match cmd_base {
-            "DANMU_MSG" => Self::parse_danmu_msg(&json),
+        let event = match cmd_base {
+            "DANMU_MSG" => Self::parse_danmu_msg(&json, &extra),
             "SEND_GIFT" => Self::parse_gift(&json),
-            "SUPER_CHAT_MESSAGE" => Self::parse_super_chat(&json),
+            "SUPER_CHAT_MESSAGE" | "SUPER_CHAT_MESSAGE_JP" => Self::parse_super_chat(&json),
             "GUARD_BUY" => Self::parse_guard_buy(&json),
             "LIVE_INTERACTIVE_GAME" => Self::parse_interactive_danmaku(&json),
             _ => None,
+        };
+        let detail = if save_detail {
+            Self::notification_detail(cmd_base, &json, event.as_ref(), &extra)
+        } else {
+            None
+        };
+        let chat_metadata = match &event {
+            Some(DanmakuEvent::Chat(chat)) => {
+                let meta = &json["info"][0];
+                Some(ChatMetadata {
+                    mode: meta[1]
+                        .as_u64()
+                        .filter(|n| (1..=9).contains(n))
+                        .unwrap_or(1),
+                    size: meta[2]
+                        .as_u64()
+                        .filter(|n| (1..=1000).contains(n))
+                        .unwrap_or(25),
+                    timestamp_ms: meta[4]
+                        .as_i64()
+                        .filter(|n| (1_000_000_000_000..10_000_000_000_000).contains(n))
+                        .unwrap_or_else(|| chat.timestamp.timestamp_millis()),
+                })
+            }
+            _ => None,
+        };
+        let raw = save_raw.then(|| text.to_owned());
+        (event.is_some() || detail.is_some() || raw.is_some()).then_some(Notification {
+            event,
+            detail,
+            raw,
+            chat_metadata,
+        })
+    }
+
+    fn notification_detail(
+        cmd: &str,
+        message: &Value,
+        event: Option<&DanmakuEvent>,
+        extra: &Value,
+    ) -> Option<(&'static str, Value)> {
+        let data = &message["data"];
+        match event {
+            Some(DanmakuEvent::Chat(_)) => {
+                let user = &message["info"][2];
+                let emoji_url = [
+                    &message["info"][0][13]["url"],
+                    &extra["emoticon"]["url"],
+                    &data["emoji_img_url"],
+                ]
+                .into_iter()
+                .filter_map(Value::as_str)
+                .find(|url| !url.is_empty());
+                let mut detail = json!({
+                    "is_admin": user.get(2).and_then(Value::as_u64).map(|n| n == 1),
+                    "is_vip": user.get(3).and_then(Value::as_u64).map(|n| n == 1),
+                    "guard_level": message["info"].get(7).and_then(Value::as_u64),
+                    "emoji_url": emoji_url,
+                });
+                if let Some(emojis) = extra["emots"].as_object() {
+                    // Keep inline emoji tokens and URLs as scalar XML attributes.
+                    let images = emojis.iter().filter_map(|(token, image)| {
+                        let url = image["url"].as_str()?;
+                        (!url.is_empty()).then_some((token, url))
+                    });
+                    for (index, (token, url)) in (1..).zip(images) {
+                        detail[format!("emoji_{index}_text")] = json!(token);
+                        detail[format!("emoji_{index}_url")] = json!(url);
+                    }
+                }
+                Some(("danmaku", detail))
+            }
+            Some(DanmakuEvent::Gift(_)) => Some((
+                "gift",
+                json!({"tid": data["tid"], "total_coin": data["total_coin"]}),
+            )),
+            Some(DanmakuEvent::GuardBuy(_)) => {
+                Some(("guard_buy", json!({"level": data["guard_level"]})))
+            }
+            Some(DanmakuEvent::SuperChat(_)) => Some((
+                "super_chat",
+                json!({
+                    "id": data["id"], "original_price": data["price"], "time": data["time"],
+                }),
+            )),
+            _ => match cmd {
+                "SEND_GIFT_V2" => Some(("gift", Self::parse_gift_v2(data)?)),
+                "INTERACT_WORD" => {
+                    let action = match data["msg_type"].as_u64()? {
+                        2 => "follow",
+                        3 => "share",
+                        4 => "special_follow",
+                        5 => "mutual_follow",
+                        _ => return None,
+                    };
+                    Some((
+                        "interact",
+                        json!({"action": action, "uid": data["uid"], "username": data["uname"]}),
+                    ))
+                }
+                "LIVE" | "PREPARING" | "WARNING" | "CUT_OFF" => Some((
+                    "room_status",
+                    json!({
+                        "cmd": cmd,
+                        "room_id": message.get("roomid").unwrap_or(&message["room_id"]),
+                        "message": message.get("msg").unwrap_or(&data["msg"]),
+                    }),
+                )),
+                _ => None,
+            },
         }
     }
 
+    fn parse_gift_v2(data: &Value) -> Option<Value> {
+        let bytes = STANDARD.decode(data["pb"].as_str()?).ok()?;
+        let fields = ProtoReader::new(&bytes).parse_all_strict()?;
+        let first = |tag| fields.get(&tag)?.first();
+        // SendGiftBroadcast: switch=11, gift_list=10. Each GiftItem has its own tid.
+        if first(11)?.as_u64()? == 0 {
+            return None;
+        }
+        let uid = first(1)?.as_u64()?;
+        let name = first(2)?.as_str()?;
+        let items: Vec<_> = fields
+            .get(&10)?
+            .iter()
+            .filter_map(|item| {
+                let bytes = match item {
+                    ProtoValue::Bytes(bytes) => bytes.as_slice(),
+                    ProtoValue::String(text) => text.as_bytes(),
+                    _ => return None,
+                };
+                let fields = ProtoReader::new(bytes).parse_all_strict()?;
+                let first = |tag| fields.get(&tag)?.first();
+                Some(GiftItem {
+                    gift_id: first(1)?.as_u64()?,
+                    giftname: first(2)?.as_str()?.to_owned(),
+                    num: u32::try_from(first(3)?.as_u64()?).ok()?,
+                    price: first(5).and_then(ProtoValue::as_u64),
+                    total_coin: first(7).and_then(ProtoValue::as_u64),
+                    tid: first(9).and_then(ProtoValue::as_str).map(str::to_owned),
+                })
+            })
+            .collect();
+        (!items.is_empty()).then(|| json!({"uid": uid, "username": name, "items": items}))
+    }
+
     /// Parse DANMU_MSG.
-    fn parse_danmu_msg(json: &Value) -> Option<DanmakuEvent> {
+    fn parse_danmu_msg(json: &Value, extra: &Value) -> Option<DanmakuEvent> {
         let info = json.get("info")?.as_array()?;
 
         // info[1] = content
-        let content = info.get(1)?.as_str()?.to_string();
+        let content = info.get(1)?.as_str()?;
 
         // info[2][0] = uid, info[2][1] = name
         let user_info = info.get(2)?.as_array()?;
@@ -440,27 +627,12 @@ impl Bilibili {
             .map(|c| c as u32)
             .unwrap_or(DEFAULT_COLOR);
 
-        // Check for emoticon
-        let content = if let Some(extra_obj) = meta.get(15) {
-            if let Some(extra_str) = extra_obj.get("extra").and_then(|v| v.as_str()) {
-                if let Ok(extra) = serde_json::from_str::<Value>(extra_str) {
-                    if let Some(emoticon) = extra.get("emoticon_unique").and_then(|v| v.as_str()) {
-                        if !emoticon.is_empty() {
-                            format!("表情【{}】", emoticon)
-                        } else {
-                            content
-                        }
-                    } else {
-                        content
-                    }
-                } else {
-                    content
-                }
-            } else {
-                content
-            }
-        } else {
-            content
+        let content = match extra["emoticon_unique"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+        {
+            Some(id) => format!("表情【{id}】"),
+            None => content.to_owned(),
         };
 
         let mut chat = ChatMessage::new(content).with_color(color);
@@ -505,7 +677,12 @@ impl Bilibili {
         let name = user_info.get("uname")?.as_str()?.to_string();
         let uid = data.get("uid")?.as_u64()?;
         let content = data.get("message")?.as_str()?.to_string();
-        let price = data.get("price").and_then(|v| v.as_u64()).unwrap_or(0) * 1000;
+        // Preserve the legacy XML price attribute. The detail field uses the source value.
+        let price = data
+            .get("price")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+            .saturating_mul(1000);
 
         Some(DanmakuEvent::SuperChat(SuperChatMessage {
             name,
@@ -522,7 +699,16 @@ impl Bilibili {
 
         let name = data.get("username")?.as_str()?.to_string();
         let uid = data.get("uid")?.as_u64()?;
-        let gift_name = data.get("gift_name")?.as_str()?.to_string();
+        let gift_name = data["gift_name"]
+            .as_str()
+            .filter(|name| !name.is_empty())
+            .or(match data["guard_level"].as_u64() {
+                Some(1) => Some("总督"),
+                Some(2) => Some("提督"),
+                Some(3) => Some("舰长"),
+                _ => None,
+            })?
+            .to_owned();
         let price = data.get("price").and_then(|v| v.as_u64()).unwrap_or(0);
         let num = data.get("num").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
 
@@ -601,14 +787,51 @@ impl Platform for Bilibili {
     }
 
     fn decode_message(&self, msg: &[u8]) -> Result<DecodeResult> {
-        let packets = Self::decode_packet(msg);
-        let mut events = Vec::new();
+        let events = Self::decode_notifications(msg, false, false)?
+            .into_iter()
+            .filter_map(|notification| notification.event)
+            .collect();
+        Ok(DecodeResult::with_events(events))
+    }
 
-        for packet in packets {
+    fn decode_recording_message(
+        &self,
+        msg: &[u8],
+        save_detail: bool,
+        save_raw: bool,
+    ) -> Result<RecordingDecodeResult> {
+        let mut notifications = Self::decode_notifications(msg, save_detail, save_raw)?;
+        for notification in &mut notifications {
+            if let Some(("super_chat", detail)) = &notification.detail
+                && let Some(id) = detail["id"].as_u64().filter(|&id| id != 0)
+                && !self.super_chat_ids.lock().unwrap().insert(id)
+            {
+                // JP and ordinary notifications can refer to the same SC.
+                notification.event = None;
+                notification.detail = None;
+            }
+        }
+        Ok(RecordingDecodeResult {
+            decoded: DecodeResult::empty(),
+            notifications,
+        })
+    }
+}
+
+impl Bilibili {
+    fn decode_notifications(
+        msg: &[u8],
+        save_detail: bool,
+        save_raw: bool,
+    ) -> Result<Vec<Notification>> {
+        let mut notifications = Vec::new();
+        for packet in Self::decode_packet(msg) {
             match packet.operation {
                 op::NOTIFICATION => {
-                    if let Some(event) = Self::parse_notification(&packet.body) {
-                        events.push(event);
+                    if let Some(notification) =
+                        Self::parse_notification(&packet.body, save_detail, save_raw)
+                    {
+                        notifications.push(notification);
                     }
                 }
                 op::HEARTBEAT_REPLY => {
@@ -637,7 +860,7 @@ impl Platform for Bilibili {
             }
         }
 
-        Ok(DecodeResult::with_events(events))
+        Ok(notifications)
     }
 }
 
@@ -698,6 +921,227 @@ fn generate_fake_buvid3() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_writes_one_xml_row_per_bilibili_notification() {
+        use crate::codec::protobuf::ProtoWriter;
+        use crate::output::xml::{XmlWriter, XmlWriterConfig};
+        use quick_xml::{Reader, events::Event};
+
+        let mut batch = ProtoWriter::new();
+        batch.write_varint_field(1, 123);
+        batch.write_string(2, "sender");
+        for (gift_id, name, count, tid) in [(1, "first", 1, "tid-1"), (2, "second", 3, "tid-2")] {
+            let mut item = ProtoWriter::new();
+            item.write_varint_field(1, gift_id);
+            item.write_string(2, name);
+            item.write_varint_field(3, count);
+            if gift_id == 2 {
+                item.write_varint_field(5, 1000);
+                item.write_varint_field(7, 3000);
+            }
+            item.write_string(9, tid);
+            batch.write_bytes(10, &item.into_buffer());
+        }
+        batch.write_varint_field(11, 1);
+        let v2 =
+            json!({"cmd": "SEND_GIFT_V2", "data": {"pb": STANDARD.encode(batch.into_buffer())}})
+                .to_string();
+        let chat = "{\r\n\"cmd\":\"DANMU_MSG:1\",\"info\":[[0,4,18,16777215,1795151935316],\"A & B\\nsecond line\",[123,\"sender\",1,0],[],[],[],[],3]}";
+        let gift = r#"{"cmd":"SEND_GIFT","data":{"uid":123,"uname":"sender","giftName":"rose & star","num":3,"price":200,"total_coin":600,"tid":"classic"}}"#;
+        let sc = r#"{"cmd":"SUPER_CHAT_MESSAGE_JP","data":{"id":42,"user_info":{"uname":"sender"},"uid":123,"message":"hello","price":30,"time":60}}"#;
+        let guard = r#"{"cmd":"GUARD_BUY","data":{"username":"sender","uid":123,"guard_level":3,"num":1,"price":138000}}"#;
+        let follow = r#"{"cmd":"INTERACT_WORD","data":{"msg_type":2,"uid":123,"uname":"sender"}}"#;
+        let cutoff = r#"{"cmd":"CUT_OFF","msg":"offline","roomid":456}"#;
+        let combo = r#"{"cmd":"COMBO_SEND","data":{"total_num":18}}"#;
+        let bad_v2 = r#"{"cmd":"SEND_GIFT_V2","data":{"pb":"not base64"}}"#;
+        let duplicate_sc = sc.replace("SUPER_CHAT_MESSAGE_JP", "SUPER_CHAT_MESSAGE");
+        let room_url = "https://i0.hdslb.com/bfs/live/room.png?width=80&height=80";
+        let cat_url = "https://i0.hdslb.com/bfs/live/cat.png";
+        let dog_url = "https://i0.hdslb.com/bfs/live/dog.png";
+        let emoji_chat = |image: Value, extra: Value, text: &str| {
+            let mut meta = vec![Value::Null; 16];
+            meta[13] = image;
+            meta[15] = json!({"extra": extra.to_string()});
+            json!({"cmd": "DANMU_MSG", "info": [meta, text, [123, "sender"]]}).to_string()
+        };
+        let room_emoji = emoji_chat(
+            json!({"url": room_url}),
+            json!({"emoticon_unique": "room_emoji"}),
+            "room emoji",
+        );
+        let inline_emoji = emoji_chat(
+            Value::Null,
+            json!({"emots": {"[cat]": {"url": cat_url}, "[dog]": {"url": dog_url}, "[empty]": {"url": ""}}}),
+            "A [cat] and a [dog]",
+        );
+        let messages = [
+            chat,
+            &v2,
+            gift,
+            sc,
+            guard,
+            follow,
+            cutoff,
+            combo,
+            bad_v2,
+            &duplicate_sc,
+            &room_emoji,
+            &inline_emoji,
+        ];
+        let mut frame: Vec<u8> = messages
+            .iter()
+            .flat_map(|body| build_packet(body.as_bytes(), op::NOTIFICATION))
+            .collect();
+        frame.extend(build_packet(br#"{"code":0}"#, op::AUTH_REPLY));
+
+        let dir = std::env::temp_dir().join(format!(
+            "bilibili-notifications-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        for (detail, raw, expected) in [
+            (false, false, "ddd"),
+            (false, true, "dooooooooodd"),
+            (true, false, "dssssssdd"),
+            (true, true, concat!("d", "ssssss", "ooo", "dd")),
+        ] {
+            let mut writer = XmlWriter::new(
+                dir.join(format!("{detail}-{raw}.xml")),
+                XmlWriterConfig {
+                    save_detail: detail,
+                    save_raw: raw,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let decoded = Bilibili::new()
+                .decode_recording_message(&frame, detail, raw)
+                .unwrap();
+            for notification in &decoded.notifications {
+                writer.write_bilibili_notification(notification).unwrap();
+            }
+            assert_eq!(writer.message_count() as usize, expected.len());
+            let xml = std::fs::read_to_string(writer.finish().unwrap()).unwrap();
+            assert!(xml.starts_with("<?xml version=\"1.0\" encoding=\"UTF-8\"?><i "));
+            assert_eq!(xml.lines().count(), expected.len() + 2);
+
+            let mut reader = Reader::from_str(&xml);
+            let (items, rows): (Vec<_>, Vec<_>) =
+                std::iter::from_fn(|| match reader.read_event().unwrap() {
+                    Event::Eof => None,
+                    event => Some(event),
+                })
+                .filter_map(|event| match event {
+                    Event::Start(elem) | Event::Empty(elem) if elem.name().as_ref() != b"i" => {
+                        let tag = std::str::from_utf8(elem.name().as_ref())
+                            .unwrap()
+                            .to_owned();
+                        let attrs: BTreeMap<_, _> = elem
+                            .attributes()
+                            .map(|attr| {
+                                let attr = attr.unwrap();
+                                (
+                                    std::str::from_utf8(attr.key.as_ref()).unwrap().to_owned(),
+                                    attr.unescape_value().unwrap().into_owned(),
+                                )
+                            })
+                            .collect();
+                        Some((tag, attrs))
+                    }
+                    _ => None,
+                })
+                .partition(|(tag, _)| tag == "item");
+            assert_eq!(
+                rows.iter().map(|(tag, _)| tag.as_str()).collect::<String>(),
+                expected
+            );
+            let (_, fields) = rows[0].1["p"].split_once(',').unwrap();
+            assert_eq!(fields, "4,18,16777215,1795151935316,0,123,0");
+            assert!(xml.contains("A &amp; B&#10;second line</d>"));
+            assert!(xml.contains("表情【room_emoji】</d>"));
+            assert!(xml.contains("A [cat] and a [dog]</d>"));
+            assert!(!rows[0].1.contains_key("emoji_url"));
+            let room = &rows[rows.len() - 2].1;
+            let inline = &rows[rows.len() - 1].1;
+            assert_eq!(
+                room.get("emoji_url").map(String::as_str),
+                detail.then_some(room_url)
+            );
+            for (key, value) in [
+                ("emoji_1_text", "[cat]"),
+                ("emoji_1_url", cat_url),
+                ("emoji_2_text", "[dog]"),
+                ("emoji_2_url", dog_url),
+            ] {
+                assert_eq!(inline.get(key).map(String::as_str), detail.then_some(value));
+            }
+            assert!(!inline.contains_key("emoji_3_url"));
+            for (_, attrs) in &rows {
+                assert_eq!(attrs.contains_key("raw"), raw);
+                assert!(!attrs.contains_key("detail"));
+            }
+            if raw {
+                for ((_, attrs), body) in rows.iter().zip(messages) {
+                    assert_eq!(attrs["raw"], body);
+                }
+            }
+            if detail {
+                let chat = &rows[0].1;
+                assert_eq!(chat["user"], "sender");
+                assert_eq!(chat["timestamp"], "1795151935316");
+                assert_eq!(chat["is_admin"], "true");
+                assert_eq!(chat["is_vip"], "false");
+                assert_eq!(chat["guard_level"], "3");
+                assert_eq!(rows[1].1["username"], "sender");
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0].1["tid"], "tid-1");
+                assert!(!items[0].1.contains_key("price"));
+                assert!(!items[0].1.contains_key("total_coin"));
+                assert_eq!(items[1].1["giftname"], "second");
+                assert_eq!(items[1].1["num"], "3");
+                assert_eq!(items[1].1["tid"], "tid-2");
+                assert_eq!(items[1].1["price"], "1000");
+                assert_eq!(items[1].1["total_coin"], "3000");
+                let gift = &rows[2].1;
+                assert_eq!(gift["giftname"], "rose & star");
+                assert_eq!(gift["price"], "200");
+                assert_eq!(gift["total_coin"], "600");
+                assert_eq!(gift["tid"], "classic");
+                let sc = &rows[3].1;
+                assert_eq!(sc["id"], "42");
+                assert_eq!(sc["original_price"], "30");
+                assert_eq!(sc["time"], "60");
+                assert_eq!(sc["price"], "30000");
+                assert_eq!(rows[4].1["level"], "3");
+                assert_eq!(rows[4].1["price"], "138000");
+                assert_eq!(rows[5].1["action"], "follow");
+                assert_eq!(rows[5].1["username"], "sender");
+                assert_eq!(rows[6].1["type"], "room_status");
+                assert_eq!(rows[6].1["room_id"], "456");
+                assert_eq!(rows[6].1["message"], "offline");
+            } else {
+                assert!(items.is_empty());
+                assert!(!rows[0].1.contains_key("is_admin"));
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn chat_without_millisecond_send_time_uses_millisecond_receive_time() {
+        for meta in [json!([0, 5, 36, 16777215, 1795151935]), json!([0, 5, 36])] {
+            let body = json!({"cmd": "DANMU_MSG", "info": [meta, "text", [123, "sender"]]});
+            let notification =
+                Bilibili::parse_notification(body.to_string().as_bytes(), false, false).unwrap();
+            let Some(DanmakuEvent::Chat(chat)) = notification.event else {
+                panic!("expected a chat message");
+            };
+            let format = notification.chat_metadata.unwrap();
+            assert_eq!((format.mode, format.size), (5, 36));
+            assert_eq!(format.timestamp_ms, chat.timestamp.timestamp_millis());
+        }
+    }
 
     #[test]
     fn auth_identity_uses_the_same_cookie_as_token_headers() {
@@ -826,7 +1270,7 @@ mod tests {
             ]
         });
 
-        let event = Bilibili::parse_danmu_msg(&json);
+        let event = Bilibili::parse_danmu_msg(&json, &Value::Null);
         assert!(event.is_some());
 
         if let Some(DanmakuEvent::Chat(chat)) = event {

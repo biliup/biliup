@@ -175,6 +175,12 @@ impl DecodeResult {
     }
 }
 
+#[doc(hidden)]
+pub struct RecordingDecodeResult {
+    pub(crate) decoded: DecodeResult,
+    pub(crate) notifications: Vec<bilibili::Notification>,
+}
+
 /// Platform-specific context for connecting.
 #[derive(Debug, Clone, Default)]
 pub struct PlatformContext {
@@ -238,6 +244,19 @@ pub trait Platform: Send + Sync {
     /// For text-based protocols, `msg` contains UTF-8 text.
     /// For binary protocols, `msg` contains raw bytes.
     fn decode_message(&self, msg: &[u8]) -> Result<DecodeResult>;
+
+    #[doc(hidden)]
+    fn decode_recording_message(
+        &self,
+        msg: &[u8],
+        _save_detail: bool,
+        _save_raw: bool,
+    ) -> Result<RecordingDecodeResult> {
+        Ok(RecordingDecodeResult {
+            decoded: self.decode_message(msg)?,
+            notifications: Vec::new(),
+        })
+    }
 
     /// Whether this platform uses text-based WebSocket messages.
     ///

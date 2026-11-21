@@ -54,6 +54,15 @@ fn attributes(start: &BytesStart<'_>) -> Result<Vec<(Vec<u8>, String)>, String> 
         .collect()
 }
 
+pub(crate) fn xml_timestamp_ms(unix: i64) -> Option<i64> {
+    // Main-site XML uses seconds. Live recordings can keep the packet's milliseconds.
+    if unix >= 1_000_000_000_000 {
+        Some(unix)
+    } else {
+        unix.checked_mul(1000).filter(|ms| *ms >= 0)
+    }
+}
+
 fn comment(attrs: &[(Vec<u8>, String)]) -> Result<XmlComment, String> {
     let p = attrs
         .iter()
@@ -94,9 +103,7 @@ fn comment(attrs: &[(Vec<u8>, String)]) -> Result<XmlComment, String> {
                 .trim()
                 .parse::<i64>()
                 .map_err(|_| "弹幕 XML 的 Unix 时间无效")?;
-            unix.checked_mul(1000)
-                .filter(|n| *n >= 0)
-                .ok_or("弹幕 XML 的 Unix 时间超出范围")
+            xml_timestamp_ms(unix).ok_or("弹幕 XML 的 Unix 时间超出范围")
         })
         .transpose()?;
     Ok(XmlComment {

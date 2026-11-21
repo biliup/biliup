@@ -39,7 +39,7 @@ fn parses_comments_and_paid_events() {
     let texts: Vec<&str> = parsed.comments.iter().map(|c| c.2.as_str()).collect();
     assert_eq!(texts, vec!["第一条", "a & b <3", "最后"]);
     assert_eq!(parsed.comments[0].0, 1.5);
-    assert_eq!(parsed.comments[0].1, Some(CREATED + 1));
+    assert_eq!(parsed.comments[0].1, Some((CREATED + 1) * 1000));
     assert_eq!(parsed.paid, vec![(CREATED + 4, 30.0), (CREATED + 5, 5.0)]);
     // Unix 秒是截断的，推出来的创建时刻最多早 1 秒
     let created = parsed.created_at_ms().unwrap();
@@ -60,6 +60,28 @@ fn a_half_written_file_keeps_what_was_read() {
     assert_eq!(parsed.comments[0].2, "ok");
     assert!(parse_xml(b"").comments.is_empty());
     assert!(parse_xml(b"not xml at all").comments.is_empty());
+}
+
+#[test]
+fn millisecond_comments_use_the_recorded_origin_for_paid_events() {
+    let origin = CREATED * 1000 + 200;
+    let sent = CREATED * 1000 + 1_075;
+    let xml = format!(
+        "<i recording_start_time_ms=\"{origin}\"><d p=\"1.500,4,18,16777215,{sent},0,42,0\">a</d>{}</i>",
+        s(CREATED + 4, 30.0)
+    );
+    let parsed = parse_xml(xml.as_bytes());
+    assert_eq!(parsed.created_at_ms(), Some(origin));
+    let (comments, paid) = align(&parsed, Alignment::Segment { start_ms: 60_000 });
+    assert_eq!(comments[0].at_ms, 61_500);
+    assert_eq!(paid[0].at_ms, 63_800);
+    let (comments, _) = align(
+        &parsed,
+        Alignment::Wallclock {
+            started_at: (CREATED - 30) * 1000,
+        },
+    );
+    assert_eq!(comments[0].at_ms, 31_075);
 }
 
 #[test]
