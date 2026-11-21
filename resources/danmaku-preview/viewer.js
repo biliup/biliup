@@ -235,16 +235,30 @@
     return image;
   }
 
-  function drawEmotes(cell, content, raw) {
-    if (!raw) return;
-    const packet = json(raw);
-    const meta = (Array.isArray(packet) ? packet : packet?.info)?.[0];
-    const extra = json(meta?.[15]?.extra);
-    const emote = meta?.[13]?.url || extra?.emoticon?.url || packet?.data?.emoji_img_url;
+  function drawEmotes(cell, content, { node, raw }) {
+    let emote = node.getAttribute('emoji_url');
+    let images;
+    if (!emote && node.hasAttribute('emoji_1_text')) {
+      images = new Map();
+      for (let index = 1; ; index++) {
+        const text = node.getAttribute(`emoji_${index}_text`);
+        if (!text) break;
+        images.set(text, node.getAttribute(`emoji_${index}_url`));
+      }
+    }
+    if (!emote && !images?.size && raw) {
+      const packet = json(raw);
+      const meta = (Array.isArray(packet) ? packet : packet?.info)?.[0];
+      const extra = json(meta?.[15]?.extra);
+      emote = meta?.[13]?.url || extra?.emoticon?.url || packet?.data?.emoji_img_url;
+      if (!emote && extra?.emots) {
+        images = new Map(Object.entries(extra.emots).map(([text, image]) => [text, image?.url]));
+      }
+    }
     if (emote) {
       cell.replaceChildren(emoteNode(emote, content));
-    } else if (extra?.emots) {
-      cell.replaceChildren(...content.split(/(\[[^\]]+\])/).map(part => emoteNode(extra.emots[part]?.url, part)));
+    } else if (images?.size) {
+      cell.replaceChildren(...content.split(/(\[[^\]]+\])/).map(part => emoteNode(images.get(part), part)));
     }
   }
 
@@ -267,7 +281,7 @@
         sender.textContent = event.user;
         row.cells[2].replaceChildren(sender);
       }
-      if (event.type === 'chat') drawEmotes(row.cells[3], content, event.raw);
+      if (event.type === 'chat') drawEmotes(row.cells[3], content, event);
       if (event.time !== null) row.cells[0].title = timestamp(event.time, true);
 
       const detailCell = row.insertCell();
