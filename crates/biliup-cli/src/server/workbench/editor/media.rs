@@ -93,13 +93,12 @@ pub async fn registered(
     Ok((entry, source))
 }
 
-/// Source browsing does not create an editing project. Membership is checked against the
-/// source/group timeline, so a segment ID from another session cannot be used here.
-pub async fn session_source(
+/// Resolve only segments belonging to the requested source or group timeline.
+async fn session_segment(
     pool: &ConnectionPool,
     session: i64,
     media: &str,
-) -> Result<(PathBuf, RecordingSource), Error> {
+) -> Result<(store::SegmentRow, i64), Error> {
     let segment_id = media
         .rsplit('-')
         .next()
@@ -113,12 +112,38 @@ pub async fn session_source(
         .into_iter()
         .find(|member| member.source_session_id == segment.session_id)
         .ok_or(Error::NotFound)?;
-    if media != format!("recording-{}-{}", segment.session_id, segment.id)
-        || matches!(
-            segment.state,
-            store::SegmentState::Missing | store::SegmentState::Deleted
-        )
-    {
+    if media != format!("recording-{}-{}", segment.session_id, segment.id) {
+        return Err(Error::NotFound);
+    }
+    Ok((segment, member.offset_ms))
+}
+
+pub async fn session_danmaku(
+    pool: &ConnectionPool,
+    session: i64,
+    media: &str,
+) -> Result<(PathBuf, String), Error> {
+    let (segment, _) = session_segment(pool, session, media).await?;
+    let path = crate::server::workbench::preview_danmaku_path(&segment)
+        .await
+        .ok_or(Error::NotFound)?;
+    let url = sqlx::query_scalar("SELECT url FROM stream_sessions WHERE id = ?")
+        .bind(segment.session_id)
+        .fetch_one(pool)
+        .await?;
+    Ok((path, url))
+}
+
+pub async fn session_source(
+    pool: &ConnectionPool,
+    session: i64,
+    media: &str,
+) -> Result<(PathBuf, RecordingSource), Error> {
+    let (segment, offset_ms) = session_segment(pool, session, media).await?;
+    if matches!(
+        segment.state,
+        store::SegmentState::Missing | store::SegmentState::Deleted
+    ) {
         return Err(Error::NotFound);
     }
     let path = PathBuf::from(&segment.path);
@@ -142,9 +167,9 @@ pub async fn session_source(
     let source = RecordingSource {
         kind: "recording".into(),
         session_id: segment.session_id,
-        segment_id,
+        segment_id: segment.id,
         view_session_id: session,
-        view_start_ms: segment.start_ms + member.offset_ms,
+        view_start_ms: segment.start_ms + offset_ms,
         source_start_ms: segment.start_ms,
         duration_ms: duration,
         file_name: path

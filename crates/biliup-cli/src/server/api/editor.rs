@@ -1,11 +1,12 @@
 //! Saved editing projects use the same authentication/permissions as the workbench.
+use crate::server::core::download_manager::DownloadManager;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::editor::{self, Document, Error};
 use crate::server::workbench::renders::jobs::RenderJobs;
 use axum::{
     Json,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use serde::Deserialize;
@@ -999,12 +1000,28 @@ pub async fn media(
 pub async fn session_media(
     State(pool): State<ConnectionPool>,
     State(jobs): State<std::sync::Arc<crate::server::workbench::renders::jobs::RenderJobs>>,
+    State(managers): State<Arc<DownloadManager>>,
     Path((id, media, kind)): Path<(i64, String, String)>,
     request: axum::extract::Request,
 ) -> Response {
     let _lifecycle = crate::server::workbench::retention::MEDIA_LIFECYCLE
         .read()
         .await;
+    if kind == "danmaku" {
+        return match editor::media::session_danmaku(&pool, id, &media).await {
+            Ok((path, url)) => {
+                let platform = managers
+                    .plugin_for(&url)
+                    .await
+                    .map_or("", |plugin| plugin.name());
+                serve_danmaku(&path, platform).await
+            }
+            Err(Error::NotFound) => {
+                (StatusCode::NOT_FOUND, "找不到该分段的弹幕文件").into_response()
+            }
+            Err(error) => response::<()>(Err(error)),
+        };
+    }
     match editor::media::session_source(&pool, id, &media).await {
         Ok((path, source)) if kind == "probe" => {
             let source = editor::MediaSource::Recording(source);
@@ -1038,6 +1055,145 @@ pub async fn session_media(
         }
         Err(error) => response::<()>(Err(error)),
     }
+}
+
+async fn serve_danmaku(path: &std::path::Path, platform: &str) -> Response {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use sha2::{Digest, Sha256};
+
+    let source = match tokio::fs::read_to_string(path).await {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return (StatusCode::NOT_FOUND, "找不到该分段的弹幕文件").into_response();
+        }
+        Err(error) => {
+            tracing::warn!(%error, "读取弹幕文件失败");
+            return (StatusCode::UNPROCESSABLE_ENTITY, "无法读取弹幕文件").into_response();
+        }
+    };
+    let keys = r#"
+document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || event.defaultPrevented) return;
+    event.preventDefault();
+    parent.postMessage("biliup:close-danmaku-preview", "*");
+});
+"#;
+    let keys_xml =
+        format!("<h:script xmlns:h=\"http://www.w3.org/1999/xhtml\"><![CDATA[{keys}]]></h:script>");
+    let (body, scripts) = if let Some(loader) = embedded_danmaku_loader(&source) {
+        // Authorize this file's viewer and the modal keyboard handler.
+        let loader_hash = STANDARD.encode(Sha256::digest(loader));
+        let keys_hash = STANDARD.encode(Sha256::digest(keys));
+        let mut source = source;
+        let closing_tag = source.trim_end().len() - "</i>".len();
+        source.insert_str(closing_tag, &keys_xml);
+        (
+            source.into_bytes(),
+            format!("'sha256-{loader_hash}' 'sha256-{keys_hash}' 'strict-dynamic'"),
+        )
+    } else {
+        (
+            temporary_danmaku_preview(&source, platform, &keys_xml),
+            "'unsafe-inline'".into(),
+        )
+    };
+    let policy = format!(
+        "sandbox allow-scripts; default-src 'none'; script-src {scripts}; style-src 'unsafe-inline'; img-src https://hdslb.com https://*.hdslb.com https://biliimg.com https://*.biliimg.com"
+    );
+    (
+        [
+            (header::CONTENT_TYPE, "application/xml; charset=utf-8"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CACHE_CONTROL, "private, no-store"),
+        ],
+        [(header::CONTENT_SECURITY_POLICY, policy)],
+        body,
+    )
+        .into_response()
+}
+
+fn embedded_danmaku_loader(source: &str) -> Option<&str> {
+    fn loader(fragment: &str) -> Option<&str> {
+        let (_, fragment) = fragment.rsplit_once("<!-- biliup-danmaku-preview:")?;
+        let (version, fragment) = fragment.split_once(" -->")?;
+        if version.len() != 16 || !version.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return None;
+        }
+        fragment
+            .split_once("<h:script xmlns:h=\"http://www.w3.org/1999/xhtml\"><![CDATA[")?
+            .1
+            .trim_end()
+            .strip_suffix("]]></h:script>")
+    }
+
+    // The minifier can rename locals when the encoded payload changes.
+    fn signature(code: &str) -> String {
+        let separator = |ch: char| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '$';
+        let mut names = std::collections::HashMap::new();
+        let mut result = String::with_capacity(code.len());
+        for token in code.split_inclusive(separator) {
+            let name = token.trim_end_matches(separator);
+            if name.len() == 1 && name.as_bytes()[0].is_ascii_alphabetic() {
+                let next = names.len();
+                let index = names.entry(name).or_insert(next);
+                result.push('_');
+                result.push_str(&index.to_string());
+                result.push_str(&token[name.len()..]);
+            } else {
+                result.push_str(token);
+            }
+        }
+        result
+    }
+
+    let source = loader(source.trim_end().strip_suffix("</i>")?)?;
+    let template = std::str::from_utf8(crate::server::core::live::DANMAKU_PREVIEW_XML).ok()?;
+    let (expected, _) = loader(template)?.rsplit_once("(\"H4sI")?;
+    let (actual, payload) = source.rsplit_once("(\"H4sI")?;
+    if signature(expected) != signature(actual) {
+        return None;
+    }
+    payload
+        .strip_suffix("\");")?
+        .trim_end_matches('=')
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/'))
+        .then_some(source)
+}
+
+#[cfg(test)]
+#[test]
+fn recognizes_only_the_biliup_danmaku_loader() {
+    let fragment = std::str::from_utf8(crate::server::core::live::DANMAKU_PREVIEW_XML).unwrap();
+    let source = format!("<i><d>test</d>{fragment}</i>\n");
+    let loader = embedded_danmaku_loader(&source).unwrap();
+    assert!(source.contains(loader));
+    assert!(embedded_danmaku_loader("<i><d>test</d></i>").is_none());
+    let changed_loader = source.replace("DecompressionStream", "differentLoader");
+    assert!(embedded_danmaku_loader(&changed_loader).is_none());
+}
+
+fn temporary_danmaku_preview(source: &str, platform: &str, keys_xml: &str) -> Vec<u8> {
+    let preview = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../build/danmaku-preview-app.xml"
+    ));
+    // Keep unrecognized XML markup inert.
+    let mut body = Vec::with_capacity(source.len() + preview.len() + keys_xml.len() + 80);
+    body.extend_from_slice(b"<i><biliup-source platform=\"");
+    body.extend_from_slice(quick_xml::escape::escape(platform).as_bytes());
+    body.extend_from_slice(b"\"><![CDATA[");
+    for (index, chunk) in source.split("]]>").enumerate() {
+        if index > 0 {
+            body.extend_from_slice(b"]]]]><![CDATA[>");
+        }
+        body.extend_from_slice(chunk.as_bytes());
+    }
+    body.extend_from_slice(b"]]></biliup-source>");
+    body.extend_from_slice(preview);
+    body.extend_from_slice(keys_xml.as_bytes());
+    body.extend_from_slice(b"</i>");
+    body
 }
 
 async fn serve_media(

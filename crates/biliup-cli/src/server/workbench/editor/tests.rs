@@ -471,11 +471,37 @@ async fn source_view_uses_session_membership_without_creating_projects() {
             .view_start_ms,
         5000
     );
+    assert!(matches!(
+        media::session_danmaku(&pool, session, media).await,
+        Err(Error::NotFound)
+    ));
+    let xml = path.with_extension("xml");
+    std::fs::write(&xml, "<i/>").unwrap();
+    assert_eq!(
+        media::session_danmaku(&pool, group, media).await.unwrap(),
+        (xml, "https://test".to_string())
+    );
+    let registered = path.with_file_name("registered.xml");
+    std::fs::write(&registered, "<i/>").unwrap();
+    sqlx::query("UPDATE segments SET danmaku_path=? WHERE id=?")
+        .bind(registered.to_string_lossy().as_ref())
+        .bind(source.segment_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        media::session_danmaku(&pool, group, media).await.unwrap(),
+        (registered, "https://test".to_string())
+    );
+    assert!(matches!(
+        media::session_danmaku(&pool, group + 100, media).await,
+        Err(Error::NotFound)
+    ));
     assert_eq!(
         required_permission(
             &axum::http::Method::GET,
             "/v1/editor/sessions/{id}/media/{media}/{kind}",
-            "/v1/editor/sessions/1/media/recording-1-1/file"
+            "/v1/editor/sessions/1/media/recording-1-1/danmaku"
         ),
         Some(Permission::FileView)
     );

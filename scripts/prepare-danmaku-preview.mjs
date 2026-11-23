@@ -7,11 +7,8 @@ const into = file => new URL(file, import.meta.url)
 const read = file => readFileSync(into(file), 'utf8').replace(/\r\n/g, '\n')
 const js = read('../resources/danmaku-preview/viewer.js')
 const css = read('../resources/danmaku-preview/viewer.css')
-const revision = createHash('sha256')
-  .update(JSON.stringify([version, read(import.meta.url), js, css]))
-  .digest('hex').slice(0, 16)
-const header = '\n\t<!-- biliup-danmaku-preview:' + revision + ' -->\n'
-const file = into('../build/danmaku-preview.xml')
+const standaloneJs = js.replace(/^[ \t]*\/\* In-app only \*\/\n[\s\S]*?^[ \t]*\/\* End in-app only \*\/\n/gm, '')
+const standaloneCss = css.split('\n/* In-app preview */\n', 1)[0]
 const fallback = 'i{display:block;color-scheme:light dark;font:14px system-ui,sans-serif}i>d{display:block}i>d::before{content:attr(p) "  "}'
 
 async function loadPreview(encoded) {
@@ -25,10 +22,19 @@ async function loadPreview(encoded) {
   }
 }
 
-// Reuse the build artifact when the source and generator are unchanged.
-if (!existsSync(file) || !readFileSync(file, 'utf8').startsWith(header)) {
+// Strip app-only code before compressing the fragment embedded in recordings.
+for (const inApp of [false, true]) {
+  const code = (inApp ? js : standaloneJs).replace('__DANMAKU_DATA__', inApp ? 'data' : 'root')
+  const styles = inApp ? css : standaloneCss
+  const file = into(inApp ? '../build/danmaku-preview-app.xml' : '../build/danmaku-preview.xml')
+  const revision = createHash('sha256')
+    .update(JSON.stringify([version, read(import.meta.url), inApp, code, styles]))
+    .digest('hex').slice(0, 16)
+  const header = '\n\t<!-- biliup-danmaku-preview:' + revision + ' -->\n'
+  if (existsSync(file) && readFileSync(file, 'utf8').startsWith(header)) continue
+
   const minify = (source, loader) => transformSync(source, { loader, minify: true }).code.trimEnd()
-  const bundle = JSON.stringify([minify(css, 'css'), minify(js, 'js')])
+  const bundle = JSON.stringify([minify(styles, 'css'), minify(code, 'js')])
   const payload = gzipSync(bundle, { level: 9 }).toString('base64')
   const loader = minify('(' + loadPreview + ')(' + JSON.stringify(payload) + ')', 'js')
   const tag = (name, text) =>

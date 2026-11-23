@@ -14,7 +14,7 @@ import { type AutoClipAvailability, useAutoClip, useSessionJob } from '@/app/lib
 import { JobCell } from '@/app/ui/auto-clip/AutoClipJob'
 import { useMe } from '@/app/lib/use-me'
 import { ReportedError } from '@/app/lib/markers'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Filter from './Filter'
 import { useIsMobile } from '../../lib/useIsMobile'
 import dc from '@/app/ui/data-card.module.scss'
@@ -281,7 +281,8 @@ function TextForGroup() {
 // 展开子行:该次直播的录制文件列表；有时间轴的场次，能回看的文件可以直接定位到这一段
 const FileLists = ({ record }: { record: SessionSummary }) => {
   const {can}=useMe()
-  const [playing,setPlaying]=useState<SessionDetail['segments'][number]>()
+  const [preview,setPreview]=useState<{ segment: SessionDetail['segments'][number], kind: 'file' | 'danmaku' }>()
+  const closePreview = () => setPreview(undefined)
   const { data: detail, isLoading } = useSWR<SessionDetail>(
     sessionUrl(record.id),
     fetcher,
@@ -306,18 +307,55 @@ const FileLists = ({ record }: { record: SessionSummary }) => {
       {detail.segments.map((segment) => {
         const start = isReadable(segment) ? segment.start_ms : undefined
         const duration = segmentEnd(segment)-segment.start_ms
+        const showDanmaku = segment.has_danmaku && segment.state !== 'deleted'
         return (
           <div key={segment.id} className={styles.recordingFile}>
             <div className={styles.fileIcon}><Film size={21}/></div>
             <div className={styles.fileInfo}><strong>{baseName(segment.file_name)}</strong><div className={styles.fileMeta}><span className={styles.fileFormat}>{segment.container.toUpperCase()}</span>{duration>0&&<span>{formatSpan(duration)}</span>}{segment.bytes!==null&&<span>{formatSize(segment.bytes)}</span>}{segment.state==='recording'&&<span className={styles.fileRecording}>录制中</span>}{!isReadable(segment)&&<span className={styles.fileUnavailable}>{segment.state==='missing'?'文件缺失':'已删除'}</span>}</div></div>
-            {start !== undefined&&<div className={styles.fileActions}><button type="button" className={styles.fileAction} onClick={()=>setPlaying(segment)}><Play size={15}/>播放</button>{can('clip.edit')&&<Link href={replayHref(record.id,start)} className={styles.fileAction}><Scissors size={15}/>剪辑</Link>}</div>}
+            {(start !== undefined || showDanmaku) && <div className={styles.fileActions}>
+              {start !== undefined && <button type="button" className={styles.fileAction} onClick={() => setPreview({ segment, kind: 'file' })}><Play size={15}/>播放</button>}
+              {showDanmaku && <button type="button" className={styles.fileAction} onClick={() => setPreview({ segment, kind: 'danmaku' })}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 5.75h10.5m3.75 0h3.25M6.5 12h15M2.5 18.25h5m4 0h7.25"/>
+                </svg>
+                弹幕
+              </button>}
+              {start !== undefined && can('clip.edit') && <Link href={replayHref(record.id,start)} className={styles.fileAction}><Scissors size={15}/>剪辑</Link>}
+            </div>}
           </div>
         )
       })}
       {!detail.segments.length&&<div className={styles.fileListStatus}>暂无录制文件</div>}
-      {playing&&<GlobalDialog label="播放录像" onClose={()=>setPlaying(undefined)}><section className="modal workspace-output"><header><strong>{baseName(playing.file_name)}</strong><button className="icon-btn" aria-label="关闭" onClick={()=>setPlaying(undefined)}><X/></button></header><Player url={`${API_BASE}/v1/editor/sessions/${record.id}/media/recording-${playing.source_session_id??record.id}-${playing.id}/file`} type={playing.container==='flv'?'flv':playing.container==='ts'?'mpegts':undefined} height="50vh"/></section></GlobalDialog>}
+      {preview && <FilePreview sessionId={record.id} {...preview} onClose={closePreview}/>}
     </div>
   )
+}
+
+function FilePreview({ sessionId, segment, kind, onClose }: {
+  sessionId: number
+  segment: SessionDetail['segments'][number]
+  kind: 'file' | 'danmaku'
+  onClose: () => void
+}) {
+  const url = `${API_BASE}/v1/editor/sessions/${sessionId}/media/recording-${segment.source_session_id??sessionId}-${segment.id}/${kind}`
+  const frame = useRef<HTMLIFrameElement>(null)
+  useEffect(() => {
+    if (kind !== 'danmaku') return
+    const closeOnEscape = (event: MessageEvent) => {
+      const previewWindow = frame.current?.contentWindow
+      if (previewWindow && event.source === previewWindow && event.data === 'biliup:close-danmaku-preview') onClose()
+    }
+    window.addEventListener('message', closeOnEscape)
+    return () => window.removeEventListener('message', closeOnEscape)
+  }, [kind, onClose])
+  return <GlobalDialog label={kind === 'danmaku' ? '弹幕预览' : '播放录像'} onClose={onClose}>
+    <section className="modal workspace-output">
+      <header><strong>{baseName(segment.file_name)}</strong><button className="icon-btn" aria-label="关闭" onClick={onClose}><X/></button></header>
+      {kind === 'danmaku'
+        ? <iframe ref={frame} className={styles.danmakuPreview} title="弹幕预览" src={url} sandbox="allow-scripts"/>
+        : <Player url={url} type={segment.container==='flv'?'flv':segment.container==='ts'?'mpegts':undefined} height="50vh"/>}
+    </section>
+  </GlobalDialog>
 }
 
 const expandRowRender = (record: any) => {

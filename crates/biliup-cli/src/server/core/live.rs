@@ -315,7 +315,7 @@ fn ytdlp_backend(
     }
 }
 
-const DANMAKU_PREVIEW_XML: &[u8] = include_bytes!(concat!(
+pub(crate) const DANMAKU_PREVIEW_XML: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../build/danmaku-preview.xml"
 ));

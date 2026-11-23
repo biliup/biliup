@@ -71,3 +71,15 @@ td img {zoom:25%;margin:0 .2em;vertical-align:middle}
 summary {color:var(--muted);cursor:pointer}
 pre {max-width:38rem;white-space:pre-wrap;overflow-wrap:anywhere}
 nav {display:flex;align-items:center;justify-content:center;gap:.8rem;margin-top:1rem}
+
+/* In-app preview */
+.preview-notice {display:flex;align-items:center;gap:12px;padding:12px;margin:0 0 16px;
+border-radius:4px;background:var(--tint);color:var(--ink);line-height:20px}
+.preview-notice.warning {background:light-dark(#fff8ea,rgb(255 174 67 / 20%))}
+.preview-notice svg {width:20px;height:20px;flex:none;color:var(--primary)}
+.preview-notice.warning svg {color:light-dark(#fc8800,#ffae43)}
+[data-hide-columns~="type"] :is(th,td):nth-child(2),
+[data-hide-columns~="sender"] :is(th,td):nth-child(3),
+[data-hide-columns~="quantity"] :is(th,td):nth-child(5),
+[data-hide-columns~="amount"] :is(th,td):nth-child(6) {display:none}
+[data-hide-columns] th:first-child {width:8rem}

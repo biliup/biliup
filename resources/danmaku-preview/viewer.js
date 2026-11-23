@@ -1,7 +1,21 @@
 (() => {
   const root = document.documentElement;
   const create = tag => document.createElementNS('http://www.w3.org/1999/xhtml', tag);
+  /* In-app only */
+  const source = root.querySelector(':scope > biliup-source');
+  const data = new DOMParser().parseFromString(source.textContent, 'application/xml').documentElement;
+  const platform = source.getAttribute('platform');
+  const generic = platform !== 'Bilibili';
+  source.remove();
+  if (data.localName !== 'i' || data.querySelector('parsererror')) {
+    root.appendChild(create('p')).textContent = '无法预览此弹幕 XML';
+    return;
+  }
+  /* End in-app only */
   const kinds = { chat: '弹幕', super_chat: 'SC', guard_buy: '上舰', gift: '礼物', other: '其他' };
+  /* In-app only */
+  if (generic) Object.assign(kinds, { chat: '聊天', super_chat: '付费留言', guard_buy: '会员' });
+  /* End in-app only */
   const number = value => value == null || value.trim() === '' || !Number.isFinite(+value) ? null : +value;
   const json = value => {
     try { return JSON.parse(value ?? 'null'); } catch { return null; }
@@ -18,7 +32,7 @@
     ? null : gifts.reduce((total, gift) => total + gift[key], 0);
   const giftLabel = ({ name, quantity }) =>
     (name || '—') + (quantity === null ? '' : ' x ' + quantity);
-  const events = [...root.children].filter(node => ['d', 's', 'o'].includes(node.localName))
+  const events = [...__DANMAKU_DATA__.children].filter(node => ['d', 's', 'o'].includes(node.localName))
     .map(node => {
       const attr = name => node.getAttribute(name);
       const kind = node.localName === 'd' ? 'chat' : attr('type');
@@ -106,6 +120,60 @@
   const endSlider = find('#time-end');
   const clearTime = find('#clear-time');
   const clearSender = find('#clear-sender');
+
+  /* In-app only */
+  {
+    const recordingStart = number(data.getAttribute('recording_start_time_ms'));
+    if (!generic && recordingStart > 0) {
+      for (const event of events) {
+        if (event.type === 'chat' || event.time !== null) continue;
+        const timestamp = number(event.node.getAttribute('timestamp'));
+        if (!(timestamp > 0)) continue;
+        const relative = Math.round((timestamp >= 1e12 ? timestamp : timestamp * 1000) - recordingStart);
+        // Legacy timestamps rounded down to seconds can fall just before the start.
+        if (relative >= -999) event.time = Math.max(relative, 0);
+      }
+    }
+    const notice = create('aside');
+    notice.className = generic ? 'preview-notice' : 'preview-notice warning';
+    const icon = generic
+      ? '<circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/>'
+      : '<path d="M10.3 4.4 2.7 18a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01"/>';
+    const message = generic
+      ? '<strong>仅预览</strong>　由 biliup 临时渲染此 XML。'
+      : '此文件没有可直接使用的内嵌预览。当前为 biliup 提供的临时只读预览。';
+    notice.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg><span>${message}</span>`;
+    view.prepend(notice);
+
+    if (generic) {
+      const types = new Set(events.map(event => event.type));
+      const sender = events.some(event => event.user);
+      const details = events.some(event => event.node.attributes.length > Number(event.node.hasAttribute('p')));
+      view.setAttribute('data-hide-columns', [
+        !sender && 'sender',
+        types.size < 2 && 'type',
+        !events.some(event => event.quantity !== null) && 'quantity',
+        !events.some(event => event.amount !== null || event.duration !== null) && 'amount',
+      ].filter(Boolean).join(' '));
+      find('.filters').hidden = types.size < 2;
+      for (const input of view.querySelectorAll('.filters input')) {
+        input.parentElement.hidden = !types.has(input.value);
+        if (types.size === 1 && types.has(input.value)) input.checked = true;
+      }
+      find('#show-details').parentElement.hidden = !details;
+      const names = { Douyin: '抖音', Douyu: '斗鱼', Huya: '虎牙', Youtube: 'YouTube' };
+      const name = names[platform] || (platform === 'General' ? '' : platform);
+      find('h1').textContent = name ? name + ' 直播聊天' : '直播聊天';
+      find('thead th:nth-child(3)').textContent = '发送者';
+      if (!types.has('gift')) find('thead th:nth-child(4)').textContent = '内容';
+      if (types.size === 1 && types.has('chat')) {
+        find('input[type=search]').placeholder = sender ? '搜索发送者或内容' : '搜索聊天内容';
+      }
+    }
+  }
+  /* End in-app only */
+
   const timeParts = seconds => [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
   const clock = ms => timeParts(Math.floor(ms / 1000)).map(value => String(value).padStart(2, '0')).join(':');
   const timestamp = (ms, precise = false) => clock(ms)
@@ -211,6 +279,18 @@
       ['上舰', `${guard.length} 笔`, guard.length && amountText(guard)],
       ['已知金额合计', amountText([...giftItems, ...sc, ...guard]), '礼物、SC 和上舰'],
     ];
+    /* In-app only */
+    if (generic) {
+      if (!people([...chat, ...sc])) stats[0][2] = '';
+      stats[0][0] = '聊天消息';
+      stats[1][0] = '聊天峰值';
+      stats[3][0] = kinds.super_chat;
+      stats[4][0] = kinds.guard_buy;
+      stats[5][2] = '';
+      const present = [gifts.length, sc.length, guard.length, stats[5][1] !== '—'];
+      stats.splice(2, present.length, ...stats.slice(2).filter((_, index) => present[index]));
+    }
+    /* End in-app only */
     find('.stats').innerHTML = stats.map(([label, value, note]) =>
       `<div><dt>${label}</dt><dd>${value}${note ? `<small>${note}</small>` : ''}</dd></div>`).join('');
   }
