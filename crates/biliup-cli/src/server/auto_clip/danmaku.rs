@@ -1,14 +1,14 @@
 //! 弹幕密度与高峰：从分段的弹幕 XML 算出 10 秒一桶的条数、前后 10 分钟的滑动中位数基线，
 //! 以及条数明显高于基线的高峰（附出现最多的弹幕样例）。
 //!
-//! - `<d p="秒,类型,字号,颜色,Unix秒,…">`：第一项是距这个 XML 创建的秒数。分段切换时 XML 跟着滚动，
+//! - `<d p="秒,类型,字号,颜色,Unix时间戳,…">`：第一项是距这个 XML 创建的秒数。分段切换时 XML 跟着滚动，
 //!   创建时刻约等于分段开头，所以场次时间 = 分段 `start_ms` + 秒数 × 1000，误差 1 秒左右；
-//! - 分段没记 `danmaku_path`（旧数据、滚动失败）但旁边有同名 `.xml` 时，按第五项 Unix 秒减场次
-//!   `started_at` 对齐；
-//! - `<s>`（礼物、醒目留言、上舰，只在开了 `*_danmaku_detail` 时写）只有 Unix 秒，用同一个文件里
-//!   `<d>` 的两种时间算出的偏移换算，另记一条「付费」曲线；
+//! - 分段没记 `danmaku_path`（旧数据、滚动失败）但旁边有同名 `.xml` 时，第五项统一换算成毫秒后减
+//!   场次 `started_at` 对齐；
+//! - `<s>` 的 Unix 秒按 XML 创建时刻对齐，另记一条「付费」曲线。旧文件可从 `<d>` 的两种时间估算创建时刻；
 //! - 写到一半的 XML（进程被杀、还在录）读到哪算到哪。
 
+use crate::server::common::processing::danmaku::xml_timestamp_ms;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::workbench::store::{self, SegmentRow};
 use quick_xml::Reader;
@@ -116,19 +116,23 @@ impl Density {
 /// 一个 XML 文件里读到的原始内容。
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Parsed {
-    /// `(距文件创建的秒数, Unix 秒, 内容)`
+    /// `(距文件创建的秒数, Unix 毫秒, 内容)`
     pub comments: Vec<(f64, Option<i64>, String)>,
     /// `(Unix 秒, 金额)`
     pub paid: Vec<(i64, f64)>,
+    recording_start_time_ms: Option<i64>,
 }
 
 impl Parsed {
-    /// `<d>` 的两种时间给出的「文件创建时刻」（Unix 毫秒，取中位数）；没有带 Unix 秒的弹幕时为 `None`。
+    /// 优先用 XML 记录的创建时刻；旧文件用 `<d>` 的两种时间估算并取中位数。
     fn created_at_ms(&self) -> Option<i64> {
+        if self.recording_start_time_ms.is_some() {
+            return self.recording_start_time_ms;
+        }
         let mut offsets: Vec<i64> = self
             .comments
             .iter()
-            .filter_map(|(secs, unix, _)| unix.map(|u| u * 1000 - (secs * 1000.0).round() as i64))
+            .filter_map(|(secs, unix_ms, _)| unix_ms.map(|ms| ms - (secs * 1000.0).round() as i64))
             .collect();
         if offsets.is_empty() {
             return None;
@@ -148,6 +152,12 @@ pub fn parse_xml(bytes: &[u8]) -> Parsed {
     let mut open: Option<Open> = None;
     while let Ok(event) = reader.read_event_into(&mut buf) {
         match event {
+            Event::Start(start) if start.name().as_ref() == b"i" => {
+                parsed.recording_start_time_ms = attribute(&start, b"recording_start_time_ms")
+                    .and_then(|value| value.trim().parse::<i64>().ok())
+                    .filter(|ms| *ms >= 0);
+                open = None;
+            }
             Event::Start(start) => open = opened(&start),
             Event::Text(text) => match open.take() {
                 Some(Open::Comment(secs, unix)) => {
@@ -200,8 +210,11 @@ fn opened(start: &BytesStart) -> Option<Open> {
             if !secs.is_finite() || secs < 0.0 {
                 return None;
             }
-            let unix = fields.nth(3).and_then(|v| v.trim().parse::<i64>().ok());
-            Some(Open::Comment(secs, unix))
+            let unix_ms = fields
+                .nth(3)
+                .and_then(|v| v.trim().parse::<i64>().ok())
+                .and_then(xml_timestamp_ms);
+            Some(Open::Comment(secs, unix_ms))
         }
         b"s" => {
             let unix = attribute(start, b"timestamp")?.trim().parse().ok()?;
@@ -229,10 +242,10 @@ pub fn align(parsed: &Parsed, alignment: Alignment) -> (Vec<Comment>, Vec<Paid>)
     let comments: Vec<Comment> = parsed
         .comments
         .iter()
-        .filter_map(|(secs, unix, text)| {
+        .filter_map(|(secs, unix_ms, text)| {
             let at_ms = match alignment {
                 Alignment::Segment { start_ms } => start_ms + (secs * 1000.0).round() as i64,
-                Alignment::Wallclock { started_at } => unix.map(|u| u * 1000 - started_at)?,
+                Alignment::Wallclock { started_at } => unix_ms.map(|ms| ms - started_at)?,
             };
             Some(Comment {
                 at_ms,

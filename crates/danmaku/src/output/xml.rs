@@ -5,8 +5,8 @@
 //! <?xml version="1.0" encoding="UTF-8"?>
 //! <i>
 //!   <d p="time,type,size,color,timestamp,0,uid,0">content</d>
-//!   <s timestamp="..." uid="..." ...>content</s>
-//!   <o timestamp="...">raw_data</o>
+//!   <s timestamp="..." uid="..." type="..." detail="...">content</s>
+//!   <o timestamp="..." raw="..." />
 //! </i>
 //! ```
 
@@ -18,10 +18,13 @@ use std::time::Instant;
 
 use chrono::Utc;
 use quick_xml::Writer;
+use quick_xml::escape::escape;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
+use serde_json::Value;
 
 use crate::error::Result;
 use crate::message::{ChatMessage, DanmakuEvent, GiftMessage, GuardBuyMessage, SuperChatMessage};
+use crate::protocols::bilibili::Notification;
 
 /// Configuration for the XML writer.
 #[derive(Debug, Clone)]
@@ -64,6 +67,59 @@ fn xml_safe(s: &str) -> Cow<'_, str> {
     }
 }
 
+fn xml_line(text: &str) -> Cow<'_, str> {
+    let escaped = escape(text);
+    if escaped.contains(['\r', '\n', '\t']) {
+        Cow::Owned(
+            escaped
+                .replace('\r', "&#13;")
+                .replace('\n', "&#10;")
+                .replace('\t', "&#9;"),
+        )
+    } else {
+        escaped
+    }
+}
+
+fn push_line_attribute(elem: &mut BytesStart<'_>, key: &str, value: &str) {
+    let safe = xml_safe(value);
+    let escaped = xml_line(&safe);
+    // Byte attributes are already escaped. In particular, keep attribute
+    // whitespace as character references so XML readers return it unchanged.
+    elem.push_attribute((key.as_bytes(), escaped.as_bytes()));
+}
+
+fn push_json_attribute(elem: &mut BytesStart<'_>, key: &str, json: &str) {
+    // These characters can occur in JSON strings but are forbidden in XML 1.0.
+    let json = if json.contains(['\u{fffe}', '\u{ffff}']) {
+        Cow::Owned(
+            json.replace('\u{fffe}', r"\ufffe")
+                .replace('\u{ffff}', r"\uffff"),
+        )
+    } else {
+        Cow::Borrowed(json)
+    };
+    push_line_attribute(elem, key, &json);
+}
+
+fn push_scalar_attributes(elem: &mut BytesStart<'_>, data: &Value) {
+    let Some(fields) = data.as_object() else {
+        return;
+    };
+    for (key, value) in fields {
+        match value {
+            Value::String(text) => push_line_attribute(elem, key, text),
+            Value::Number(number) => {
+                elem.push_attribute((key.as_str(), number.to_string().as_str()));
+            }
+            Value::Bool(flag) => {
+                elem.push_attribute((key.as_str(), if *flag { "true" } else { "false" }));
+            }
+            _ => {}
+        }
+    }
+}
+
 /// XML writer for danmaku output.
 pub struct XmlWriter {
     /// Output file path.
@@ -97,11 +153,11 @@ impl XmlWriter {
             .truncate(true)
             .open(&file_path)?;
 
-        let buf_writer = BufWriter::new(file);
+        let mut buf_writer = BufWriter::new(file);
+        // Danmaku2ASS detects Bilibili XML by the adjacent declaration and root.
+        let declaration = BytesDecl::new("1.0", Some("UTF-8"), None);
+        Writer::new(&mut buf_writer).write_event(Event::Decl(declaration))?;
         let mut writer = Writer::new_with_indent(buf_writer, b'\t', 1);
-
-        // Write XML declaration
-        writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))?;
 
         // Write root element start
         // Retain the wall-clock origin of p[0] for recording/post-edit alignment.
@@ -125,46 +181,77 @@ impl XmlWriter {
 
     /// Write a danmaku event.
     pub fn write_event(&mut self, event: &DanmakuEvent) -> Result<()> {
+        let written = self.write_structured_event(event, None)?;
+        self.finish_event(written)
+    }
+
+    pub(crate) fn write_bilibili_notification(
+        &mut self,
+        notification: &Notification,
+    ) -> Result<()> {
+        if let Some(event) = &notification.event
+            && self.write_structured_event(event, Some(notification))?
+        {
+            return self.finish_event(true);
+        }
+        let detail = notification
+            .detail
+            .as_ref()
+            .filter(|_| self.config.save_detail);
+        let tag = match detail {
+            Some(_) => "s",
+            None if self.config.save_raw && notification.raw.is_some() => "o",
+            None => return Ok(()),
+        };
+        let mut elem = BytesStart::new(tag);
+        elem.push_attribute(("timestamp", Utc::now().timestamp().to_string().as_str()));
+        elem.push_attribute(("ts", self.elapsed().as_str()));
+        if let Some((kind, _)) = detail {
+            elem.push_attribute(("type", *kind));
+        }
+        self.push_notification_attributes(&mut elem, Some(notification));
+        if let Some(items) = detail.and_then(|(_, data)| data["items"].as_array()) {
+            self.write_gift_batch(elem, items)?;
+        } else {
+            self.writer.write_event(Event::Empty(elem))?;
+        }
+        self.finish_event(true)
+    }
+
+    fn write_structured_event(
+        &mut self,
+        event: &DanmakuEvent,
+        notification: Option<&Notification>,
+    ) -> Result<bool> {
         let written = match event {
             DanmakuEvent::Chat(msg) => {
-                self.write_chat(msg)?;
+                self.write_chat(msg, notification)?;
                 true
             }
-            DanmakuEvent::Gift(msg) => {
-                if self.config.save_detail {
-                    self.write_gift(msg)?;
-                    true
-                } else {
-                    false
-                }
+            DanmakuEvent::Gift(msg) if self.config.save_detail => {
+                self.write_gift(msg, notification)?;
+                true
             }
-            DanmakuEvent::SuperChat(msg) => {
-                if self.config.save_detail {
-                    self.write_superchat(msg)?;
-                    true
-                } else {
-                    false
-                }
+            DanmakuEvent::SuperChat(msg) if self.config.save_detail => {
+                self.write_superchat(msg, notification)?;
+                true
             }
-            DanmakuEvent::GuardBuy(msg) => {
-                if self.config.save_detail {
-                    self.write_guard_buy(msg)?;
-                    true
-                } else {
-                    false
-                }
+            DanmakuEvent::GuardBuy(msg) if self.config.save_detail => {
+                self.write_guard_buy(msg, notification)?;
+                true
             }
-            DanmakuEvent::Enter(_) => false,
-            DanmakuEvent::Other { raw_data } => {
-                if self.config.save_raw {
-                    self.write_raw(raw_data)?;
-                    true
-                } else {
-                    false
-                }
+            DanmakuEvent::Other { raw_data } if self.config.save_raw => {
+                let mut elem = BytesStart::new("o");
+                elem.push_attribute(("timestamp", Utc::now().timestamp().to_string().as_str()));
+                self.write_text_element(elem, "o", raw_data)?;
+                true
             }
+            _ => false,
         };
+        Ok(written)
+    }
 
+    fn finish_event(&mut self, written: bool) -> Result<()> {
         if written {
             self.message_count += 1;
         }
@@ -178,18 +265,66 @@ impl XmlWriter {
         Ok(())
     }
 
+    fn elapsed(&self) -> String {
+        format!("{:.3}", self.start_time.elapsed().as_secs_f64())
+    }
+
+    fn push_notification_attributes(
+        &self,
+        elem: &mut BytesStart<'_>,
+        notification: Option<&Notification>,
+    ) {
+        let Some(notification) = notification else {
+            return;
+        };
+        if self.config.save_detail
+            && let Some((_, detail)) = &notification.detail
+        {
+            push_scalar_attributes(elem, detail);
+        }
+        if self.config.save_raw
+            && let Some(raw) = &notification.raw
+        {
+            push_json_attribute(elem, "raw", raw);
+        }
+    }
+
+    fn write_gift_batch(&mut self, elem: BytesStart<'_>, items: &[Value]) -> Result<()> {
+        self.writer.write_event(Event::Start(elem))?;
+        let mut inline = Writer::new(self.writer.get_mut());
+        for item in items {
+            let mut element = BytesStart::new("item");
+            push_scalar_attributes(&mut element, item);
+            inline.write_event(Event::Empty(element))?;
+        }
+        // Keep the closing tag on the same line as the batch.
+        self.writer.write_event(Event::Text(BytesText::new("")))?;
+        self.writer.write_event(Event::End(BytesEnd::new("s")))?;
+        Ok(())
+    }
+
+    fn write_text_element(&mut self, elem: BytesStart<'_>, tag: &str, content: &str) -> Result<()> {
+        self.writer.write_event(Event::Start(elem))?;
+        let content = xml_safe(content);
+        self.writer
+            .write_event(Event::Text(BytesText::from_escaped(xml_line(&content))))?;
+        self.writer.write_event(Event::End(BytesEnd::new(tag)))?;
+        Ok(())
+    }
+
     /// Write a chat message.
-    fn write_chat(&mut self, msg: &ChatMessage) -> Result<()> {
-        let elapsed = self.start_time.elapsed().as_secs_f64();
-        let timestamp = msg.timestamp.timestamp();
+    fn write_chat(&mut self, msg: &ChatMessage, notification: Option<&Notification>) -> Result<()> {
+        let (mode, size, timestamp) = notification
+            .and_then(|notification| notification.chat_metadata.as_ref())
+            .map(|meta| (meta.mode, meta.size, meta.timestamp_ms))
+            .unwrap_or_else(|| (1, 25, msg.timestamp.timestamp()));
         let uid = msg.uid.unwrap_or(0);
 
         // Format: time,type,size,color,timestamp,0,uid,0
-        // type: 1=scroll, 4=bottom, 5=top
-        // size: 25 is standard
         let p = format!(
-            "{:.3},1,25,{},{},0,{},0",
-            elapsed, msg.color, timestamp, uid
+            "{},{mode},{size},{},{timestamp},0,{uid},0",
+            self.elapsed(),
+            msg.color,
         );
 
         let mut elem = BytesStart::new("d");
@@ -199,107 +334,80 @@ impl XmlWriter {
             elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
             elem.push_attribute(("uid", uid.to_string().as_str()));
             if let Some(ref name) = msg.name {
-                elem.push_attribute(("user", xml_safe(name).as_ref()));
+                push_line_attribute(&mut elem, "user", name);
             }
         }
 
-        self.writer.write_event(Event::Start(elem))?;
-        self.writer
-            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
-        self.writer.write_event(Event::End(BytesEnd::new("d")))?;
-
-        Ok(())
+        self.push_notification_attributes(&mut elem, notification);
+        self.write_text_element(elem, "d", &msg.content)
     }
 
     /// Write a gift message.
-    fn write_gift(&mut self, msg: &GiftMessage) -> Result<()> {
-        if !self.config.save_detail {
-            return Ok(());
-        }
-
+    fn write_gift(&mut self, msg: &GiftMessage, notification: Option<&Notification>) -> Result<()> {
         let timestamp = msg.timestamp.timestamp();
 
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
+        push_line_attribute(&mut elem, "username", &msg.name);
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "gift"));
         elem.push_attribute(("num", msg.num.to_string().as_str()));
-        elem.push_attribute(("giftname", xml_safe(&msg.gift_name).as_ref()));
-
-        self.writer.write_event(Event::Start(elem))?;
-        self.writer
-            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
-        self.writer.write_event(Event::End(BytesEnd::new("s")))?;
-
-        Ok(())
+        push_line_attribute(&mut elem, "giftname", &msg.gift_name);
+        self.write_detail_element(elem, &msg.content, notification)
     }
 
     /// Write a Super Chat message.
-    fn write_superchat(&mut self, msg: &SuperChatMessage) -> Result<()> {
-        if !self.config.save_detail {
-            return Ok(());
-        }
-
+    fn write_superchat(
+        &mut self,
+        msg: &SuperChatMessage,
+        notification: Option<&Notification>,
+    ) -> Result<()> {
         let timestamp = msg.timestamp.timestamp();
 
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
+        push_line_attribute(&mut elem, "username", &msg.name);
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "super_chat"));
         elem.push_attribute(("num", "1"));
         elem.push_attribute(("giftname", "醒目留言"));
 
-        self.writer.write_event(Event::Start(elem))?;
-        self.writer
-            .write_event(Event::Text(BytesText::new(&xml_safe(&msg.content))))?;
-        self.writer.write_event(Event::End(BytesEnd::new("s")))?;
-
-        Ok(())
+        self.write_detail_element(elem, &msg.content, notification)
     }
 
     /// Write a guard buy message.
-    fn write_guard_buy(&mut self, msg: &GuardBuyMessage) -> Result<()> {
-        if !self.config.save_detail {
-            return Ok(());
-        }
-
+    fn write_guard_buy(
+        &mut self,
+        msg: &GuardBuyMessage,
+        notification: Option<&Notification>,
+    ) -> Result<()> {
         let timestamp = msg.timestamp.timestamp();
         let content = format!("{}上了{}个月{}", msg.name, msg.num, msg.gift_name);
 
         let mut elem = BytesStart::new("s");
         elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
         elem.push_attribute(("uid", msg.uid.to_string().as_str()));
-        elem.push_attribute(("username", xml_safe(&msg.name).as_ref()));
+        push_line_attribute(&mut elem, "username", &msg.name);
         elem.push_attribute(("price", msg.price.to_string().as_str()));
         elem.push_attribute(("type", "guard_buy"));
         elem.push_attribute(("num", msg.num.to_string().as_str()));
-        elem.push_attribute(("giftname", xml_safe(&msg.gift_name).as_ref()));
-
-        self.writer.write_event(Event::Start(elem))?;
-        self.writer
-            .write_event(Event::Text(BytesText::new(&xml_safe(&content))))?;
-        self.writer.write_event(Event::End(BytesEnd::new("s")))?;
-
-        Ok(())
+        push_line_attribute(&mut elem, "giftname", &msg.gift_name);
+        self.write_detail_element(elem, &content, notification)
     }
 
-    /// Write raw message data.
-    fn write_raw(&mut self, raw_data: &str) -> Result<()> {
-        let timestamp = Utc::now().timestamp();
-
-        let mut elem = BytesStart::new("o");
-        elem.push_attribute(("timestamp", timestamp.to_string().as_str()));
-
-        self.writer.write_event(Event::Start(elem))?;
-        self.writer
-            .write_event(Event::Text(BytesText::new(&xml_safe(raw_data))))?;
-        self.writer.write_event(Event::End(BytesEnd::new("o")))?;
-
-        Ok(())
+    fn write_detail_element(
+        &mut self,
+        mut elem: BytesStart<'_>,
+        content: &str,
+        notification: Option<&Notification>,
+    ) -> Result<()> {
+        if notification.is_some() {
+            elem.push_attribute(("ts", self.elapsed().as_str()));
+        }
+        self.push_notification_attributes(&mut elem, notification);
+        self.write_text_element(elem, "s", content)
     }
 
     /// Flush the writer to disk.
