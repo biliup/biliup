@@ -40,6 +40,34 @@ pub(crate) fn segment_path(path: &Path) -> PathBuf {
         .collect()
 }
 
+pub(crate) fn sibling_danmaku_path(video: &Path) -> PathBuf {
+    if video.extension().is_some_and(|extension| extension == "part") {
+        video.with_extension("").with_extension("xml")
+    } else {
+        video.with_extension("xml")
+    }
+}
+
+pub(crate) async fn preview_danmaku_path(segment: &SegmentRow) -> Option<PathBuf> {
+    if segment.state == SegmentState::Deleted {
+        return None;
+    }
+    if let Some(path) = &segment.danmaku_path
+        && tokio::fs::metadata(path).await.is_ok_and(|meta| meta.is_file())
+    {
+        return Some(PathBuf::from(path));
+    }
+    // An unfinished recording can still be writing its XML.
+    if segment.state == SegmentState::Recording {
+        return None;
+    }
+    let sibling = sibling_danmaku_path(Path::new(&segment.path));
+    tokio::fs::metadata(&sibling)
+        .await
+        .is_ok_and(|meta| meta.is_file())
+        .then_some(sibling)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("database: {0}")]

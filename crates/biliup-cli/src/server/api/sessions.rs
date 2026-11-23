@@ -210,10 +210,11 @@ pub struct SessionDetail {
 /// 盘上没有关键帧就是 0（还不能播）；有就一定大于 0。缓存覆盖的字节还没全部落盘时，盘上最后一个关键帧
 /// 之后那一截按字节在它和缓存末尾之间线性估计，只用来画可播范围，起播位置仍然落在盘上的关键帧。
 /// `index` 是 [`segment_index`] 的结果，里面的关键帧已经只剩落了盘的。
-use crate::server::workbench::readable_ms;
+use crate::server::workbench::{preview_danmaku_path, readable_ms};
 
 async fn segment_view(row: SegmentRow) -> SegmentView {
     let path = std::path::PathBuf::from(&row.path);
+    let has_danmaku = preview_danmaku_path(&row).await.is_some();
     let (mut end_ms, mut bytes) = (row.end_ms, row.bytes);
     if row.state == SegmentState::Recording {
         let index = segment_index(&row).await;
@@ -236,7 +237,7 @@ async fn segment_view(row: SegmentRow) -> SegmentView {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        has_danmaku: row.danmaku_path.is_some(),
+        has_danmaku,
     }
 }
 

@@ -41,6 +41,8 @@ pub struct RecorderConfig {
     pub save_raw: bool,
     /// Whether to save detailed info.
     pub save_detail: bool,
+    /// Trusted XML fragment to embed in the finished recording.
+    pub xml_preview: Option<&'static [u8]>,
     /// Optional live tee: every decoded event is also `send` to this broadcast channel
     /// (best effort — no subscribers or a full ring just drops the copy). Used by the
     /// web UI's live preview to overlay danmaku; never affects the XML recording.
@@ -56,6 +58,7 @@ impl RecorderConfig {
             context: PlatformContext::new(),
             save_raw: false,
             save_detail: false,
+            xml_preview: None,
             live_tx: None,
         }
     }
@@ -81,6 +84,12 @@ impl RecorderConfig {
     /// Enable detailed info saving.
     pub fn with_detail(mut self, save_detail: bool) -> Self {
         self.save_detail = save_detail;
+        self
+    }
+
+    /// Embed the browser preview in each finished XML file.
+    pub fn with_xml_preview(mut self, xml_preview: Option<&'static [u8]>) -> Self {
+        self.xml_preview = xml_preview;
         self
     }
 }
@@ -228,6 +237,7 @@ impl DanmakuRecorder {
         let xml_config = XmlWriterConfig {
             save_raw: self.config.save_raw,
             save_detail: self.config.save_detail,
+            xml_preview: self.config.xml_preview,
             save_interval: if self.config.save_raw { 300 } else { 10 },
         };
 

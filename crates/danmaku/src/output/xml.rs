@@ -33,6 +33,8 @@ pub struct XmlWriterConfig {
     pub save_raw: bool,
     /// Whether to save detailed info (uid, username attributes).
     pub save_detail: bool,
+    /// Trusted XML fragment to embed before the root closing tag.
+    pub xml_preview: Option<&'static [u8]>,
     /// Auto-save interval in seconds.
     pub save_interval: u64,
 }
@@ -42,6 +44,7 @@ impl Default for XmlWriterConfig {
         Self {
             save_raw: false,
             save_detail: false,
+            xml_preview: None,
             save_interval: 10,
         }
     }
@@ -425,6 +428,9 @@ impl XmlWriter {
     /// Finish the current XML document and flush it to disk.
     pub fn finalize(&mut self) -> Result<()> {
         if !self.finalized {
+            if let Some(preview) = self.config.xml_preview {
+                self.writer.get_mut().write_all(preview)?;
+            }
             self.writer.write_event(Event::End(BytesEnd::new("i")))?;
             self.finalized = true;
         }

@@ -10,6 +10,7 @@
     "prepare:jassub": "node scripts/prepare-jassub.mjs",
     "predev": "npm run prepare:editor && npm run prepare:jassub",
     "prebuild": "npm run prepare:editor && npm run prepare:jassub",
+    "postbuild": "node scripts/prepare-danmaku-preview.mjs",
     "prepare:editor": "node scripts/prepare-editor.mjs"
   },
   "dependencies": {

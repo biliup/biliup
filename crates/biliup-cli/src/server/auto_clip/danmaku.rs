@@ -410,9 +410,7 @@ fn danmaku_file(segment: &SegmentRow, started_at: Option<i64>) -> Option<(PathBu
             },
         ));
     }
-    let video = Path::new(&segment.path);
-    let name = video.to_string_lossy();
-    let sibling = PathBuf::from(name.strip_suffix(".part").unwrap_or(&name)).with_extension("xml");
+    let sibling = crate::server::workbench::sibling_danmaku_path(Path::new(&segment.path));
     Some((
         sibling,
         Alignment::Wallclock {
