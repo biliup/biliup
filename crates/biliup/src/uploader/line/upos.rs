@@ -360,6 +360,52 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn diskless_short_stream_completes_only_acknowledged_parts() {
+        // A live stream announced 4 chunks but stopped after 2. Never send a
+        // fabricated partNumber to the complete endpoint.
+        use axum::{
+            Json, Router,
+            routing::{post, put},
+        };
+        use serde_json::{Value, json};
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let router = Router::new().route("/live", put(|| async {})).route(
+            "/live",
+            post(move |Json(body): Json<Value>| {
+                let tx = tx.clone();
+                async move {
+                    tx.send(body).await.unwrap();
+                    Json(json!({"OK": 1}))
+                }
+            }),
+        );
+        tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+        let (mut upos, _) = fake_upos().await;
+        upos.url = format!("http://{addr}/live");
+        let chunks = [b"abcd", b"e\0\0\0"].map(|b| Ok::<_, Kind>((Bytes::from_static(b), 4)));
+        let parts = upos
+            .upload_stream_with_observer(futures::stream::iter(chunks), 16, 3, None)
+            .await
+            .unwrap()
+            .map_ok(|(part, _)| part)
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        let video = upos
+            .get_ret_video_info(&parts, std::path::Path::new("live.mkv"))
+            .await
+            .unwrap();
+        assert_eq!(video.filename, "file");
+        let manifest = rx.recv().await.unwrap();
+        assert_eq!(
+            manifest["parts"],
+            json!([{"partNumber":1,"eTag":"etag"},{"partNumber":2,"eTag":"etag"}])
+        );
+    }
+
     fn part(part_number: usize) -> UposPart {
         UposPart {
             part_number,

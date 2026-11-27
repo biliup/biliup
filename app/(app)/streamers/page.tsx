@@ -277,7 +277,7 @@ export default function StreamersPage() {
             visible={openActionId === item.id}
             onVisibleChange={visible => setOpenActionId(visible ? item.id : null)} render={
             <Dropdown.Menu>
-              {can('file.view') && <Dropdown.Item icon={<IconVideoListStroked />} onClick={()=>{setOpenActionId(null);router.push(`/sessions?streamer=${item.id}`)}}>直播场次</Dropdown.Item>}
+              {can('file.view') && <Dropdown.Item icon={<IconVideoListStroked />} onClick={()=>{setOpenActionId(null);router.push(`/sessions?streamer=${item.id}`)}}>媒体库</Dropdown.Item>}
               {canEdit && canControl && (
                 <Dropdown.Item icon={paused ? <IconPlay /> : <IconPause />} disabled={disabled}
                   onClick={() => { setOpenActionId(null); void togglePause(item) }}>{paused ? '恢复监控' : '暂停监控'}</Dropdown.Item>

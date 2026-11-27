@@ -122,7 +122,7 @@ impl ServiceRegister {
             config: config.clone(),
             client,
             log_handle,
-            system: SystemMonitor::spawn(),
+            system: SystemMonitor::spawn(config),
         }
     }
 

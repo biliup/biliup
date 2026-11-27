@@ -13,7 +13,6 @@ use crate::server::services::douyu_keeper::{DouyuCookieKeeper, apply_douyu_overr
 use biliup::client::StatelessClient;
 use biliup::downloader::live::LiveStream;
 use core::fmt;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tokio::sync::watch;
 use tracing::{error, info};
@@ -114,7 +113,11 @@ impl Context {
         &self.streamer_info
     }
 
-    pub fn download_config(&self, stream: &LiveStream) -> DownloadConfig {
+    pub fn download_config(
+        &self,
+        stream: &LiveStream,
+        output_dir: &std::path::Path,
+    ) -> DownloadConfig {
         let config = self.config();
         // 确定文件格式后缀
         let suffix = self
@@ -134,8 +137,7 @@ impl Context {
             file_size: config.file_size,
             headers: stream.stream_headers.clone(),
             recorder: self.recorder(stream_info),
-            // output_dir: PathBuf::from("./downloads")
-            output_dir: PathBuf::from("."),
+            output_dir: output_dir.to_owned(),
             suffix: suffix.trim().trim_start_matches('.').to_ascii_lowercase(),
             bytes_written: Default::default(),
             preview: Default::default(),

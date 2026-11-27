@@ -10,6 +10,7 @@ use serde_json::Value;
 /// Fleet 也只下发这些字段（D11），名单外的键只留在各节点本地。
 pub const VISIBLE_CONFIG_KEYS: &[&str] = &[
     "downloader",
+    "recording_dir",
     "sync_save_dir",
     "ffmpeg_path",
     "render_fonts_dir",

@@ -225,6 +225,7 @@ async fn remote_reveal_never_launches_native_commands() {
     let response = reveal(
         State(pool),
         State(jobs),
+        State(Arc::new(RwLock::new(Config::default()))),
         Some(Extension(ConnectInfo("192.168.1.8:2000".parse().unwrap()))),
         HeaderMap::new(),
         Json(recording("anything.mp4")),
@@ -242,7 +243,8 @@ async fn remote_reveal_never_launches_native_commands() {
 #[tokio::test]
 async fn remote_location_returns_a_copyable_path_without_gui_capability() {
     let pool = pool().await;
-    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
     let file = tempfile::Builder::new()
         .prefix(".file-location-test-")
         .suffix(".mp4")
@@ -254,6 +256,10 @@ async fn remote_location_returns_a_copyable_path_without_gui_capability() {
     let response = location(
         State(pool),
         State(jobs),
+        State(Arc::new(RwLock::new(Config {
+            recording_dir: Some(cwd.to_string_lossy().into_owned()),
+            ..Config::default()
+        }))),
         Some(Extension(ConnectInfo("192.168.1.8:2000".parse().unwrap()))),
         headers,
         Query(recording(

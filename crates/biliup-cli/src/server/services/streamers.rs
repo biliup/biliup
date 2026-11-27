@@ -226,10 +226,10 @@ mod tests {
             publisher,
             pool,
             managers: Arc::new(managers),
+            system: SystemMonitor::spawn(config.clone()),
             config,
             client,
             log_handle,
-            system: SystemMonitor::spawn(),
         };
         Fixture {
             _dir: dir,

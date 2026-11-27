@@ -86,10 +86,12 @@ const Global: React.FC<Props> = ({ disabled }) => {
           <Select.Option value="ytarchive">ytarchive（仅适用于 Youtube Live）</Select.Option>
           <Select.Option value="mesio">mesio（默认）</Select.Option>
         </Form.Select>
+        <Form.Input field="recording_dir" label="录像目录（recording_dir）" placeholder="留空使用工作目录" extraText="普通下载器将新录像写入此目录。请先创建或挂载目录；数据库位置不变。" />
         {isSyncDownloader ? (
           <>
             <Form.Input
               field="sync_save_dir"
+              extraText="留空时视频不落盘；设置后保留可补传的本地副本。"
               label="边录边传额外保存本地目录（sync_save_dir）"
               placeholder=""
               style={{ width: '100%' }}
@@ -225,7 +227,7 @@ const Global: React.FC<Props> = ({ disabled }) => {
           noLabel={true}
           extraText={
             <div style={{ fontSize: '14px' }}>
-              后处理 rm、边录边传投稿后删除临时文件时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕 XML
+              执行后处理 rm 时，录像先保留这么多小时，到期后由每分钟一次的清理任务删除（连同弹幕 XML
               和 .idx 关键帧索引）。关闭或填 0 表示立即删除，与以前一样。
               <br />
               剪辑台里被标记、切片引用的片段，以及点了「保留这场」的场次，不论这里怎么设都会等引用释放后再删。
@@ -261,17 +263,10 @@ const Global: React.FC<Props> = ({ disabled }) => {
 
         <Form.InputNumber
           field="delay"
-          label="下播延迟检测（delay)"
-          extraText={
-            <div style={{ fontSize: '14px' }}>
-              当检测到主播下播后，延迟一定时间再次检测确认，避免特殊情况提早启动上传导致分稿件。
-              <br />
-              单位：秒
-              <br />
-              默认延迟时间为 0 秒
-            </div>
-          }
-          placeholder="0"
+          label="断流重连窗口（delay）"
+          extraText="普通直播断流后从 2 秒起指数退避，单次最多等 delay 秒。窗口内安排的最后一次重试可以跨过窗口；恢复后继续录入同一稿件。默认 300 秒，0 表示不等待。"
+          min={0}
+          placeholder="300"
           suffix="s"
           style={{ width: '100%' }}
           fieldStyle={{
@@ -454,7 +449,7 @@ const Global: React.FC<Props> = ({ disabled }) => {
           min={1}
           extraText={
             <div style={{ fontSize: '14px' }}>
-              负责上传事件的线程池大小。根据实际带宽设置。保存后立即生效，调小不会中断正在进行的上传。
+              自动投稿同时传输的文件数。等待分段或提交稿件不占传输名额。保存后立即生效，调小不会中断正在上传的文件。
             </div>
           }
           placeholder={3}

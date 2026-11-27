@@ -33,6 +33,9 @@
     <td width="50%"><img src=".github/resource/webui-overview.webp" alt="biliup WebUI 概览：系统状态、直播录制与最近事件" /></td>
     <td width="50%"><img src=".github/resource/webui-editor.webp" alt="biliup 剪辑台：素材、画面预览、字幕、多轨时间轴和助手" /></td>
   </tr>
+  <tr>
+    <td colspan="2"><img src=".github/resource/webui-library-dark.webp" alt="媒体库深色模式" width="100%" /></td>
+  </tr>
 </table>
 
 ## 📺 支持平台
@@ -191,8 +194,8 @@ user_cookie = "cookies.json"
 
 行为说明：
 
-- 录制期间每 P 会同时写入系统临时目录（`$TMPDIR/biliup-sync/worker-<id>/`）作为兜底；预传完整且校验一致时直接 complete，否则（直播提前结束、上传落后）按实际长度从临时文件重传。投稿确认后临时文件删除，设置了 `sync_save_dir` 的副本保留并交给 `postprocessor`。
-- 停止/暂停/编辑主播只会结束当前分段，已录内容仍会上传并投稿；上传或投稿失败时保留有内容的分段文件并在日志中打印路径，可手动补传。
+- `sync_save_dir` 留空时，视频从 FFmpeg 直接进入有界上传队列，不写录像或临时视频。上传慢时等网络，不把整 P 缓存在内存中。下播、暂停时仍发送已读到的尾块；上传彻底失败则没有本地文件可补传。数据库、日志，以及单独启用的弹幕 XML 不属于视频数据。
+- 要保留可补传的副本，请设置 `sync_save_dir`。这时上传落后或直播提前结束可以按文件实际长度重传；成功后默认保留副本，显式设置的 `postprocessor`（例如 `rm`）仍会执行。
 - B 站直链约 1 小时过期。分段结束后拉不到数据时会立刻交回监控循环重新解析直链，并在同一稿件上继续追加分 P。
 - 排查问题时留意 `ERROR ... 下载流程出错` 日志：会带上具体原因（cookies 文件路径、preupload 拒绝等），而不是静默退回落盘录制。
 

@@ -58,7 +58,7 @@ mod tests {
     /// 走真实的路由与查询参数解析：首次拉全部历史，之后按 `since` 只拿增量，禁止缓存
     #[tokio::test]
     async fn the_endpoint_serves_history_then_increments() {
-        let monitor = SystemMonitor::spawn();
+        let monitor = SystemMonitor::spawn(Default::default());
         let app = Router::new()
             .route("/v1/system-stats", get(get_system_stats))
             .with_state(monitor.clone());

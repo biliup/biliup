@@ -27,6 +27,11 @@ pub struct Config {
     #[serde(default)]
     pub downloader: Option<DownloaderType>,
 
+    /// 普通录像目录。与数据库和配置目录无关；节点级设置。
+    #[patch(skip)]
+    #[serde(default)]
+    pub recording_dir: Option<String>,
+
     /// 边录边传额外保存本地目录（仅 sync-downloader）
     #[serde(default)]
     pub sync_save_dir: Option<String>,
@@ -112,7 +117,7 @@ pub struct Config {
     #[serde(default)]
     pub max_upload_limit: Option<u32>,
 
-    /// 延迟时间（秒）
+    /// 普通直播断流后的重连窗口（秒）；窗口内安排的退避不截短，0 表示不等待。
     #[builder(default = default_delay())]
     #[serde(default = "default_delay")]
     pub delay: u64,
@@ -143,7 +148,7 @@ pub struct Config {
     #[serde(default = "default_live_merge_minutes")]
     pub live_merge_minutes: u64,
 
-    /// 投稿后保留录像的小时数：后处理 `rm`、边录边传投稿后删除临时文件时，录像先留这么久，
+    /// 投稿后保留录像的小时数：执行后处理 `rm` 时，录像先留这么久，
     /// 到期后由每分钟一次的清理任务删除。0（默认）= 立即删除，与以前一样。
     /// 被切片工作台引用、或所在场次设了「保留这场」的分段，不论这里怎么设都会等引用释放后再删。
     #[builder(default)]
@@ -661,6 +666,15 @@ impl Default for Config {
 pub const DEFAULT_PREVIEW_MAX_MINUTES: u64 = 30;
 
 impl Config {
+    pub fn recording_root(&self) -> &std::path::Path {
+        std::path::Path::new(
+            self.recording_dir
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or("."),
+        )
+    }
+
     /// Validate new masking settings before persisting. The processor also checks
     /// imported/legacy settings so invalid config never bypasses masking.
     pub fn validate_mosaic(&self) -> Result<(), String> {

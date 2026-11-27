@@ -23,6 +23,7 @@ pub const PER_NODE_KEYS: &[&str] = &[
     "pool2_size",
     "ffmpeg_path",
     "render_fonts_dir",
+    "recording_dir",
     "sync_save_dir",
     "min_free_space",
     "loggers_level",

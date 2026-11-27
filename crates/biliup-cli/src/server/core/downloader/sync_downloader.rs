@@ -179,6 +179,33 @@ pub struct SegmentStdout {
     pub peeked: Vec<u8>,
 }
 
+impl SegmentStdout {
+    pub(crate) async fn pump(
+        self,
+        chunk_size: usize,
+        total_size: u64,
+        save_path: Option<&PathBuf>,
+        tx: async_channel::Sender<Bytes>,
+        token: &CancellationToken,
+    ) -> AppResult<PumpResult> {
+        match save_path {
+            None => pump_live(self.stdout, self.peeked, chunk_size, total_size, tx, token).await,
+            Some(path) => {
+                pump_chunks(
+                    self.stdout,
+                    self.peeked,
+                    chunk_size,
+                    total_size,
+                    path.clone(),
+                    tx,
+                    token.clone(),
+                )
+                .await
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PumpResult {
     pub actual_size: u64,
@@ -186,7 +213,58 @@ pub struct PumpResult {
     pub stream_complete: bool,
 }
 
-/// 把 ffmpeg stdout 同时写入临时文件并按 UPOS chunk 切给上传通道。
+/// 无本地副本时只保留一个正在拼装的块；通道满时等待上传，绝不转存到磁盘。
+/// 与旧版相同，短 P 只补齐最后一个已产生的 UPOS 分块，不填充到配置的整 P 大小。
+pub async fn pump_live<R: tokio::io::AsyncRead + Unpin>(
+    mut stdout: R,
+    peeked: Vec<u8>,
+    chunk_size: usize,
+    total_size: u64,
+    tx: async_channel::Sender<Bytes>,
+    token: &CancellationToken,
+) -> AppResult<PumpResult> {
+    let mut buffer = Vec::new();
+    let mut remaining = total_size;
+    let mut streamed_size = 0;
+    let mut incoming = peeked;
+    loop {
+        for chunk in take_full_chunks(&mut buffer, &incoming, chunk_size, &mut remaining) {
+            let len = chunk.len();
+            tx.send(chunk)
+                .await
+                .map_err(|_| AppError::Custom("流式上传通道已关闭，无本地副本".into()))?;
+            streamed_size += len as u64;
+        }
+        if remaining == 0 {
+            break;
+        }
+        incoming.resize(64 * 1024, 0);
+        let n = tokio::select! {
+            _ = token.cancelled() => break,
+            n = stdout.read(&mut incoming) => n.change_context(AppError::Unknown)?,
+        };
+        if n == 0 {
+            break;
+        }
+        incoming.truncate(n);
+    }
+    let actual_size = total_size - remaining;
+    if !buffer.is_empty() {
+        let len = (total_size - streamed_size).min(chunk_size as u64) as usize;
+        buffer.resize(len, 0);
+        tx.send(Bytes::from(buffer))
+            .await
+            .map_err(|_| AppError::Custom("尾块上传通道已关闭，无本地副本".into()))?;
+        streamed_size += len as u64;
+    }
+    Ok(PumpResult {
+        actual_size,
+        streamed_size,
+        stream_complete: true,
+    })
+}
+
+/// 把 ffmpeg stdout 同时写入指定的本地副本并按 UPOS chunk 切给上传通道。
 ///
 /// 通道跟不上时停止预传但继续完整落盘，调用方随后可按实际长度回退为文件上传。
 ///
@@ -248,7 +326,7 @@ pub async fn pump_chunks<R: tokio::io::AsyncRead + Unpin>(
                 if tx.try_send(chunk).is_ok() {
                     streamed += len;
                 } else {
-                    warn!("流式上传跟不上录制速度，停止预传并保留临时文件回退");
+                    warn!("流式上传跟不上录制速度，停止预传并使用本地副本回退");
                     sender.take();
                     buffer.clear();
                     break;
@@ -440,6 +518,46 @@ mod tests {
         assert_eq!(align_file_size(Some(0)), 205 * 10 * 1024 * 1024);
     }
 
+    #[tokio::test]
+    async fn diskless_stream_waits_for_the_reader_and_only_pads_the_last_chunk() {
+        // Capacity one forces backpressure. No file or directory is passed to this path.
+        let (tx, rx) = async_channel::bounded(1);
+        let token = CancellationToken::new();
+        let (pump, chunks) = tokio::join!(
+            pump_live(&b"cdefghi"[..], b"ab".to_vec(), 4, 64, tx, &token),
+            async {
+                let mut chunks = Vec::new();
+                while let Ok(chunk) = rx.recv().await {
+                    chunks.push(chunk.to_vec());
+                }
+                chunks
+            }
+        );
+        let pump = pump.unwrap();
+        assert!(pump.stream_complete);
+        assert_eq!((pump.actual_size, pump.streamed_size), (9, 12));
+        assert_eq!(chunks, [b"abcd", b"efgh", b"i\0\0\0"]);
+    }
+
+    #[tokio::test]
+    async fn diskless_cancel_keeps_peeked_bytes_and_receiver_loss_is_an_error() {
+        let token = CancellationToken::new();
+        token.cancel();
+        let (tx, rx) = async_channel::bounded(1);
+        let r = pump_live(tokio::io::empty(), b"abc".to_vec(), 4, 16, tx, &token)
+            .await
+            .unwrap();
+        assert_eq!(r.actual_size, 3);
+        assert_eq!(&rx.recv().await.unwrap()[..], b"abc\0");
+        let (tx, rx) = async_channel::bounded(1);
+        drop(rx);
+        assert!(
+            pump_live(tokio::io::empty(), b"abcd".to_vec(), 4, 16, tx, &token)
+                .await
+                .is_err()
+        );
+    }
+
     #[test]
     fn hls_is_detected_from_path_not_query() {
         assert!(is_hls_url("https://example.com/live/index.m3u8"));
@@ -465,6 +583,58 @@ mod tests {
         let chunk = finish_chunks(b"hi".to_vec(), 4).unwrap();
         assert_eq!(&chunk[..], b"hi");
         assert!(finish_chunks(Vec::new(), 4).is_none());
+    }
+
+    #[tokio::test]
+    async fn ffmpeg_without_a_save_path_streams_a_short_recording_without_a_video_file() {
+        if !tools::ffmpeg_status().await.available {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("input.mkv");
+        let root = dir.path().join("recordings");
+        std::fs::create_dir(&root).unwrap();
+        assert!(
+            tools::ffmpeg_command()
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=size=32x32:duration=0.5",
+                    "-c:v",
+                    "mpeg4"
+                ])
+                .arg(&src)
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+        let cfg = DownloadConfig {
+            url: src.display().to_string(),
+            output_dir: root.clone(),
+            ..Default::default()
+        };
+        let d = SyncDownloader::new();
+        let token = CancellationToken::new();
+        let size = 65536;
+        let segment = d.start_segment(&cfg, size, &token).await.unwrap().unwrap();
+        let (tx, rx) = async_channel::bounded(1);
+        let (pump, data) = tokio::join!(segment.pump(256, size, None, tx, &token), async {
+            let mut data = Vec::new();
+            while let Ok(chunk) = rx.recv().await {
+                data.extend_from_slice(&chunk);
+            }
+            data
+        });
+        d.stop().await.unwrap();
+        let pump = pump.unwrap();
+        assert!((100..size).contains(&pump.actual_size));
+        assert_eq!(&data[..4], &[0x1a, 0x45, 0xdf, 0xa3]); // Matroska header
+        assert_eq!(data.len() as u64, pump.actual_size.div_ceil(256) * 256);
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
     }
 
     #[test]

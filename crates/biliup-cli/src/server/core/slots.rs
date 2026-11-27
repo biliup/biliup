@@ -16,6 +16,8 @@ pub struct Slots {
     state: Mutex<SlotsState>,
     /// 有槽位归还或容量变化时唤醒 [`Slots::acquire`] 的等待者
     changed: Notify,
+    /// 异步申请按等待顺序进入；刚传完一段的场次不能插到队首。
+    queue: tokio::sync::Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -32,6 +34,7 @@ impl Slots {
                 occupied: 0,
             }),
             changed: Notify::new(),
+            queue: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -65,6 +68,7 @@ impl Slots {
 
     /// 等到有空闲槽位再占用一个
     pub async fn acquire(self: &Arc<Self>) -> Slot {
+        let _head = self.queue.lock().await;
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);

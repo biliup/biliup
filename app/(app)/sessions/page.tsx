@@ -1,15 +1,20 @@
 'use client'
-import {Suspense} from 'react'
-import {useSearchParams} from 'next/navigation'
+import { Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import {CalendarDays} from 'lucide-react'
-import PageHeader from '../components/PageHeader'
+import { LibraryBig } from 'lucide-react'
 import SessionsTab from '../workbench/SessionsTab'
-import {parseWorkbenchNumber} from '@/app/lib/workbench'
-import styles from '@/app/ui/data-card.module.scss'
+import { parseWorkbenchNumber } from '@/app/lib/workbench'
+import library from '../workbench/library.module.scss'
 
-export default function SessionsPage(){return <Suspense><Sessions/></Suspense>}
-function Sessions(){
- const params=useSearchParams(),streamerId=parseWorkbenchNumber(params.get('streamer'),1)
- return <><PageHeader title="直播场次" icon={<CalendarDays size={24}/>} actions={streamerId?<Link href="/sessions">全部场次</Link>:undefined}/><div className={styles.content}><SessionsTab key={streamerId??'all'} streamerId={streamerId}/></div></>
+export default function SessionsPage() { return <Suspense><Sessions/></Suspense> }
+function Sessions() {
+  const params = useSearchParams(), streamerId = parseWorkbenchNumber(params.get('streamer'), 1)
+  return <div className={library.content}>
+    <header className={library.topbar}>
+      <h1><LibraryBig aria-hidden="true" size={20}/>媒体库</h1>
+      {streamerId && <Link className={library.allLink} href="/sessions">查看全部场次</Link>}
+    </header>
+    <SessionsTab key={streamerId ?? 'all'} streamerId={streamerId}/>
+  </div>
 }

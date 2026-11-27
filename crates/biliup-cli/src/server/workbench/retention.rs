@@ -1,6 +1,6 @@
 //! 分段文件的生命周期：被引用就推迟删除、定时清理、磁盘水位兜底。
 //!
-//! - 删除点（后处理 `rm`、边录边传投稿后删临时文件、过滤删除小文件）都经过 [`remove`]：分段被引用
+//! - 删除点（后处理 `rm`、过滤删除小文件）都经过 [`remove`]：分段被引用
 //!   （`pin_count > 0`）、所属场次在 `retain_until` 之前，或调用方要求再保留一段时间（「投稿后保留
 //!   录像」）时，不立即删，把分段标成 `pending_delete`，文件原样留在盘上；
 //! - [`spawn_sweeper`] 每分钟删掉到期且没人引用的 `pending_delete` 分段，并在录像所在磁盘的可用空间
@@ -189,12 +189,13 @@ async fn tracked(pool: &ConnectionPool, path: &Path) -> sqlx::Result<Option<Trac
 /// 工作台记录的分段在被引用、场次保留期内或 `keep_for_ms > 0` 时推迟删除，同一批里它的弹幕文件
 /// 跟着留下；其余的立即删，分段行标 `deleted`，关键帧索引一起删。数据库出错时停止删除，避免
 /// 无法确认引用或保留期时丢失源录像。
-/// 删文件出错时返回错误，与原来的 `rm` 一样停在出错的那个文件。
+/// Windows 共享锁只推迟对应分段；处理完其他分段仍向调用方报告错误。
 pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Disposal>> {
     let _lifecycle = MEDIA_LIFECYCLE.write().await;
     let now = now_ms();
     let mut outcome: Vec<Option<Disposal>> = vec![None; paths.len()];
     let mut kept_danmaku: Vec<PathBuf> = Vec::new();
+    let mut locked_error = None;
     for (i, path) in paths.iter().enumerate() {
         let segment = tracked(&retention.pool, path).await.map_err(|e| {
             warn!(path = %path.display(), error = %e, "查询分段记录失败，保留文件并停止删除");
@@ -243,6 +244,15 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
             defer(&retention.pool, segment.id, 0, now, danmaku.as_deref())
                 .await
                 .map_err(io::Error::other)?;
+            // ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION. Only this file is busy;
+            // don't strand the remainder of a successfully submitted batch.
+            if cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)) {
+                warn!(?path, %error, "分段被占用，已排队重试删除，继续处理其他分段");
+                locked_error.get_or_insert(error);
+                outcome[i] = Some(Disposal::Deferred);
+                kept_danmaku.extend(danmaku);
+                continue;
+            }
             return Err(error);
         }
         if let Err(e) = set_deleted(&retention.pool, segment.id).await {
@@ -261,6 +271,9 @@ pub async fn remove(retention: &Retention, paths: &[&Path]) -> io::Result<Vec<Di
         remove_processed_sources(&retention.pool, path).await?;
         delete_video(path).await?;
         outcome[i] = Some(Disposal::Untracked);
+    }
+    if let Some(error) = locked_error {
+        return Err(error);
     }
     Ok(outcome.into_iter().flatten().collect())
 }

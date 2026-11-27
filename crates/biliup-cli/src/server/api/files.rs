@@ -1,5 +1,6 @@
 //! File location uses existing recording names or render IDs, never arbitrary
 //! paths supplied by the browser. GUI actions are limited to direct local peers.
+use crate::server::config::Config;
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::router::{StaticPathError, resolve_media_path};
 use crate::server::workbench::renders::RenderJobs;
@@ -11,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -234,13 +235,15 @@ async fn open_native(path: &Path) -> Result<(), String> {
 pub async fn location(
     State(pool): State<ConnectionPool>,
     State(jobs): State<Arc<RenderJobs>>,
+    State(config): State<Arc<RwLock<Config>>>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Query(file): Query<FileRequest>,
 ) -> Response {
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "工作目录不可用"),
+    let cwd = if file.kind == "recording" {
+        config.read().unwrap().recording_root().to_owned()
+    } else {
+        PathBuf::from(".")
     };
     match resolve_file(&pool, jobs.root(), &cwd, &file).await {
         Ok(path) => Json(FileLocation {
@@ -255,6 +258,7 @@ pub async fn location(
 pub async fn reveal(
     State(pool): State<ConnectionPool>,
     State(jobs): State<Arc<RenderJobs>>,
+    State(config): State<Arc<RwLock<Config>>>,
     peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     Json(file): Json<FileRequest>,
@@ -265,9 +269,10 @@ pub async fn reveal(
     if !desktop_available() {
         return error(StatusCode::CONFLICT, "服务没有可用桌面，请复制文件路径");
     }
-    let cwd = match std::env::current_dir() {
-        Ok(cwd) => cwd,
-        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "工作目录不可用"),
+    let cwd = if file.kind == "recording" {
+        config.read().unwrap().recording_root().to_owned()
+    } else {
+        PathBuf::from(".")
     };
     let path = match resolve_file(&pool, jobs.root(), &cwd, &file).await {
         Ok(path) => path,

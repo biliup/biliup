@@ -754,8 +754,7 @@ pub async fn replayable_segment_files(pool: &ConnectionPool) -> sqlx::Result<Vec
     .await
 }
 
-/// 按文件名索引 `dir` 下的分段文件：相对路径只认不带目录的（`a.flv`、`./a.flv`），绝对路径只认上级就是
-/// `dir` 的。同名的取最后登记的那一段。
+/// 按文件名索引录像目录的直接子项；历史相对路径以进程工作目录为基准。
 pub fn segment_files_in_dir(
     files: Vec<SegmentFile>,
     dir: Option<&Path>,
@@ -767,11 +766,13 @@ pub fn segment_files_in_dir(
             continue;
         };
         let parent = path.parent().unwrap_or(Path::new(""));
-        let here = if path.is_absolute() {
-            dir.is_some_and(|dir| parent == dir)
+        let base = if parent.as_os_str().is_empty() {
+            Path::new(".")
         } else {
-            parent.as_os_str().is_empty() || parent == Path::new(".")
+            parent
         };
+        let here =
+            dir.is_some_and(|dir| std::path::absolute(base).is_ok_and(|parent| parent == dir));
         if here {
             by_name.insert(name.to_string(), file);
         }

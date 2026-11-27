@@ -1,5 +1,5 @@
 'use client'
-import { Banner, Button, Popconfirm, Spin, Table, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
+import { Banner, Button, Pagination, Popconfirm, Spin, Table, Tag, Toast, Tooltip, Typography } from '@douyinfe/semi-ui'
 import { IconDeleteStroked } from '@douyinfe/semi-icons'
 import Link from 'next/link'
 import useSWR from 'swr'
@@ -21,11 +21,14 @@ import dc from '@/app/ui/data-card.module.scss'
 import styles from './sessions.module.scss'
 import SessionMergeDialog from './SessionMergeDialog'
 import {GlobalDialog} from '@/app/ui/editor/controls/GlobalDialog'
-import {X,Film,Play,Scissors} from 'lucide-react'
+import { X, Film, Play, Scissors, Search, LayoutGrid, List, ListChecks, LibraryBig } from 'lucide-react'
+import { useEnumPref } from '@/app/lib/use-local-pref'
+import { SegmentPoster, SessionCard, SessionSpotlight } from './LibraryGallery'
+import library from './library.module.scss'
 import dynamic from 'next/dynamic'
 const Player=dynamic(()=>import('@/app/ui/Player'),{ssr:false})
 
-/** 「直播场次」：每场一行，能按场次回看的点「回看」进回看页 */
+/** 媒体库和管理列表共用分页、选择状态、场次详情和写操作。 */
 export default function SessionsTab({streamerId=null}:{streamerId?:number|null}={}) {
   const isMobile = useIsMobile()
   const { Text } = Typography
@@ -34,7 +37,32 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
   const canEdit = can('clip.edit')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
-  const { data, error, isLoading, mutate } = useSWR<SessionPage>(`/v1/sessions?page=${page}&page_size=${pageSize}${streamerId?`&streamer_id=${streamerId}`:''}`, fetcher, { keepPreviousData: true, refreshInterval: 10_000 })
+  const [view, setView] = useEnumPref('biliup.sessions.view', ['gallery', 'table'] as const, 'gallery')
+  const [managing, setManaging] = useState(false)
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [opened, setOpened] = useState<SessionSummary | null>(null)
+  const opener = useRef<HTMLElement | null>(null)
+  const detailHeading = useRef<HTMLHeadingElement>(null)
+  const spotlight = useRef<HTMLDivElement>(null)
+  const openFiles = (record: SessionSummary) => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setOpened(record)
+  }
+  useEffect(() => {
+    if (opened) {
+      spotlight.current?.scrollIntoView({ block: 'start' })
+      detailHeading.current?.focus({ preventScroll: true })
+    }
+  }, [opened])
+  const closeFiles = () => {
+    const id = opener.current?.id
+    setOpened(null)
+    requestAnimationFrame(() => { if (id) document.getElementById(id)?.focus() })
+  }
+  const applySearch = (value: string) => { setQuery(value.trim()); setPage(1) }
+  const clearSearch = () => { setSearch(''); applySearch('') }
+  const { data, error, isLoading, mutate } = useSWR<SessionPage>(`/v1/sessions?page=${page}&page_size=${pageSize}${streamerId?`&streamer_id=${streamerId}`:''}${query ? `&q=${encodeURIComponent(query)}` : ''}`, fetcher, { keepPreviousData: true, refreshInterval: 10_000 })
   const { data: candidateData, error: candidatesError, mutate: reloadCandidates } = useSWR<{ items: SessionMergeCandidate[] }>(canEdit ? mergeCandidatesUrl : null, fetcher, { refreshInterval: 10_000 })
   const [selected, setSelected] = useState<SessionSummary[]>([])
   const [merge, setMerge] = useState<{ ids: number[]; candidate?: SessionMergeCandidate } | null>(null)
@@ -47,6 +75,7 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
     try {
       await deleteSession(record.id)
       await mutate()
+      if (page > 1 && data?.items.length === 1) setPage(page - 1)
       setSelected(previous => previous.filter(source => source.id !== record.id))
       Toast.success({ content: '已删除场次历史', duration: 2 })
     } catch (error) {
@@ -69,13 +98,39 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
     } finally { setDismissing(null) }
   }
 
-  if (isLoading) {
+  if (isLoading && !data && !query) {
     return (
       <div style={{ padding: '80px 0', textAlign: 'center' }}>
         <Spin size="large" />
       </div>
     )
   }
+
+  const items = data?.items ?? []
+  const detail = opened && (items.find(item => item.id === opened.id) ?? opened)
+  const pagination = { currentPage: page, pageSize, total: data?.total ?? 0, showSizeChanger: true, pageSizeOpts: [10, 20, 50, 100],
+    onPageChange: setPage, onPageSizeChange: (size: number) => { setPageSize(size); setPage(1) } }
+  const deleteButton = (record: SessionSummary) => canEdit ? (
+    <Popconfirm
+      title="删除这场直播历史？"
+      content={record.kind === 'group'
+        ? '删除合并场次及其新建工作台记录，原始场次、录像和旧工作台记录保留。正在录制或有未完成任务时无法删除。'
+        : '会删除回看时间轴、标记和切片记录；原始录像、切片与合成文件保留在磁盘。正在录制或有未完成任务时无法删除。'}
+      okText="删除历史"
+      okType="danger"
+      onConfirm={() => removeSession(record)}
+    >
+      <Button
+        size="small"
+        theme="borderless"
+        type="danger"
+        icon={<IconDeleteStroked />}
+        aria-label={`删除 ${record.streamer_name} 的场次历史`}
+        loading={deleting === record.id}
+        disabled={deleting !== null}
+      />
+    </Popconfirm>
+  ) : null
 
   const columns = [
     {
@@ -143,33 +198,17 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
               剪辑
             </Link>
           ) : null}
-          {can('clip.edit') ? (
-            <Popconfirm
-              title="删除这场直播历史？"
-              content={record.kind === 'group'
-                ? '删除合并场次及其新建工作台记录，原始场次、录像和旧工作台记录保留。正在录制或有未完成任务时无法删除。'
-                : '会删除回看时间轴、标记和切片记录；原始录像、切片与合成文件保留在磁盘。正在录制或有未完成任务时无法删除。'}
-              okText="删除历史"
-              okType="danger"
-              onConfirm={() => removeSession(record)}
-            >
-              <Button
-                size="small"
-                theme="borderless"
-                type="danger"
-                icon={<IconDeleteStroked />}
-                aria-label={`删除 ${record.streamer_name} 的场次历史`}
-                loading={deleting === record.id}
-                disabled={deleting !== null}
-              />
-            </Popconfirm>
-          ) : null}
+          {deleteButton(record)}
         </div>,
     },
   ]
 
   return (
-    <div className={styles.sessionPage}>
+    <div className={`${styles.sessionPage} ${library.collection}`}>
+      {view === 'gallery' && (detail || items.length > 0) && <div ref={spotlight} className={library.featureAnchor}>
+        <SessionSpotlight records={items} detail={detail} canEdit={canEdit} onOpen={openFiles} onBack={closeFiles}/>
+      </div>}
+
       {candidateData?.items.length ? <div className={dc.card}>
         <div className={styles.mergeToolbar}><strong>场次续接建议</strong></div>
         <div className={styles.candidates}>
@@ -185,20 +224,45 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
         </div>
       </div> : null}
       {candidatesError ? <Banner type="warning" description="续接建议加载失败，稍后会自动重试" /> : null}
-      <div className={dc.card}>
-      {canEdit ? <div className={styles.mergeToolbar}>
+      {detail && view === 'gallery' ? <>
+        <div className={library.sectionHead}><div>
+          <h2 ref={detailHeading} tabIndex={-1} className={library.fileHeading}>录制分段 <small>{detail.segment_count} 个文件</small></h2></div>
+          <div className={library.detailsMeta}>{detail.recording ? '录制中' : '已结束'} · {new Date(detail.started_at).toLocaleString()} · {formatSize(detail.bytes)}</div>
+        </div>
+        {autoClip.visible && <div className={library.cardJob}>自动切片 <AutoClipCell record={detail} availability={autoClip}/></div>}
+        <FileLists key={detail.id} record={detail} libraryView/>
+      </> : <>
+      <div className={library.sectionHead}>
+        <div><h2>{query ? '搜索结果' : streamerId ? '主播录像' : '全部录像'} <small>{data?.total ?? 0} 场</small></h2></div>
+        <div className={library.tools}>
+          <form className={library.search} role="search" onSubmit={event => { event.preventDefault(); applySearch(search) }}>
+            <button type="submit" aria-label="搜索录像"><Search/></button><input value={search} maxLength={256} aria-label="搜索主播或标题" placeholder="搜索主播或标题" onChange={event => { setSearch(event.target.value); if (!event.target.value) applySearch('') }}/>
+            {(search || query) && <button type="button" onClick={clearSearch} aria-label="清除搜索"><X/></button>}
+          </form>
+          {canEdit && view === 'gallery' && <button type="button" className={library.toolButton} aria-pressed={managing} onClick={() => setManaging(!managing)}><ListChecks/>{managing ? '完成管理' : '批量管理'}</button>}
+          <div className={library.switch} role="group" aria-label="馆藏视图">
+            <button type="button" title="封面视图" aria-label="封面视图" aria-pressed={view === 'gallery'} onClick={() => setView('gallery')}><LayoutGrid/></button>
+            <button type="button" title="列表视图" aria-label="列表视图" aria-pressed={view === 'table'} onClick={() => setView('table')}><List/></button>
+          </div>
+        </div>
+      </div>
+      {error && !!items.length && <Banner type="warning" description="场次刷新失败，当前显示上次加载的录像"/>}
+      {canEdit && (view === 'table' || managing) ? <div className={dc.card}>
+        <div className={styles.mergeToolbar}>
         <Text type="tertiary">已选择 {selected.length} 场</Text>
         <Tooltip content={mergeProblem(selected) ?? '预览顺序、停录缺口和压制配方后合并'}>
           <span><Button size="small" disabled={!!mergeProblem(selected)} onClick={() => setMerge({ ids: selected.map(source => source.id) })}>合并所选场次</Button></span>
         </Tooltip>
         {selected.length ? <Button size="small" theme="borderless" type="tertiary" onClick={() => setSelected([])}>清空选择</Button> : null}
+        </div>
       </div> : null}
+      {view === 'table' ? <div className={dc.card}>
       <Table
         size="small"
         rowKey="id"
         scroll={{ x: 'max-content' }}
         columns={columns}
-        dataSource={data?.items ?? []}
+        dataSource={items}
         rowSelection={canEdit ? {
           selectedRowKeys: selected.map(source => source.id),
           getCheckboxProps: (record: SessionSummary) => ({ disabled: record.kind === 'group' || record.group_session_id != null }),
@@ -207,12 +271,20 @@ export default function SessionsTab({streamerId=null}:{streamerId?:number|null}=
             setSelected((keys ?? []).map(id => byId.get(Number(id))).filter((source): source is SessionSummary => !!source))
           },
         } : undefined}
-        pagination={{ currentPage: page, pageSize, total: data?.total ?? 0, showSizeChanger: true, pageSizeOpts: [10, 20, 50, 100],
-          onPageChange: setPage, onPageSizeChange: size => { setPageSize(size); setPage(1) } }}
+        pagination={pagination}
         expandedRowRender={expandRowRender}
         empty={error ? '加载失败，请检查后端连接' : '暂无数据'}
       />
-      </div>
+      </div> : <>
+        {items.length ? <div className={library.grid}>{items.map(record => <SessionCard key={record.id} record={record} onOpen={openFiles}
+          selecting={canEdit && managing} selected={selected.some(source => source.id === record.id)}
+          onSelect={() => setSelected(previous => previous.some(source => source.id === record.id) ? previous.filter(source => source.id !== record.id) : [...previous, record])}
+          actions={deleteButton(record)} job={autoClip.visible ? <AutoClipCell record={record} availability={autoClip}/> : null}/>)}</div>
+        : <div className={library.empty} role="status"><LibraryBig size={32}/><p>{isLoading ? '正在加载录像…' : error ? '加载失败，请检查后端连接' : query ? '没有找到匹配的录像' : '暂无录制场次'}</p>
+          {error ? <Button onClick={() => void mutate()}>重新加载</Button> : query && <Button onClick={clearSearch}>清除搜索</Button>}</div>}
+        {!!data?.total && <Pagination className={library.pagination} {...pagination}/>}
+      </>}
+      </>}
       <details className={styles.legacyHistory} onToggle={event => setLegacyOpen(event.currentTarget.open)}>
         <summary>无时间轴的场次历史</summary>
         {legacyOpen ? <LegacySessions deleting={deleting} canEdit={canEdit} onDelete={removeSession} /> : null}
@@ -279,7 +351,7 @@ function TextForGroup() {
 }
 
 // 展开子行:该次直播的录制文件列表；有时间轴的场次，能回看的文件可以直接定位到这一段
-const FileLists = ({ record }: { record: SessionSummary }) => {
+const FileLists = ({ record, libraryView = false }: { record: SessionSummary; libraryView?: boolean }) => {
   const {can}=useMe()
   const [preview,setPreview]=useState<{ segment: SessionDetail['segments'][number], kind: 'file' | 'danmaku' }>()
   const closePreview = () => setPreview(undefined)
@@ -296,7 +368,7 @@ const FileLists = ({ record }: { record: SessionSummary }) => {
   if (!detail) return <div className={styles.fileListStatus} role="alert">读取场次详情失败</div>
 
   return (
-    <div className={styles.recordingFiles}>
+    <div className={`${styles.recordingFiles} ${libraryView ? library.filePanel : ''}`}>
       {detail.kind === 'group' ? <div className={styles.members}>
         <strong>来源场次</strong>
         {detail.members?.map(member => <div key={member.source_session_id}>
@@ -304,13 +376,13 @@ const FileLists = ({ record }: { record: SessionSummary }) => {
           <span>{member.title || '无标题'} · 合并位置 {formatPrecise(member.offset_ms)}{member.gap_before_ms > 0 ? ` · 前有 ${formatSpan(member.gap_before_ms)} 缺口` : ''}</span>
         </div>)}
       </div> : null}
-      {detail.segments.map((segment) => {
+      {detail.segments.map((segment, index) => {
         const start = isReadable(segment) ? segment.start_ms : undefined
         const duration = segmentEnd(segment)-segment.start_ms
         const showDanmaku = segment.has_danmaku && segment.state !== 'deleted'
         return (
-          <div key={segment.id} className={styles.recordingFile}>
-            <div className={styles.fileIcon}><Film size={21}/></div>
+          <div key={segment.id} className={`${styles.recordingFile} ${libraryView ? library.segmentRow : ''}`}>
+            {libraryView ? <SegmentPoster sessionId={record.id} at={start !== undefined && duration > 0 ? start + Math.min(1000, duration - 1) : undefined} index={index}/> : <div className={styles.fileIcon}><Film size={21}/></div>}
             <div className={styles.fileInfo}><strong>{baseName(segment.file_name)}</strong><div className={styles.fileMeta}><span className={styles.fileFormat}>{segment.container.toUpperCase()}</span>{duration>0&&<span>{formatSpan(duration)}</span>}{segment.bytes!==null&&<span>{formatSize(segment.bytes)}</span>}{segment.state==='recording'&&<span className={styles.fileRecording}>录制中</span>}{!isReadable(segment)&&<span className={styles.fileUnavailable}>{segment.state==='missing'?'文件缺失':'已删除'}</span>}</div></div>
             {(start !== undefined || showDanmaku) && <div className={styles.fileActions}>
               {start !== undefined && <button type="button" className={styles.fileAction} onClick={() => setPreview({ segment, kind: 'file' })}><Play size={15}/>播放</button>}

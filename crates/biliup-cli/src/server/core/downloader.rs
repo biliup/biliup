@@ -82,7 +82,13 @@ impl DownloadConfig {
     /// # 返回
     /// 返回完整的输出文件路径
     fn generate_output_filename(&self, suffix: &str) -> PathBuf {
-        self.output_dir.join(self.recorder.generate_path(suffix))
+        self.output_dir
+            .join(crate::server::common::util::path_with_suffix(
+                &self
+                    .recorder
+                    .generate_filename_in(&self.output_dir, &[suffix]),
+                suffix,
+            ))
     }
 
     /// 本次录制块允许的最长时长（`"HH:MM:SS"`）。

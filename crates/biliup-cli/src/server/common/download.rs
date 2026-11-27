@@ -177,18 +177,11 @@ impl SegmentEventProcessor {
 
         let tx = match &self.channel {
             None => {
-                // 不设上限：投稿流程可能整场都轮不到上传槽位（槽位由别的房间整场占着），
-                // 有界通道满了 `force_send` 会挤掉最早的分段，那一段就再也不会投稿或后处理
+                // 两级通道只排队文件路径或接收端，不能挤掉其他场次或分段。
                 let (tx, rx) = async_channel::unbounded();
-
-                // 发送到上传器
-                let res = self
-                    .uploader
-                    .force_send(UploaderMessage::segment_event(rx.clone(), self.ctx.clone()))
+                self.uploader
+                    .try_send(UploaderMessage::segment_event(rx, self.ctx.clone()))
                     .change_context(AppError::Custom("Failed to send to uploader".to_string()))?;
-                if let Some(prev) = res {
-                    warn!(SegmentEvent = ?prev, "replace an existing message in the channel");
-                }
 
                 self.channel = Some(tx.clone());
                 tx
@@ -196,7 +189,7 @@ impl SegmentEventProcessor {
             Some(tx) => tx.clone(),
         };
         if protected {
-            tx.force_send(event)
+            tx.try_send(event)
                 .change_context(AppError::Custom("Failed to send to buffer".to_string()))?;
             self.sent.fetch_add(1, Ordering::Release);
         } else {
@@ -449,7 +442,7 @@ impl DownloadTask {
         let mut retry_count = 0;
         let max_retries = 3; // 最大重试次数
         let base_delay = Duration::from_secs(2); // 基础延迟时间（2秒）
-        let max_delay = Duration::from_secs(ctx.config().delay); // 最大延迟时间（60秒）
+        let max_delay = Duration::from_secs(ctx.config().delay);
         let url = ctx.live_streamer().url.clone();
         let mut stream = ctx.live_stream().clone();
         let filename_prefix = ctx
@@ -480,9 +473,23 @@ impl DownloadTask {
         {
             *self.recorder_handle.write().unwrap() = Some(workbench.handle());
         }
+        let config = ctx.config();
+        let output_dir = if matches!(self.downloader, DownloaderRuntime::Sync(_)) {
+            config
+                .sync_save_dir
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .map(Path::new)
+                .unwrap_or(Path::new("."))
+        } else {
+            config.recording_root()
+        };
+        let missing_output_dir =
+            !matches!(self.downloader, DownloaderRuntime::Sync(_)) && !output_dir.is_dir();
         let danmaku_client = danmaku_client(
-            stream.danmaku.as_ref(),
+            stream.danmaku.as_ref().filter(|_| !missing_output_dir),
             filename_prefix.as_deref(),
+            output_dir,
             &stream.name,
             ctx.config().bilibili_danmaku_preview.unwrap_or(false),
             self.danmaku_tx.clone(),
@@ -501,7 +508,6 @@ impl DownloadTask {
         if let Some(session) = &self.sync_session {
             let mut session = session.lock().await;
             session.set_recorder(workbench.handle());
-            session.set_retention(Retention::after_upload(ctx.pool().clone(), &ctx.config()));
         }
 
         // 初始化组件
@@ -517,7 +523,17 @@ impl DownloadTask {
         // “什么都没下到”当成进展，于是 0 延迟无限重试同一个视频。
         let mut last_seen = processor.output().seen;
         crate::server::fleet::ha::unit_started(ctx);
+        let ordinary_live = self.sync_session.is_none()
+            && !matches!(&stream.runtime_options,
+            Some(biliup::downloader::live::RuntimeOptions::YtDlp(options)) if !options.is_live);
+        let mut reconnect = ReconnectWindow::default();
         let result = loop {
+            if !matches!(self.downloader, DownloaderRuntime::Sync(_)) && !output_dir.is_dir() {
+                error!(?output_dir, "录像目录不存在或不可访问，本场不写入工作目录");
+                break Err(
+                    AppError::Custom(format!("录像目录不可用：{}", output_dir.display())).into(),
+                );
+            }
             // 创建守卫确保清理
             // 创建事件处理器
             // 执行下载
@@ -528,6 +544,7 @@ impl DownloadTask {
                     ctx.clone(),
                     danmaku_client.clone(),
                     &stream,
+                    output_dir,
                     workbench.handle(),
                 );
                 // 一主一备模式 2：备机接手了主机断网期间中断过的这一段，停掉这次拉流（没有配对时不会就绪）
@@ -580,6 +597,26 @@ impl DownloadTask {
             {
                 break components;
             }
+            if ordinary_live {
+                let seen = processor.output().seen;
+                let recorded = seen > last_seen || self.meter.counter().total() > bytes_before;
+                last_seen = seen;
+                if recorded {
+                    reconnect = ReconnectWindow::default();
+                }
+                // 正常分段立即复检；流结束但产过文件也先复检一次，不白等。
+                let immediate = recorded && download_attempt_progressed(&components);
+                if let Some(next) = self
+                    .next_live_stream(ctx, plugin.as_ref(), &mut reconnect, max_delay, immediate)
+                    .await
+                {
+                    stream = next;
+                    self.refresh_media(ctx, &stream);
+                    continue;
+                }
+                break components;
+            }
+            // 边录边传和点播保留各自原有的重试语义。
             // 检查流状态
             match plugin.check_stream(live_request(ctx.worker())).await {
                 Ok(LiveStatus::Live {
@@ -750,18 +787,66 @@ impl DownloadTask {
         Ok(())
     }
 
+    /// 正常分段立即复检；断流时只重试新探测到的地址，沿用本场的分段和投稿通道。
+    async fn next_live_stream(
+        &self,
+        ctx: &Context,
+        plugin: &(dyn LivePlugin + Send + Sync),
+        window: &mut ReconnectWindow,
+        limit: Duration,
+        mut immediate: bool,
+    ) -> Option<LiveStream> {
+        let probe_loop = async {
+            loop {
+                if !immediate {
+                    // 只在安排重试前看窗口；最后一次等待跨过 delay 也照常探测并尝试拉流。
+                    let wait = window.next_wait(tokio::time::Instant::now(), limit)?;
+                    info!(url = ctx.live_streamer().url, ?wait, "断流，等待复检");
+                    tokio::time::sleep(wait).await;
+                }
+                match plugin.check_stream(live_request(ctx.worker())).await {
+                    Ok(LiveStatus::Live { stream }) => {
+                        if let Some(reason) = recording_policy::reject_before_record(
+                            ctx.live_streamer(),
+                            &stream.title,
+                        ) {
+                            info!(url = ctx.live_streamer().url, %reason, "停止录制");
+                            return None;
+                        }
+                        if self.token.is_cancelled()
+                            || crate::server::fleet::ha::yield_recording(ctx)
+                        {
+                            return None;
+                        }
+                        return Some(*stream);
+                    }
+                    Ok(LiveStatus::Offline) => (),
+                    Err(e) => warn!(url = ctx.live_streamer().url, error = ?e, "开播复检失败"),
+                }
+                immediate = false;
+            }
+        };
+        tokio::select! {
+            biased;
+            _ = self.token.cancelled() => None,
+            _ = crate::server::fleet::ha::stop_requested(ctx) => None,
+            stream = probe_loop => stream,
+        }
+    }
+
     async fn download(
         &self,
         processor: &mut SegmentEventProcessor,
         ctx: Context,
         danmaku_client: Option<Arc<dyn DanmakuClient + Send + Sync>>,
         stream: &LiveStream,
+        output_dir: &Path,
         workbench: RecorderHandle,
     ) -> AppResult<DownloadStatus> {
         workbench.run_started();
         // 获取配置和主播信息
         let streamer = ctx.live_streamer();
-        let mut download_config = ctx.download_config(stream);
+        let mut download_config = ctx.download_config(stream, output_dir);
         if crate::server::common::processing::masking::masking_required(
             &ctx.config(),
             &streamer.override_cfg,
@@ -974,6 +1059,26 @@ fn ws_expire_override_failed(
     strip_ws_expire_override(stream_url).is_some()
         && !wrote_bytes
         && !download_attempt_progressed(result)
+}
+
+#[derive(Default)]
+struct ReconnectWindow {
+    started: Option<tokio::time::Instant>,
+    previous_wait: Duration,
+}
+
+impl ReconnectWindow {
+    fn next_wait(&mut self, now: tokio::time::Instant, delay: Duration) -> Option<Duration> {
+        if now.duration_since(*self.started.get_or_insert(now)) >= delay {
+            return None;
+        }
+        self.previous_wait = self
+            .previous_wait
+            .saturating_mul(2)
+            .max(Duration::from_secs(2))
+            .min(delay);
+        Some(self.previous_wait)
+    }
 }
 
 /// Exponential backoff delay for the current `retry_count`.
@@ -1301,15 +1406,21 @@ mod tests {
 
         const ROOM: &str = "https://gated.example/1";
 
-        /// 本地「CDN」：数拉流请求，一律 404
-        async fn counting_cdn() -> (String, Arc<AtomicUsize>) {
+        /// 空 fixture 返回 404，否则用真实 FLV 走完整的录制、断流和重连流程。
+        async fn counting_cdn(media: Option<bytes::Bytes>) -> (String, Arc<AtomicUsize>) {
             let hits = Arc::new(AtomicUsize::new(0));
             let counter = hits.clone();
             let app = Router::new().route(
                 "/live.flv",
                 get(move || {
                     counter.fetch_add(1, Ordering::SeqCst);
-                    async { StatusCode::NOT_FOUND }
+                    let media = media.clone();
+                    async move {
+                        match media {
+                            Some(bytes) => (StatusCode::OK, bytes),
+                            None => (StatusCode::NOT_FOUND, bytes::Bytes::new()),
+                        }
+                    }
                 }),
             );
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1323,6 +1434,7 @@ mod tests {
             stream: LiveStream,
             probing: mpsc::UnboundedSender<()>,
             gate: Arc<Notify>,
+            offline: Arc<AtomicBool>,
         }
 
         #[async_trait]
@@ -1338,6 +1450,9 @@ mod tests {
             async fn check_stream(&self, _request: LiveRequest) -> LiveResult<LiveStatus> {
                 let _ = self.probing.send(());
                 self.gate.notified().await;
+                if self.offline.load(Ordering::SeqCst) {
+                    return Ok(LiveStatus::Offline);
+                }
                 Ok(LiveStatus::Live {
                     stream: Box::new(self.stream.clone()),
                 })
@@ -1349,12 +1464,23 @@ mod tests {
             run: tokio::task::JoinHandle<AppResult<()>>,
             probing: mpsc::UnboundedReceiver<()>,
             gate: Arc<Notify>,
+            offline: Arc<AtomicBool>,
             hits: Arc<AtomicUsize>,
+            uploads: async_channel::Receiver<UploaderMessage>,
+            config: Arc<std::sync::RwLock<Config>>,
             _dir: tempfile::TempDir,
         }
 
-        /// `delay`：退避上限（秒），即 `Config::delay`
+        /// `delay`：断流后留在原录制任务内的重连窗口（秒）
         async fn start(danmaku: Option<DanmakuSource>, delay: u64) -> Harness {
+            start_with_media(danmaku, delay, None).await
+        }
+
+        async fn start_with_media(
+            danmaku: Option<DanmakuSource>,
+            delay: u64,
+            media: Option<bytes::Bytes>,
+        ) -> Harness {
             let dir = tempfile::tempdir().unwrap();
             let db = dir.path().join("data.sqlite3");
             let pool = ConnectionManager::new_pool(db.to_str().unwrap())
@@ -1365,7 +1491,14 @@ mod tests {
                 .execute(&pool)
                 .await
                 .unwrap();
-            let (stream_url, hits) = counting_cdn().await;
+            let downloader = if media.is_some() {
+                DownloaderRuntime::from_type(
+                    crate::server::core::downloader::DownloaderType::FfmpegExternal,
+                )
+            } else {
+                DownloaderRuntime::Mesio(Mesio::new())
+            };
+            let (stream_url, hits) = counting_cdn(media).await;
             let stream = LiveStream {
                 name: "gated".into(),
                 url: ROOM.into(),
@@ -1390,10 +1523,14 @@ mod tests {
             )
             .await
             .unwrap();
-            let config = Config {
+            let root = dir.path().join("recordings");
+            std::fs::create_dir(&root).unwrap();
+            let config = Arc::new(std::sync::RwLock::new(Config {
                 delay,
+                recording_dir: Some(root.to_string_lossy().into_owned()),
+                filtering_threshold: 0,
                 ..Default::default()
-            };
+            }));
             let streamer = LiveStreamer {
                 id: 1,
                 url: ROOM.to_string(),
@@ -1413,27 +1550,26 @@ mod tests {
             let worker = Arc::new(Worker::new(
                 streamer,
                 None,
-                Arc::new(std::sync::RwLock::new(config)),
+                config.clone(),
                 Default::default(),
             ));
             let ctx = Context::new(session.id, worker, pool.clone(), stream.clone());
             let (probing_tx, probing) = mpsc::unbounded_channel();
             let gate = Arc::new(Notify::new());
+            let offline = Arc::new(AtomicBool::new(false));
             let plugin = Arc::new(GatedLive {
                 stream: stream.clone(),
                 probing: probing_tx,
                 gate: gate.clone(),
+                offline: offline.clone(),
             });
-            let (uploader, _) = async_channel::bounded(1);
+            let (uploader, uploads) = async_channel::unbounded();
             let monitor = Arc::new(Monitor::new(
                 uploader.clone(),
                 Arc::new(Slots::new(1)),
                 pool,
             ));
-            let task = Arc::new(DownloadTask::new(
-                DownloaderRuntime::Mesio(Mesio::new()),
-                &stream,
-            ));
+            let task = Arc::new(DownloadTask::new(downloader, &stream));
             let run = tokio::spawn({
                 let task = task.clone();
                 async move { task.execute(&ctx, uploader, plugin, monitor).await }
@@ -1443,7 +1579,10 @@ mod tests {
                 run,
                 probing,
                 gate,
+                offline,
                 hits,
+                uploads,
+                config,
                 _dir: dir,
             }
         }
@@ -1475,13 +1614,176 @@ mod tests {
             h.hits.load(Ordering::SeqCst)
         }
 
+        #[test]
+        fn final_backoff_can_cross_the_window_and_is_not_capped_at_thirty_seconds() {
+            let delay = Duration::from_secs(300);
+            let start = tokio::time::Instant::now();
+            let mut now = start;
+            let mut window = ReconnectWindow::default();
+            for seconds in [2, 4, 8, 16, 32, 64, 128, 256] {
+                let wait = window.next_wait(now, delay).unwrap();
+                assert_eq!(wait.as_secs(), seconds);
+                now += wait;
+            }
+            assert_eq!((now - start).as_secs(), 510);
+            assert_eq!(window.next_wait(now, delay), None);
+            // delay 也限制单次等待，包括小于初始退避的设置。
+            assert_eq!(
+                ReconnectWindow::default().next_wait(start, Duration::from_secs(1)),
+                Some(Duration::from_secs(1))
+            );
+        }
+
+        #[tokio::test]
+        async fn final_probe_can_resume_the_pull_after_the_window() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            let mut h = start(None, 1).await;
+            first_recheck(&mut h).await;
+            h.gate.notify_one(); // 已过 1s，仍要用这次探测拿到的地址拉一次。
+            assert_eq!(finished_within(h, Duration::from_secs(3)).await, 2);
+        }
+
+        #[tokio::test]
+        async fn offline_rechecks_do_not_pull_the_stale_url_and_recovery_reuses_the_task() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            let mut h = start(None, 20).await;
+            first_recheck(&mut h).await;
+            h.offline.store(true, Ordering::SeqCst);
+            h.gate.notify_one();
+            first_recheck(&mut h).await; // Still exactly one CDN request after the offline probe.
+            h.offline.store(false, Ordering::SeqCst);
+            h.gate.notify_one();
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while h.hits.load(Ordering::SeqCst) != 2 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            let stop = stop(&h).await;
+            assert_eq!(finished_within(h, Duration::from_secs(3)).await, 2);
+            stop.await.unwrap().unwrap();
+        }
+
+        #[tokio::test]
+        async fn recorded_parts_before_and_after_an_outage_form_one_submission_batch() {
+            if !crate::tools::ffmpeg_status().await.available {
+                return;
+            }
+            let _role = crate::server::fleet::ha::test_guard().await;
+            let flv = crate::tools::ffmpeg_command()
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=size=32x32:duration=0.5",
+                    "-c:v",
+                    "flv",
+                    "-f",
+                    "flv",
+                    "pipe:1",
+                ])
+                .output()
+                .await
+                .unwrap();
+            assert!(flv.status.success());
+            let mut h = start_with_media(None, 2, Some(flv.stdout.into())).await;
+            first_recheck(&mut h).await;
+            let (segments, ctx, _guard) = h.uploads.recv().await.unwrap().into_parts();
+            let uploads = h.uploads.clone();
+            let pool = ctx.pool().clone();
+            let session = ctx.id();
+            let (sent, mut parts) = mpsc::unbounded_channel();
+            let batch = tokio::spawn(async move {
+                crate::server::common::upload::pipeline_upload_videos(segments, &[], &ctx, |path| {
+                    sent.send(path).unwrap();
+                    async { Ok(biliup::bilibili::Video::new("uploaded")) }
+                })
+                .await
+                .unwrap()
+            });
+            let first = tokio::time::timeout(Duration::from_secs(10), parts.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            h.offline.store(true, Ordering::SeqCst);
+            h.gate.notify_one();
+            first_recheck(&mut h).await;
+            assert!(
+                !batch.is_finished(),
+                "P1 已上传，断流窗口里不应交付投稿批次"
+            );
+            // 改全局目录只影响新场次，本场续录与弹幕仍指向原目录。
+            h.config.write().unwrap().recording_dir =
+                Some(h._dir.path().join("elsewhere").display().to_string());
+            h.offline.store(false, Ordering::SeqCst);
+            h.gate.notify_one();
+            let second = tokio::time::timeout(Duration::from_secs(10), parts.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_ne!(first, second);
+            assert_eq!(
+                first.parent(),
+                Some(h._dir.path().join("recordings").as_path())
+            );
+            assert_eq!(first.parent(), second.parent());
+            // 第二次断流不再恢复；由重连窗口自己到期，不用手动停止触发投稿。
+            h.offline.store(true, Ordering::SeqCst);
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    tokio::select! {
+                        result = &mut h.run => { result.unwrap().unwrap(); break; },
+                        Some(()) = h.probing.recv() => h.gate.notify_one(),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            let uploaded = batch.await.unwrap();
+            assert_eq!(uploaded.videos.len(), 2);
+            assert_eq!(uploaded.paths, [first, second]);
+            let ids: Vec<i64> =
+                sqlx::query_scalar("SELECT id FROM segments WHERE session_id = ? ORDER BY id")
+                    .bind(session)
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(ids.len(), 2);
+            for (id, expected) in ids.into_iter().zip(uploaded.paths) {
+                let (source, _) = crate::server::workbench::editor::media::session_source(
+                    &pool,
+                    session,
+                    &format!("recording-{session}-{id}"),
+                )
+                .await
+                .unwrap();
+                assert_eq!(
+                    source.canonicalize().unwrap(),
+                    expected.canonicalize().unwrap()
+                );
+            }
+            assert!(uploads.try_recv().is_err(), "同场不应新建第二个投稿任务");
+        }
+
+        #[tokio::test]
+        async fn zero_window_does_not_retry_a_failed_pull() {
+            let _role = crate::server::fleet::ha::test_guard().await;
+            assert_eq!(
+                finished_within(start(None, 0).await, Duration::from_secs(2)).await,
+                1
+            );
+        }
+
         /// 停止发生在续录前的开播复检期间：复检报「仍在直播」后不能再开一次拉流。
         /// mesio / stream-gears 每次拉流换新令牌、ffmpeg 每次起新进程，stop 停不到这一次，
         /// 它会一直录到分段结束或直播结束，用户点的停止 / 暂停形同虚设。
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn stopping_during_the_live_recheck_starts_no_further_download() {
             let _role = crate::server::fleet::ha::test_guard().await;
-            let mut h = start(None, 1).await;
+            let mut h = start(None, 10).await;
             first_recheck(&mut h).await;
 
             let stop = stop(&h).await;
@@ -1496,11 +1798,12 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         async fn stopping_during_the_retry_backoff_ends_the_task_at_once() {
             let _role = crate::server::fleet::ha::test_guard().await;
-            // 第一次失败后退避 2s * 2 = 4s
-            let mut h = start(None, 60).await;
-            first_recheck(&mut h).await;
-            h.gate.notify_one();
-            tokio::time::sleep(Duration::from_millis(300)).await;
+            // 拉流失败后，下次复检前的退避可立即取消。
+            let h = start(None, 60).await;
+            while h.hits.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             let stop = stop(&h).await;
             let hits = finished_within(h, Duration::from_secs(2)).await;
@@ -1525,12 +1828,16 @@ mod tests {
                 movie_id: None,
                 password: None,
             };
-            let mut h = start(Some(danmaku), 1).await;
+            let mut h = start(Some(danmaku), 10).await;
             first_recheck(&mut h).await;
 
             let stop = stop(&h).await;
             h.gate.notify_one();
-            finished_within(h, Duration::from_secs(10)).await;
+            tokio::time::timeout(Duration::from_secs(10), h.run)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
             stop.await.unwrap().unwrap();
         }
     }

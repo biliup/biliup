@@ -72,8 +72,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
       {
         href: '/sessions',
         perm: 'file.view',
-        label: '直播场次',
-        icon: <Ic d="M4 5h16v16H4zM4 10h16M8 3v4M16 3v4M8 14h3M8 17h6" />,
+        label: '媒体库',
+        icon: <Ic d="M3 5h3v15H3zM9 5h3v15H9zM14 6l3-1 4 14-3 1z" />,
       },
       {
         href: '/workbench',
@@ -348,7 +348,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   // 折叠偏好持久化:localStorage 是数据源,首屏(SSR / 水合)按未折叠渲染,水合后自动切到已保存的值
   const [siderPref, setSiderPref] = useLocalStorageValue(SIDER_KEY)
-  const collapsed = siderPref === '1'
+  // Give the media library a TV-style rail only when the user has no explicit sidebar preference.
+  const collapsed = siderPref === null ? pathname === '/sessions' : siderPref === '1'
   const toggleCollapsed = () => setSiderPref(collapsed ? '0' : '1')
 
   // 主题:同上,未保存过时为 auto

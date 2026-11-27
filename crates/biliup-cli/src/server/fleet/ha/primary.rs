@@ -3027,6 +3027,10 @@ mod tests {
         double::install(Some(double.clone()));
 
         let services = services(dir.path()).await;
+        // 即使唯一传输槽一直被其他房间占用，没有文件的恢复任务也应立即给备机答复。
+        let slots = services.managers.upload_slots();
+        slots.resize(1);
+        let _busy = slots.acquire().await;
         let unit = now_ms() - 60 * MIN;
         let mut rooms = HashMap::new();
         let mut rows = Vec::new();

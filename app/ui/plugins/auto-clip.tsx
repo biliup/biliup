@@ -255,7 +255,7 @@ const AutoClip: React.FC<Props> = ({ disabled, entity }) => {
         <div id="auto-clip-body" className={styles.autoClipBody}>
           <Typography.Paragraph type="tertiary" style={{ fontSize: 14 }}>
             用你配置的模型从录像里挑出候选片段（语音转写 + 弹幕 + 截图），接受后才变成切片草稿，不会自动导出或投稿。
-            候选在回看页的「候选」里处理；可以在剪辑台「直播场次」或回看页手动「生成候选」，也可以在直播间编辑里打开
+            候选在回看页的「候选」里处理；可以在「媒体库」或回看页手动「生成候选」，也可以在直播间编辑里打开
             「下播后自动生成候选」。只支持 OpenAI 兼容接口（/chat/completions 与
             /audio/transcriptions）；接口地址可以指向自建服务（whisper.cpp server、LocalAI、vLLM 等）。
           </Typography.Paragraph>

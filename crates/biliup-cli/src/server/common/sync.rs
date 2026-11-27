@@ -6,14 +6,13 @@ use crate::server::common::upload::{
 use crate::server::common::upload_observation::{FileObservation, TaskObservation};
 use crate::server::common::util::Recorder;
 use crate::server::core::downloader::sync_downloader::{
-    PumpResult, SyncDownloader, align_file_size, pump_chunks,
+    PumpResult, SyncDownloader, align_file_size,
 };
 use crate::server::core::downloader::{DownloadConfig, DownloadStatus};
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::context::{Context, Stage, WorkerStatus};
 use crate::server::infrastructure::models::upload_streamer::UploadStreamer;
 use crate::server::workbench::recorder::{ClosedSegment, RecorderHandle};
-use crate::server::workbench::retention::{self, Retention};
 use biliup::bilibili::{BiliBili, Studio, Video};
 use biliup::uploader::line::UploadedStream;
 use bytes::Bytes;
@@ -32,23 +31,16 @@ const MAX_EMPTY_RETRIES: u32 = 5;
 const STREAM_QUEUE_CAPACITY: usize = 6;
 const MAX_UNCOMMITTED_SEGMENTS: usize = 2;
 
-#[derive(Debug, Clone)]
-struct SegmentFile {
-    path: PathBuf,
-    keep: bool,
-}
-
 #[derive(Default)]
 pub(crate) struct SyncSession {
     studio: Option<Studio>,
     videos: Vec<Video>,
-    files: Vec<SegmentFile>,
+    files: Vec<Option<PathBuf>>,
     confirmed_parts: usize,
     cleaned_parts: usize,
     first_submit_uncertain: bool,
     postprocess_paths: Vec<PathBuf>,
     recorder: Option<RecorderHandle>,
-    retention: Option<Retention>,
 }
 
 impl SyncSession {
@@ -60,11 +52,6 @@ impl SyncSession {
     pub(crate) fn set_recorder(&mut self, recorder: RecorderHandle) {
         self.recorder = Some(recorder);
     }
-
-    /// 投稿确认后删临时分段时，按切片工作台的引用与「投稿后保留录像」推迟删除。
-    pub(crate) fn set_retention(&mut self, retention: Retention) {
-        self.retention = Some(retention);
-    }
 }
 
 impl Drop for SyncSession {
@@ -73,7 +60,8 @@ impl Drop for SyncSession {
     fn drop(&mut self) {
         let unconfirmed: Vec<String> = self.files[self.cleaned_parts.min(self.files.len())..]
             .iter()
-            .map(|file| file.path.display().to_string())
+            .flatten()
+            .map(|file| file.display().to_string())
             .collect();
         if !unconfirmed.is_empty() {
             warn!(
@@ -87,7 +75,7 @@ impl Drop for SyncSession {
 
 struct PendingSegment {
     seq: u64,
-    file: SegmentFile,
+    file: Option<PathBuf>,
     pump: PumpResult,
     upload: JoinHandle<AppResult<UploadedStream>>,
     observation: Option<FileObservation>,
@@ -95,7 +83,7 @@ struct PendingSegment {
 
 struct ReadySegment {
     seq: u64,
-    file: SegmentFile,
+    file: Option<PathBuf>,
     video: Video,
 }
 
@@ -176,7 +164,7 @@ async fn run_inner(
     // Keep the paths available for a subsequent attempt if the callback fails.
     let paths = session.lock().await.postprocess_paths.clone();
     if !super::downloaded::configured(ctx) {
-        execute_postprocessor(paths, ctx).await?;
+        postprocess_saved_copies(paths, ctx).await?;
         session.lock().await.postprocess_paths.clear();
     }
     Ok(result)
@@ -200,7 +188,7 @@ pub(crate) async fn finish_downloaded_session(
         })
         .collect();
     let files = super::downloaded::run(files, ctx).await?;
-    execute_postprocessor(
+    postprocess_saved_copies(
         files
             .iter()
             .flat_map(super::downloaded::HookFile::paths)
@@ -210,6 +198,16 @@ pub(crate) async fn finish_downloaded_session(
     .await?;
     session.lock().await.postprocess_paths.clear();
     Ok(())
+}
+
+// sync_save_dir explicitly requests a copy. Only a user-configured postprocessor
+// may remove it; ordinary file uploads still have their original default rm.
+pub(super) async fn postprocess_saved_copies(paths: Vec<PathBuf>, ctx: &Context) -> AppResult<()> {
+    if ctx.live_streamer().postprocessor.is_none() {
+        Ok(())
+    } else {
+        execute_postprocessor(paths, ctx).await
+    }
 }
 
 async fn run_upload_session(
@@ -229,7 +227,11 @@ async fn run_upload_session(
     let mut recorder = ctx.recorder(ctx.streamer_info().clone());
     recorder.filename_prefix = upload_config.title.clone();
     let prefix = download_config.recorder.generate_filename("mkv");
-    let save_dir = ctx.config().sync_save_dir.clone().map(PathBuf::from);
+    let save_dir = ctx
+        .config()
+        .sync_save_dir
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from);
     let mut pending = VecDeque::new();
     let mut ready = BTreeMap::new();
 
@@ -375,16 +377,7 @@ async fn record_segments(
         }
 
         let file_name = format!("{prefix}_{next_seq}.mkv");
-        let keep = save_dir.is_some();
-        let path = save_dir.map_or_else(
-            || {
-                std::env::temp_dir()
-                    .join("biliup-sync")
-                    .join(format!("worker-{}", ctx.worker_id()))
-                    .join(&file_name)
-            },
-            |dir| dir.join(&file_name),
-        );
+        let path = save_dir.map(|dir| dir.join(&file_name));
         info!(seq = next_seq, file_name, "准备边录边传分段");
 
         // 先确认 ffmpeg 真的产出了数据，再向 UPOS 申请上传：直播结束或直链失效时
@@ -444,19 +437,12 @@ async fn record_segments(
             }
         });
         let workbench = session.lock().await.recorder.clone();
-        if let Some(workbench) = &workbench {
-            workbench.opened(&path);
+        if let (Some(workbench), Some(path)) = (&workbench, &path) {
+            workbench.opened(path);
         }
-        let pump = pump_chunks(
-            segment.stdout,
-            segment.peeked,
-            chunk_size,
-            total_size,
-            path.clone(),
-            tx,
-            token.clone(),
-        )
-        .await;
+        let pump = segment
+            .pump(chunk_size, total_size, path.as_ref(), tx, token)
+            .await;
         let _ = downloader.stop().await;
         let pump = match pump {
             Ok(pump) => pump,
@@ -466,7 +452,7 @@ async fn record_segments(
                 if let Some(observation) = &file_observation {
                     observation.finish(Some(&format!("{error:#}")));
                 }
-                retain_or_remove(&SegmentFile { path, keep }).await;
+                warn_unsent(path.as_ref());
                 return Err(error);
             }
         };
@@ -477,12 +463,11 @@ async fn record_segments(
             stream_complete = pump.stream_complete,
             "本段录制结束"
         );
-        if let Some(workbench) = &workbench {
+        if let (Some(workbench), Some(path)) = (&workbench, &path) {
             workbench.closed(
-                &path,
+                path,
                 ClosedSegment {
                     bytes: Some(pump.actual_size),
-                    discard: pump.actual_size < MIN_MEDIA_BYTES && !keep,
                     ..Default::default()
                 },
             );
@@ -494,19 +479,12 @@ async fn record_segments(
             if let Some(observation) = &file_observation {
                 observation.cancel();
             }
-            if !keep {
-                if let Some(workbench) = &workbench {
-                    workbench.settled().await;
-                }
-                let retention = Retention::without_delay(ctx.pool().clone());
-                let _ = retention::remove(&retention, &[&path]).await;
-            }
             return Ok(());
         }
 
         pending.push_back(PendingSegment {
             seq: next_seq,
-            file: SegmentFile { path, keep },
+            file: path,
             pump,
             upload,
             observation: file_observation,
@@ -568,68 +546,34 @@ async fn finish_pending(
     work: PendingSegment,
     upload_ctx: &UploadContext,
 ) -> AppResult<ReadySegment> {
-    let uploaded = work.upload.await;
-
-    let video = if work.pump.stream_complete {
-        match uploaded {
-            Ok(Ok(uploaded))
-                if uploaded.uploaded_size() == uploaded.declared_size()
-                    && uploaded.uploaded_size() == work.pump.actual_size =>
-            {
-                match complete_byte_stream(uploaded, work.observation.as_ref()).await {
-                    Ok(video) => Some(video),
-                    Err(error) => {
-                        warn!(seq = work.seq, ?error, "UPOS complete 失败，按临时文件重传");
-                        None
-                    }
-                }
-            }
-            Ok(Ok(uploaded)) => {
-                if let Some(observation) = &work.observation {
-                    observation.finish(Some("边录边传长度不一致，改用完整文件重传"));
-                }
-                warn!(
-                    seq = work.seq,
-                    uploaded_size = uploaded.uploaded_size(),
-                    actual_size = work.pump.actual_size,
-                    "UPOS 预传长度不一致，按临时文件重传"
-                );
-                None
-            }
-            Ok(Err(error)) => {
-                if let Some(observation) = &work.observation {
-                    observation.finish(Some(&format!("{error:#}")));
-                }
-                warn!(seq = work.seq, ?error, "UPOS 预传失败，按临时文件重传");
-                None
-            }
-            Err(error) => {
-                if let Some(observation) = &work.observation {
-                    observation.finish(Some(&format!("{error:#}")));
-                }
-                warn!(seq = work.seq, ?error, "UPOS 预传任务失败，按临时文件重传");
-                None
-            }
+    let uploaded = work
+        .upload
+        .await
+        .change_context(AppError::Unknown)
+        .and_then(|res| res);
+    let result = match uploaded {
+        Ok(uploaded)
+            if work.pump.stream_complete
+                && uploaded.uploaded_size() == work.pump.streamed_size
+                && (work.file.is_none() || uploaded.declared_size() == work.pump.actual_size) =>
+        {
+            complete_byte_stream(uploaded, work.observation.as_ref()).await
         }
-    } else {
-        if let Ok(Err(error)) = uploaded {
-            warn!(seq = work.seq, ?error, "短流预传未完成，按实际长度重传");
-        }
-        if let Some(observation) = &work.observation {
-            observation.finish(Some("直播结束前流式上传未完成，改用完整文件重传"));
-        }
-        None
+        Ok(_) => Err(AppError::Custom("预传未完成或长度不一致".into()).into()),
+        Err(error) => Err(error),
     };
-
-    let video = match video {
-        Some(video) => video,
-        None => match upload_single_file(&work.file.path, upload_ctx).await {
-            Ok(video) => video,
-            Err(error) => {
-                retain_or_remove(&work.file).await;
-                return Err(error);
+    let video = match result {
+        Ok(video) => video,
+        Err(error) => {
+            if let Some(obs) = &work.observation {
+                obs.finish(Some(&format!("{error:#}")));
             }
-        },
+            let Some(path) = &work.file else {
+                return Err(error.attach("零落盘分段上传失败，无本地副本"));
+            };
+            warn!(?path, ?error, "按实际文件长度重新上传");
+            upload_single_file(path, upload_ctx).await?
+        }
     };
     Ok(ReadySegment {
         seq: work.seq,
@@ -676,7 +620,7 @@ async fn commit_unconfirmed(
     submit_api: Option<&str>,
     recorder: &Recorder,
 ) -> AppResult<()> {
-    let (temporary_files, committed, retention) = {
+    let committed = {
         let mut state = session.lock().await;
         if state.confirmed_parts == state.videos.len() {
             return Ok(());
@@ -720,40 +664,19 @@ async fn commit_unconfirmed(
             info!(aid, "边录边传首P投稿成功");
         }
 
-        let mut temporary_files = Vec::new();
         while state.cleaned_parts < state.confirmed_parts {
-            let file = state.files[state.cleaned_parts].clone();
-            if file.keep {
-                state.postprocess_paths.push(file.path);
-            } else {
-                temporary_files.push(file.path);
+            if let Some(path) = state.files[state.cleaned_parts].clone() {
+                state.postprocess_paths.push(path);
             }
             state.cleaned_parts += 1;
         }
-        (
-            temporary_files,
-            state.confirmed_parts,
-            state.retention.clone(),
-        )
+        state.confirmed_parts
     };
-
-    for path in temporary_files {
-        let removed = match &retention {
-            Some(retention) => retention::remove(retention, &[&path]).await.map(|_| ()),
-            None => tokio::fs::remove_file(&path).await,
-        };
-        if let Err(error) = removed {
-            warn!(?path, ?error, "删除边录边传临时文件失败");
-        }
-    }
     info!(committed, "边录边传分P状态已确认");
     Ok(())
 }
 
-/// 出错后放弃尚未投稿的分段：中止上传，但保留已录出内容的文件供手动补传。
-///
-/// 只有空文件才删除。录好的视频因为上传/投稿失败（如 cookie 失效）就被删掉，
-/// 是边录边传最不可接受的结果；普通下载器在同样情形下也会把文件留在磁盘上。
+/// 中止未完成上传；显式保存的录像留下供补传。
 async fn abandon_pending(
     pending: &mut VecDeque<PendingSegment>,
     ready: &mut BTreeMap<u64, ReadySegment>,
@@ -761,26 +684,18 @@ async fn abandon_pending(
     while let Some(work) = pending.pop_front() {
         work.upload.abort();
         let _ = work.upload.await;
-        retain_or_remove(&work.file).await;
+        warn_unsent(work.file.as_ref());
     }
     for (_, segment) in std::mem::take(ready) {
-        retain_or_remove(&segment.file).await;
+        warn_unsent(segment.file.as_ref());
     }
 }
 
-async fn retain_or_remove(file: &SegmentFile) {
-    let size = tokio::fs::metadata(&file.path)
-        .await
-        .map(|meta| meta.len())
-        .unwrap_or(0);
-    if file.keep || size >= MIN_MEDIA_BYTES {
-        warn!(
-            path = %file.path.display(),
-            size,
-            "边录边传分段未能投稿，已保留本地文件，可手动补传"
-        );
+fn warn_unsent(path: Option<&PathBuf>) {
+    if let Some(path) = path {
+        warn!(?path, "边录边传分段未能投稿，可用本地副本补传");
     } else {
-        let _ = tokio::fs::remove_file(&file.path).await;
+        warn!("边录边传分段未能投稿，未配置本地副本");
     }
 }
 
@@ -791,10 +706,7 @@ mod tests {
     fn segment(seq: u64) -> ReadySegment {
         ReadySegment {
             seq,
-            file: SegmentFile {
-                path: PathBuf::from(format!("seg-{seq}.mkv")),
-                keep: true,
-            },
+            file: Some(PathBuf::from(format!("seg-{seq}.mkv"))),
             video: Video::new(&format!("seg-{seq}")),
         }
     }
@@ -842,7 +754,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn abandoning_segments_keeps_recorded_files_and_drops_empty_ones() {
+    async fn abandoning_segments_keeps_explicit_local_copies() {
         let temp = tempfile::tempdir().unwrap();
         let recorded = temp.path().join("recorded.mkv");
         std::fs::write(&recorded, vec![0u8; MIN_MEDIA_BYTES as usize]).unwrap();
@@ -855,7 +767,7 @@ mod tests {
                 seq,
                 ReadySegment {
                     seq,
-                    file: SegmentFile { path, keep: false },
+                    file: Some(path),
                     video: Video::new("seg"),
                 },
             );
@@ -864,7 +776,7 @@ mod tests {
 
         assert!(ready.is_empty());
         assert!(recorded.exists(), "上传/投稿失败不能把录好的分段一起删掉");
-        assert!(!empty.exists(), "空文件没有保留价值");
+        assert!(empty.exists(), "显式保留的副本不自动清理");
     }
 
     #[tokio::test]

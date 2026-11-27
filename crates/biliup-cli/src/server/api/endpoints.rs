@@ -1128,6 +1128,7 @@ pub async fn login_by_qrcode(
 /// `GET /v1/videos`：工作目录下的录像文件。属于某一场、能按场次回看的文件另带 `session_id` 和
 /// `segment_start_ms`（这一段在场次时间轴上的起点），前端据此打开回看页并定位到这一段。
 pub async fn get_videos(
+    State(config): State<Arc<RwLock<Config>>>,
     State(pool): State<ConnectionPool>,
 ) -> Result<Json<Vec<serde_json::Value>>, Response> {
     let media_extensions = [".mp4", ".flv", ".3gp", ".webm", ".mkv", ".ts"];
@@ -1139,14 +1140,15 @@ pub async fn get_videos(
             Vec::new()
         }
     };
-    let cwd = std::env::current_dir().ok();
+    let root = config.read().unwrap().recording_root().to_owned();
+    let cwd = std::path::absolute(&root).ok();
     let segments = workbench::store::segment_files_in_dir(segments, cwd.as_deref());
 
     let mut file_list = Vec::new();
     let mut index = 1;
 
     // **use tokio::fs::read_dir**
-    if let Ok(mut entries) = fs::read_dir(".").await {
+    if let Ok(mut entries) = fs::read_dir(&root).await {
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy().into_owned();
@@ -1272,9 +1274,7 @@ pub async fn post_uploads(
         let submit_api = config.submit_api.clone();
         (line, limit, submit_api)
     };
-    let root = std::env::current_dir()
-        .change_context(AppError::Unknown)
-        .map_err(report_to_response)?;
+    let root = config.read().unwrap().recording_root().to_owned();
     let files = json_data
         .files
         .iter()
@@ -1386,7 +1386,7 @@ mod recording_policy_status_tests {
         let media = tempfile::Builder::new()
             .prefix(".manual-upload-observation-")
             .suffix(".flv")
-            .tempfile_in(std::env::current_dir().unwrap())
+            .tempfile_in(dir.path())
             .unwrap();
         std::fs::write(media.path(), b"test media").unwrap();
         let file_name = media
@@ -1397,8 +1397,16 @@ mod recording_policy_status_tests {
             .into_owned();
         let observations = UploadObservations::new(pool.clone());
         observations.initialize().await.unwrap();
+        let config = Arc::new(RwLock::new(Config {
+            recording_dir: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        }));
+        let Json(list) = get_videos(State(config.clone()), State(pool.clone()))
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 1, "只应列出录像目录中的测试媒体");
         let Json(response) = post_uploads(
-            State(Arc::new(RwLock::new(Config::default()))),
+            State(config),
             State(pool),
             State(observations.clone()),
             Json(PostUploads {

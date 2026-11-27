@@ -300,7 +300,11 @@ impl FfmpegDownloader {
         cmd.args(&args)
             .arg(format!(
                 "{}.{}.part",
-                download_config.recorder.filename_template(),
+                crate::server::common::util::template_in(
+                    &download_config.output_dir,
+                    &download_config.recorder.filename_template()
+                )
+                .display(),
                 download_config.suffix
             ))
             .stdin(Stdio::null())
@@ -320,11 +324,11 @@ impl FfmpegDownloader {
         // 异步读取stdout
         let mut reader = BufReader::new(stdout).lines();
         let mut segment_index = 0;
-        let mut prev_file_path: Option<PathBuf> = None;
 
         while let Some(line) = reader.next_line().await.change_context(AppError::Unknown)? {
             // 解析文件名
-            let file_path = PathBuf::from(line.trim());
+            // FFmpeg flat segment lists report the basename, not the output directory.
+            let file_path = download_config.output_dir.join(line.trim());
 
             // 等待文件写入完成
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
@@ -351,7 +355,6 @@ impl FfmpegDownloader {
             }));
 
             segment_index += 1;
-            prev_file_path = Some(file_path);
         }
         let status = spawn_log(
             child,
@@ -359,25 +362,6 @@ impl FfmpegDownloader {
             download_config.bytes_written.clone(),
         )
         .await?;
-
-        if let Some(file_path) = prev_file_path {
-            // 重命名文件
-            let no_ext = file_path.with_extension("");
-            tokio::fs::rename(&file_path, &no_ext)
-                .await
-                .change_context(AppError::Unknown)?;
-            callback(SegmentEvent::Segment(SegmentInfo {
-                prev_file_path: no_ext,
-                danmaku_file_path: None,
-                next_file_path: None,
-                segment_index,
-                duration_secs: None,
-                size_bytes: None,
-                ready: None,
-                // start_time: std::time::SystemTime::now(),
-                // end_time: std::time::SystemTime::now(),
-            }));
-        }
 
         // 根据退出码判断状态
         match status.code() {
@@ -414,10 +398,9 @@ impl FfmpegDownloader {
         let mut handle = self.process_handle.write().await;
         if let Some(child) = &mut *handle {
             child.kill().await.change_context(AppError::Unknown)?;
-            Ok(())
-        } else {
-            Err(AppError::Custom("Process handle not found".to_string()).into())
         }
+        // 断流后的复检阶段没有 FFmpeg 子进程；取消原任务就足够了。
+        Ok(())
     }
 
     // async fn get_status(&self) -> DownloadStatus {
@@ -514,6 +497,60 @@ mod tests {
 
     fn internal() -> FfmpegDownloader {
         FfmpegDownloader::new(Vec::new(), DownloaderType::FfmpegInternal)
+    }
+
+    #[tokio::test]
+    async fn ffmpeg_publishes_once_in_the_configured_recording_dir() {
+        if !tools::ffmpeg_status().await.available {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("input.flv");
+        let output = dir.path().join("media 100%");
+        std::fs::create_dir(&output).unwrap();
+        assert!(
+            tools::ffmpeg_command()
+                .args([
+                    "-v",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=size=32x32:duration=0.3",
+                    "-c:v",
+                    "flv"
+                ])
+                .arg(&src)
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+        for (downloader, name) in [(internal(), "internal"), (external(), "external")] {
+            let mut cfg = config(None, None);
+            cfg.url = src.to_string_lossy().into_owned();
+            cfg.output_dir = output.clone();
+            cfg.recorder.filename_prefix = Some(name.into());
+            let mut published = Vec::new();
+            downloader
+                .download(
+                    Box::new(|event| {
+                        if let SegmentEvent::Segment(s) = event {
+                            published.push(s.prev_file_path);
+                        }
+                    }),
+                    cfg,
+                )
+                .await
+                .unwrap();
+            let expected = output.join(format!("{name}.flv"));
+            assert_eq!(published, [expected.clone()]);
+            assert!(expected.metadata().unwrap().len() > 100);
+            downloader
+                .stop()
+                .await
+                .expect("复检时没有子进程，停止也应成功");
+        }
     }
 
     #[test]

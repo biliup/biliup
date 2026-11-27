@@ -384,12 +384,16 @@ async fn no_store(request: axum::extract::Request, next: axum::middleware::Next)
 }
 
 async fn using_serve_file_from_a_route(
+    axum::extract::State(config): axum::extract::State<
+        std::sync::Arc<std::sync::RwLock<crate::server::config::Config>>,
+    >,
     axum::extract::Path(path): axum::extract::Path<String>,
     request: Request<Body>,
 ) -> Response {
-    let root = match std::env::current_dir() {
-        Ok(root) => root,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    let root = if ALLOWED_LOG_FILES.contains(&path.as_str()) {
+        std::path::PathBuf::from(".")
+    } else {
+        config.read().unwrap().recording_root().to_owned()
     };
     let path = match resolve_static_path(&root, &path) {
         Ok(path) => path,

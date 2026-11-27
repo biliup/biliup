@@ -1017,8 +1017,8 @@ fn segment_files_are_matched_to_the_working_directory_by_name() {
         path: path.to_string(),
         start_ms,
     };
-    let root = tempfile::tempdir().unwrap();
-    let dir = root.path();
+    let root = std::env::current_dir().unwrap();
+    let dir = root.as_path();
     let inside = dir.join("c.flv").to_string_lossy().into_owned();
     let outside = dir
         .join("elsewhere")

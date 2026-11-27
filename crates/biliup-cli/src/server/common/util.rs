@@ -204,6 +204,14 @@ fn oauth_secret_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r#"(?i)\b(oauth)\s+[^\s"]+"#).expect("oauth secret regex"))
 }
 
+/// 只有基名是 strftime 模板，用户配置的目录中的 `%` 是字面量。
+pub(crate) fn template_in(dir: &Path, template: &str) -> PathBuf {
+    if dir == Path::new(".") {
+        return template.into();
+    }
+    Path::new(&dir.to_string_lossy().replace('%', "%%")).join(template)
+}
+
 /// 生成弹幕文件名模板（包含时间格式占位符），并清洗非法字符
 pub fn danmaku_filename_template(filename_prefix: Option<&str>, name: &str) -> String {
     let name = escape_strftime(name);

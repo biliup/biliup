@@ -48,7 +48,12 @@ impl StreamGears {
     ) -> AppResult<DownloadStatus> {
         // 开段与关段两个钩子共用同一个回调
         let callback = Arc::new(Mutex::new(callback));
-        let file_name = download_config.recorder.filename_template();
+        let file_name = crate::server::common::util::template_in(
+            &download_config.output_dir,
+            &download_config.recorder.filename_template(),
+        )
+        .to_string_lossy()
+        .into_owned();
         let headers_in = construct_headers(&download_config.headers).map_err(AppError::Custom)?;
         let proxy = self.proxy.clone();
         let segment = Segmentable::new(

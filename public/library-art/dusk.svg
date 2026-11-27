@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 540">
+  <defs>
+    <linearGradient id="sky" x2=".85" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#261e3c"/><stop offset=".48" stop-color="#a4514e"/><stop offset=".77" stop-color="#ec9662"/><stop offset="1" stop-color="#ffe0a0"/></linearGradient>
+    <radialGradient id="halo"><stop stop-color="#ffda9a" stop-opacity=".7"/><stop offset="1" stop-color="#ffbb7d" stop-opacity="0"/></radialGradient>
+    <linearGradient id="sun" x2="0" y2="1"><stop stop-color="#fff3c1"/><stop offset="1" stop-color="#ffcb79"/></linearGradient>
+    <linearGradient id="near" x2="1" y2=".5"><stop stop-color="#1f2037"/><stop offset=".65" stop-color="#65383f"/><stop offset="1" stop-color="#ac5f47"/></linearGradient>
+    <pattern id="etch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(22)"><path d="M0 0v6" stroke="#ffe5a4" stroke-opacity=".27" stroke-width="1.4"/></pattern>
+    <filter id="paper"><feTurbulence type="fractalNoise" baseFrequency=".67" numOctaves="3" stitchTiles="stitch"/></filter>
+    <path id="mesa" d="M-20 402l88-19 62-46 76-14 54-33 41-4 25-20 50-7 29-24 47-5 16-12 33-4 25 5 12-6 28 2 11-16 31-3 16-11 43-2 19-14 46-3 23-10 37-1 20-10 27 3 16-5 16 19 29 6 12 17 50 8 21 21 31 3 30 26 37 12v260H-20z"/>
+    <path id="ridge" d="M-20 492c118-64 200-130 282-123 60 5 104-29 158-28 95 3 109 37 189 22 68-13 91-44 150-57 65-14 124-52 215-62v314H-20z"/>
+  </defs>
+  <path fill="url(#sky)" d="M0 0h960v540H0z"/><circle cx="695" cy="203" r="245" fill="url(#halo)"/>
+  <g fill="none" stroke="#ffdea0" opacity=".34"><circle cx="695" cy="203" r="117"/><circle cx="695" cy="203" r="123" stroke-dasharray="1 5"/><path d="M540 203h16m279 0h16M695 54v10"/></g>
+  <circle cx="695" cy="203" r="99" fill="url(#sun)"/>
+  <path fill="#df9372" d="M0 311l106-34 80-20 44-23 47 9 81-33 25 2 41-20 21 2 32-15 41 9 40-20 26-3 37-22 24 7 38 23 56 10 34 22 34-8 27 7 24-18 24 4 43-25 64-5v380H0z"/>
+  <use href="#mesa" fill="#b66b56"/><use href="#mesa" fill="url(#etch)"/>
+  <path d="M0 422c142-65 219-98 293-96s133-65 216-63c62 2 99 39 178 21s176-21 273-67v323H0z" fill="#93544c"/>
+  <g fill="none" stroke="#f7b67a" opacity=".57"><path d="M447 281q55-26 94-12t78 21m-197 7q69-29 114-17t80 20m-206 9q69-29 119-19t80 23m-214 8q73-28 130-21t79 24"/></g>
+  <use href="#ridge" fill="url(#near)"/><path d="M379 540c77-46 167-43 235-79s119-88 198-105c78-17 99-61 148-80v264z" fill="#542f3c"/>
+  <g fill="none" stroke="#d78764" opacity=".73"><path id="line" d="M505 540c83-33 119-26 200-79 77-51 88-37 165-69 52-23 62-46 106-56"/><use href="#line" transform="translate(0 8)"/><use href="#line" transform="translate(0 17)"/><use href="#line" transform="translate(0 27)"/><use href="#line" transform="translate(0 38)"/><use href="#line" transform="translate(0 50)"/><use href="#line" transform="translate(0 63)"/></g>
+  <path d="M0 0h960v540H0z" filter="url(#paper)" opacity=".13" style="mix-blend-mode:soft-light"/>
+</svg>

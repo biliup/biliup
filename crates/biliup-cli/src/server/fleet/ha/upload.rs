@@ -290,7 +290,7 @@ pub(crate) async fn run_append(
 }
 
 /// 模式 2：主机进程中断、备机接手了这一段，主机回来后先投盘上它那半（§4「主机先投、副机追加分 P」），
-/// 投成后备机据 `Uploaded` 追加它那半。`started` 是这个主机的启动时刻。占上传池的一个槽位
+/// 投成后备机据 `Uploaded` 追加它那半。`started` 是这个主机的启动时刻。只有传文件时才占上传槽。
 pub(crate) async fn run_resume(
     primary: Arc<Primary>,
     services: ServiceRegister,
@@ -309,23 +309,24 @@ pub(crate) async fn run_resume(
                 template_name: None,
                 fifo: false,
             });
-    let slots = services.managers.upload_slots();
-    let _slot = slots.acquire().await;
     match resume_input(&primary, &services, &job, started).await {
         Ok(found) => {
             primary.resume_ended(&job.key, found.ended_at);
             let observation = guard.observation();
             observation.template_name(Some(&found.config.template_name));
             let segments = futures::stream::iter(found.segments);
-            let result = observation
-                .scope(run_primary(
-                    &primary,
-                    &job.key,
-                    segments,
-                    &found.ctx,
-                    &found.config,
-                ))
-                .await;
+            let work = observation.scope(run_primary(
+                &primary,
+                &job.key,
+                segments,
+                &found.ctx,
+                &found.config,
+            ));
+            let result = crate::server::common::upload::with_transfer_pool(
+                services.managers.upload_slots(),
+                work,
+            )
+            .await;
             let telemetry_result = result
                 .as_ref()
                 .map(|_| ())
@@ -584,7 +585,10 @@ impl Session {
                 .await
             }
             #[cfg(test)]
-            Session::Double(double) => double.upload(&path, bytes).await,
+            Session::Double(double) => {
+                let _slot = crate::server::common::upload::session_transfer_slot().await;
+                double.upload(&path, bytes).await
+            }
         }
     }
 

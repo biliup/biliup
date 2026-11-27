@@ -180,6 +180,48 @@ async fn only_an_absent_postprocessor_gets_default_cleanup() {
 }
 
 #[tokio::test]
+async fn sync_copy_survives_by_default_but_honors_explicit_rm() {
+    for post in [None, Some(vec![HookStep::Remove("rm".into())])] {
+        let dir = tempfile::tempdir().unwrap();
+        let keep = post.is_none();
+        let ctx = context(dir.path(), None, post).await;
+        let video = dir.path().join("saved.mkv");
+        std::fs::write(&video, b"video").unwrap();
+        crate::server::common::sync::postprocess_saved_copies(vec![video.clone()], &ctx)
+            .await
+            .unwrap();
+        assert_eq!(video.exists(), keep);
+    }
+}
+
+#[tokio::test]
+async fn ordinary_default_rm_removes_both_uploaded_parts_and_their_xml() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = context(dir.path(), None, None).await;
+    let mut segments = vec![];
+    let mut paths = vec![];
+    for n in 0..2 {
+        let video = dir.path().join(format!("test-{n}.flv"));
+        let xml = video.with_extension("xml");
+        for path in [&video, &xml] {
+            std::fs::write(path, b"test media").unwrap();
+        }
+        paths.extend([video.clone(), xml.clone()]);
+        segments.push(SegmentInfo::new(video, Some(xml), None, n));
+    }
+    let result =
+        pipeline_upload_videos(futures::stream::iter(segments), &[], &ctx, |_path| async {
+            Ok(Video::new("confirmed"))
+        })
+        .await
+        .unwrap();
+    assert_eq!(result.videos.len(), 2);
+    assert!(paths.iter().all(|p| p.exists()));
+    execute_postprocessor(result.paths, &ctx).await.unwrap();
+    assert!(paths.iter().all(|p| !p.exists()));
+}
+
+#[tokio::test]
 async fn empty_and_sync_sessions_still_get_one_completion_hook() {
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("calls.txt");

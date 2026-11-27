@@ -695,6 +695,8 @@ async fn upload_file_inner(
     if repair_audio {
         prepare_upload_audio(file_path).await?;
     }
+    // 音频准备、等下一段、网络退避和提交稿件都不消费传输槽。
+    let _slot = session_transfer_slot().await;
     let video_path = file_path;
     let UploadContext {
         bilibili,
@@ -1904,7 +1906,7 @@ mosaic_config: Some(value),
 pub struct UActor {
     /// 上传消息接收器
     receiver: Receiver<UploaderMessage>,
-    /// 上传池槽位（pool2_size）：每条消息的上传流程占用一个，处理完归还
+    /// 上传池槽位（pool2_size）：仅传输分段时占用，等待下一段、退避和提交稿件均不占用
     slots: Arc<Slots>,
 }
 
@@ -1916,10 +1918,10 @@ impl UActor {
 
     /// 运行Actor主循环，处理接收到的消息
     ///
-    /// 同时处理的消息数不超过上传池容量，容量调整后立即生效。
+    /// 每个场次独立等待分段，实际传输共享可调的上传池。
     pub(crate) async fn run(self) {
         let _drain = QueuedUploadDrain(self.receiver.clone());
-        run_in_slots(self.receiver, self.slots, handle_message).await
+        run_sessions(self.receiver, self.slots, handle_message).await
     }
 }
 
@@ -1932,27 +1934,35 @@ impl Drop for QueuedUploadDrain {
     }
 }
 
-/// 按到达顺序取出消息，占到一个槽位后交给 `handle` 在独立任务里处理，处理完归还槽位。
-///
-/// 先取消息再占槽位：只有真有消息要处理时才占用，调小容量后不会有闲置却占着的槽位。
-/// 处理任务都在本函数的 `JoinSet` 里，本函数所在任务被 abort 时一并取消。
-async fn run_in_slots<M, F, Fut>(receiver: Receiver<M>, slots: Arc<Slots>, handle: F)
+// 普通自动投稿、HA 备机与补投共用文件传输槽；不改变手动投稿的独立调度。
+tokio::task_local! { static SESSION_TRANSFERS: Arc<Slots>; }
+
+pub(crate) fn with_transfer_pool<F: Future>(
+    slots: Arc<Slots>,
+    work: F,
+) -> impl Future<Output = F::Output> {
+    SESSION_TRANSFERS.scope(slots, work)
+}
+
+pub(crate) async fn session_transfer_slot() -> Option<crate::server::core::slots::Slot> {
+    let slots = SESSION_TRANSFERS.try_with(Arc::clone).ok()?;
+    Some(slots.acquire().await)
+}
+
+async fn run_sessions<M, F, Fut>(receiver: Receiver<M>, slots: Arc<Slots>, handle: F)
 where
     F: Fn(M) -> Fut,
     Fut: Future<Output = ()> + Send + 'static,
 {
     let mut tasks = JoinSet::new();
-    while let Ok(msg) = receiver.recv().await {
-        let slot = slots.acquire().await;
-        // 回收已经结束的任务
-        while let Some(result) = tasks.try_join_next() {
-            report_task_exit(result);
+    loop {
+        tokio::select! {
+            Some(result) = tasks.join_next(), if !tasks.is_empty() => report_task_exit(result),
+            msg = receiver.recv() => match msg {
+                Ok(msg) => { tasks.spawn(with_transfer_pool(slots.clone(), handle(msg))); }
+                Err(_) => break,
+            }
         }
-        let task = handle(msg);
-        tasks.spawn(async move {
-            let _slot = slot;
-            task.await
-        });
     }
     while let Some(result) = tasks.join_next().await {
         report_task_exit(result);
@@ -2085,7 +2095,7 @@ pub(crate) fn observe_context(
 
 #[cfg(test)]
 mod upload_pool_tests {
-    use super::run_in_slots;
+    use super::{run_sessions, session_transfer_slot};
     use crate::server::core::slots::Slots;
     use std::sync::Arc;
     use std::time::Duration;
@@ -2104,18 +2114,59 @@ mod upload_pool_tests {
         assert!(next.is_err(), "不应有新的上传任务开始：{next:?}");
     }
 
+    #[tokio::test]
+    async fn idle_session_does_not_block_transfer_or_submit() {
+        let (tx, rx) = async_channel::unbounded();
+        let slots = Arc::new(Slots::new(1));
+        let (events_tx, mut events) = mpsc::unbounded_channel();
+        let dispatcher = tokio::spawn(run_sessions(
+            rx,
+            slots.clone(),
+            move |(id, gate): (usize, oneshot::Receiver<()>)| {
+                let events = events_tx.clone();
+                async move {
+                    if id == 0 {
+                        {
+                            let _slot = session_transfer_slot().await;
+                            events.send("A uploaded").unwrap();
+                        }
+                        let _ = gate.await; // 等待 A 的场次结束，不占网络传输槽。
+                        events.send("A submitted").unwrap();
+                    } else {
+                        let _slot = session_transfer_slot().await;
+                        events.send("B uploading").unwrap();
+                        let _ = gate.await;
+                    }
+                }
+            },
+        ));
+        let (end_a, a) = oneshot::channel();
+        tx.send((0, a)).await.unwrap();
+        assert_eq!(next_start(&mut events).await, "A uploaded");
+        let (end_b, b) = oneshot::channel();
+        tx.send((1, b)).await.unwrap();
+        assert_eq!(next_start(&mut events).await, "B uploading");
+        end_a.send(()).unwrap();
+        assert_eq!(next_start(&mut events).await, "A submitted");
+        assert_eq!(slots.occupied(), 1);
+        end_b.send(()).unwrap();
+        drop(tx);
+        dispatcher.await.unwrap();
+    }
+
     /// 同时处理的消息数不超过上传池容量；扩容 / 缩容都立即生效，缩容不打断在跑的任务
     #[tokio::test]
     async fn uploads_stay_within_the_pool_and_resizing_applies_immediately() {
         let (tx, rx) = async_channel::bounded(16);
         let slots = Arc::new(Slots::new(1));
         let (started_tx, mut started) = mpsc::unbounded_channel();
-        let dispatcher = tokio::spawn(run_in_slots(
+        let dispatcher = tokio::spawn(run_sessions(
             rx,
             slots.clone(),
             move |(id, release): (usize, oneshot::Receiver<()>)| {
                 let started_tx = started_tx.clone();
                 async move {
+                    let _slot = session_transfer_slot().await;
                     started_tx.send(id).unwrap();
                     let _ = release.await;
                 }
@@ -2156,12 +2207,13 @@ mod upload_pool_tests {
     async fn a_panicking_upload_returns_its_slot() {
         let (tx, rx) = async_channel::bounded(16);
         let (started_tx, mut started) = mpsc::unbounded_channel();
-        let dispatcher = tokio::spawn(run_in_slots(
+        let dispatcher = tokio::spawn(run_sessions(
             rx,
             Arc::new(Slots::new(1)),
             move |id: usize| {
                 let started_tx = started_tx.clone();
                 async move {
+                    let _slot = session_transfer_slot().await;
                     started_tx.send(id).unwrap();
                     assert_ne!(id, 0, "第一条消息的处理故意 panic");
                 }
@@ -2183,13 +2235,14 @@ mod upload_pool_tests {
         let (tx, rx) = async_channel::bounded(16);
         let slots = Arc::new(Slots::new(1));
         let (started_tx, mut started) = mpsc::unbounded_channel();
-        let dispatcher = tokio::spawn(run_in_slots(
+        let dispatcher = tokio::spawn(run_sessions(
             rx,
             slots.clone(),
             move |alive: oneshot::Sender<()>| {
                 let started_tx = started_tx.clone();
                 async move {
                     let _alive = alive;
+                    let _slot = session_transfer_slot().await;
                     started_tx.send(()).unwrap();
                     std::future::pending::<()>().await;
                 }

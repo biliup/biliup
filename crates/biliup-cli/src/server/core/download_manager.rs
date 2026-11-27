@@ -5,7 +5,7 @@ use crate::server::core::slots::Slots;
 use crate::server::errors::{AppError, AppResult};
 use crate::server::infrastructure::connection_pool::ConnectionPool;
 use crate::server::infrastructure::context::{Stage, Worker, WorkerStatus};
-use async_channel::bounded;
+use async_channel::unbounded;
 use biliup::downloader::live::LivePlugin;
 use error_stack::ResultExt;
 use std::sync::Arc;
@@ -22,7 +22,7 @@ pub struct DownloadManager {
 
     /// 下载池（pool1_size）：同时录制的直播间上限，由 Monitor 在检测开播前占用。
     download_slots: Arc<Slots>,
-    /// 上传池（pool2_size）：同时进行的上传流程上限，由上传Actor在处理每条消息前占用。
+    /// 上传池（pool2_size）：同时传输文件的上限，不限制等待新分段的场次。
     upload_slots: Arc<Slots>,
     /// 上传Actor任务句柄
     u_kill: JoinHandle<()>,
@@ -39,7 +39,7 @@ impl DownloadManager {
     pub fn new(pool1_size: u32, pool2_size: u32, pool: ConnectionPool) -> Self {
         let observations = UploadObservations::new(pool.clone());
         // 创建消息通道
-        let (up_tx, up_rx) = bounded(16);
+        let (up_tx, up_rx) = unbounded(); // 只传各场次的接收端，不缓存媒体字节。
         let download_slots = Arc::new(Slots::new(pool1_size as usize));
         let upload_slots = Arc::new(Slots::new(pool2_size as usize));
 

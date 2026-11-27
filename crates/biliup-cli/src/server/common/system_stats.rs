@@ -8,17 +8,18 @@
 //! - CPU：整机所有逻辑核的平均占用。容器里读到的也是宿主机的数，与容器内 `top` 一致。
 //! - 内存：已用 = 总量 - 可用，可回收的页缓存不算已用。Linux 容器设了内存上限时改报 cgroup 的
 //!   上限与匿名内存：录制会把页缓存写满到上限，按 `memory.current` 算会一直显示将满。
-//! - 磁盘：录制文件都写在工作目录下，直接对它调 statvfs / GetDiskFreeSpaceExW，
+//! - 磁盘：按当前录像目录（未设置时为工作目录）调 statvfs / GetDiskFreeSpaceExW，
 //!   录制目录挂在 NFS / SMB 上也能反映；已用比例与 `df` 同口径（前端按 used / (used + available) 算）。
 //! - 网速：参与统计的网卡收发字节差 / 实测时间差。docker0、veth、网桥、bond 与物理网卡走的是
 //!   同一份流量，全加起来会重复计数，所以只统计物理网卡；一块物理网卡都没有时
 //!   （bridge 网络的容器里只有 veth）退回统计全部非回环网卡。
 
+use crate::server::config::Config;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 use sysinfo::{CGroupLimits, IpNetwork, Networks, System};
 #[cfg(target_os = "linux")]
@@ -158,13 +159,13 @@ impl SystemMonitor {
     }
 
     /// 创建监视器并启动采样任务。任务只持有弱引用，监视器被丢弃（服务停止）后在下一个周期退出。
-    pub fn spawn() -> Arc<Self> {
-        Self::start(SAMPLE_INTERVAL).0
+    pub fn spawn(config: Arc<RwLock<Config>>) -> Arc<Self> {
+        Self::start(SAMPLE_INTERVAL, config).0
     }
 
-    fn start(interval: Duration) -> (Arc<Self>, JoinHandle<()>) {
+    fn start(interval: Duration, config: Arc<RwLock<Config>>) -> (Arc<Self>, JoinHandle<()>) {
         let monitor = Arc::new(Self::new(interval));
-        let task = tokio::spawn(run(Arc::downgrade(&monitor), interval));
+        let task = tokio::spawn(run(Arc::downgrade(&monitor), interval, config));
         (monitor, task)
     }
 
@@ -210,7 +211,7 @@ impl SystemMonitor {
     }
 }
 
-async fn run(weak: Weak<SystemMonitor>, interval: Duration) {
+async fn run(weak: Weak<SystemMonitor>, interval: Duration, config: Arc<RwLock<Config>>) {
     // sysinfo 读 /proc、/sys 或调系统 API，都是阻塞调用，放到阻塞线程里做
     let mut sampler = match tokio::task::spawn_blocking(Sampler::new).await {
         Ok(sampler) => sampler,
@@ -244,7 +245,8 @@ async fn run(weak: Weak<SystemMonitor>, interval: Duration) {
         };
         sampler = returned;
         let ts = now_ms();
-        let (disk_usage, rates) = tokio::join!(disk.poll(), disk_io.poll());
+        let dir = config.read().unwrap().recording_root().to_owned();
+        let (disk_usage, rates) = tokio::join!(disk.poll(&dir), disk_io.poll(&dir));
         reading.disk_read_bytes_per_sec = rates.read;
         reading.disk_write_bytes_per_sec = rates.write;
         let Some(monitor) = weak.upgrade() else {
@@ -354,8 +356,8 @@ struct DiskIoSampler {
 }
 
 impl DiskIoSampler {
-    fn read(&mut self) -> DiskRates {
-        let counters = self.counters();
+    fn read(&mut self, dir: &Path) -> DiskRates {
+        let counters = self.counters(dir);
         self.record(counters, Instant::now())
     }
 
@@ -379,8 +381,8 @@ impl DiskIoSampler {
     }
 
     #[cfg(target_os = "linux")]
-    fn counters(&mut self) -> Option<(String, u64, u64)> {
-        let path = std::env::current_dir().ok()?;
+    fn counters(&mut self, dir: &Path) -> Option<(String, u64, u64)> {
+        let path = std::fs::canonicalize(dir).ok()?;
         // Include all mounts here: sysinfo skips network/tmpfs mounts by default.
         // Their enclosing local disk must never be reported as their IO device.
         let mounts = std::fs::read_to_string("/proc/self/mounts").ok()?;
@@ -410,12 +412,12 @@ impl DiskIoSampler {
     }
 
     #[cfg(windows)]
-    fn counters(&mut self) -> Option<(String, u64, u64)> {
-        windows_disk_counters(&std::env::current_dir().ok()?).ok()
+    fn counters(&mut self, dir: &Path) -> Option<(String, u64, u64)> {
+        windows_disk_counters(&std::fs::canonicalize(dir).ok()?).ok()
     }
 
     #[cfg(not(any(target_os = "linux", windows)))]
-    fn counters(&mut self) -> Option<(String, u64, u64)> {
+    fn counters(&mut self, _dir: &Path) -> Option<(String, u64, u64)> {
         // sysinfo does not expose whether these platforms' IO query succeeded;
         // reporting its fallback zeros would turn unavailable counters into idle.
         None
@@ -566,11 +568,12 @@ struct DiskIoProbe {
 }
 
 impl DiskIoProbe {
-    async fn poll(&mut self) -> DiskRates {
+    async fn poll(&mut self, dir: &Path) -> DiskRates {
         if self.in_flight.is_none() {
+            let dir = dir.to_owned();
             let mut sampler = self.sampler.take().unwrap_or_default();
             self.in_flight = Some(tokio::task::spawn_blocking(move || {
-                let rates = sampler.read();
+                let rates = sampler.read(&dir);
                 (sampler, rates)
             }));
         }
@@ -678,7 +681,7 @@ fn link_target_is_virtual(target: &Path) -> bool {
 /// 录制目录的磁盘查询。查询放在阻塞线程里并限时等待；上一次还没返回（例如网络盘挂住）就不再发起，
 /// 最多只有一个线程被卡住，阻塞线程池不会被一次次的查询占满。
 struct DiskProbe {
-    probe: fn() -> Option<DiskUsage>,
+    probe: fn(&Path) -> Option<DiskUsage>,
     timeout: Duration,
     stale_after: Duration,
     in_flight: Option<JoinHandle<Option<DiskUsage>>>,
@@ -690,7 +693,11 @@ impl DiskProbe {
         Self::with(probe_disk, DISK_PROBE_TIMEOUT, DISK_STALE_AFTER)
     }
 
-    fn with(probe: fn() -> Option<DiskUsage>, timeout: Duration, stale_after: Duration) -> Self {
+    fn with(
+        probe: fn(&Path) -> Option<DiskUsage>,
+        timeout: Duration,
+        stale_after: Duration,
+    ) -> Self {
         Self {
             probe,
             timeout,
@@ -700,11 +707,12 @@ impl DiskProbe {
         }
     }
 
-    async fn poll(&mut self) -> Option<DiskUsage> {
+    async fn poll(&mut self, dir: &Path) -> Option<DiskUsage> {
         let probe = self.probe;
-        let handle = self
-            .in_flight
-            .get_or_insert_with(|| tokio::task::spawn_blocking(probe));
+        let handle = self.in_flight.get_or_insert_with(|| {
+            let dir = dir.to_owned();
+            tokio::task::spawn_blocking(move || probe(&dir))
+        });
         // 超时就让它继续跑，下个周期接着等同一个查询
         if let Ok(joined) = tokio::time::timeout(self.timeout, handle).await {
             self.in_flight = None;
@@ -723,11 +731,8 @@ impl DiskProbe {
     }
 }
 
-/// 录制文件写在工作目录下（下载器的输出目录是 `.`），查它所在文件系统的容量。
-fn probe_disk() -> Option<DiskUsage> {
-    let dir = std::env::current_dir()
-        .inspect_err(|e| debug!(error = %e, "读取工作目录失败"))
-        .ok()?;
+fn probe_disk(dir: &Path) -> Option<DiskUsage> {
+    let dir = std::path::absolute(dir).ok()?;
     disk_usage(&dir)
         .inspect_err(|e| debug!(error = %e, path = %dir.display(), "读取录制目录磁盘容量失败"))
         .ok()
@@ -1059,7 +1064,9 @@ mod tests {
     /// 真实采样：历史里陆续出现读数；监视器被丢弃后采样任务退出
     #[tokio::test]
     async fn the_sampler_fills_the_history_and_stops_with_the_monitor() {
-        let (monitor, task) = SystemMonitor::start(Duration::from_millis(50));
+        let dir = tempfile::tempdir().unwrap();
+        let config = Arc::new(RwLock::new(Config::default()));
+        let (monitor, task) = SystemMonitor::start(Duration::from_millis(50), config.clone());
         let stats = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 let stats = monitor.snapshot(None);
@@ -1079,6 +1086,18 @@ mod tests {
         let memory = stats.memory.expect("采样后应有内存读数");
         assert!(memory.total > 0 && memory.used <= memory.total);
 
+        config.write().unwrap().recording_dir = Some(dir.path().display().to_string());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !monitor
+                .snapshot(None)
+                .disk
+                .is_some_and(|usage| Path::new(&usage.path) == dir.path())
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("改目录后应采样录像盘而不是工作目录");
         drop(monitor);
         tokio::time::timeout(Duration::from_secs(5), task)
             .await
@@ -1273,7 +1292,7 @@ mod tests {
     static HUNG_PROBE_RELEASED: AtomicBool = AtomicBool::new(false);
 
     /// 模拟挂住的网络盘：直到测试放行才返回
-    fn hung_probe() -> Option<DiskUsage> {
+    fn hung_probe(_: &Path) -> Option<DiskUsage> {
         HUNG_PROBE_CALLS.fetch_add(1, Ordering::SeqCst);
         while !HUNG_PROBE_RELEASED.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(5));
@@ -1294,7 +1313,7 @@ mod tests {
             Duration::from_millis(20),
             Duration::from_millis(300),
         );
-        assert_eq!(probe.poll().await, None);
+        assert_eq!(probe.poll(Path::new(".")).await, None);
         // 等阻塞线程真正开始执行查询，再确认之后的周期不会另起一个
         tokio::time::timeout(Duration::from_secs(5), async {
             while HUNG_PROBE_CALLS.load(Ordering::SeqCst) == 0 {
@@ -1303,8 +1322,8 @@ mod tests {
         })
         .await
         .expect("查询应已开始");
-        assert_eq!(probe.poll().await, None);
-        assert_eq!(probe.poll().await, None);
+        assert_eq!(probe.poll(Path::new(".")).await, None);
+        assert_eq!(probe.poll(Path::new(".")).await, None);
         assert_eq!(
             HUNG_PROBE_CALLS.load(Ordering::SeqCst),
             1,
@@ -1314,7 +1333,7 @@ mod tests {
         HUNG_PROBE_RELEASED.store(true, Ordering::SeqCst);
         let usage = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Some(usage) = probe.poll().await {
+                if let Some(usage) = probe.poll(Path::new(".")).await {
                     break usage;
                 }
             }
@@ -1326,6 +1345,10 @@ mod tests {
         // 之后的查询一直拿不到新值：旧读数过了有效期就不再报告
         probe.in_flight = Some(tokio::spawn(std::future::pending()));
         tokio::time::sleep(Duration::from_millis(350)).await;
-        assert_eq!(probe.poll().await, None, "超过有效期的旧读数不再报告");
+        assert_eq!(
+            probe.poll(Path::new(".")).await,
+            None,
+            "超过有效期的旧读数不再报告"
+        );
     }
 }

@@ -3,7 +3,7 @@
 //! 节点代理收到带 `ha` 的期望状态才成为备机（[`NodeHa::assign`]），这时才建 `ha-state.json`；
 //! 之后重启时按它恢复，控制面连不上也照常录、照常按规则投。没被指定为备机的节点这里什么都不做。
 //!
-//! 备机录的场次只把分段收下（[`super::upload::Plan::Collect`]），要投时另起任务、占上传池的一个槽位，
+//! 备机录的场次只把分段收下（[`super::upload::Plan::Collect`]），要投时另起任务，仅传输文件时占上传槽，
 //! 按场次里记下的开播信息重建上下文再投（[`super::upload::run_standby`]）。
 
 use super::adopt;
@@ -620,7 +620,7 @@ impl Standby {
         Ok(ctx)
     }
 
-    /// 投这一场：`append` 为空时作为完整稿件投，否则追加为这个稿件的后续分 P。占上传池的一个槽位
+    /// 投这一场：`append` 为空时作为完整稿件投，否则追加为这个稿件的后续分 P。
     async fn run(self: Arc<Self>, id: String, append: Option<String>) {
         let Some(session) = self.core.lock().unwrap().session(&id).cloned() else {
             return;
@@ -644,8 +644,6 @@ impl Standby {
                 fifo: false,
             },
         );
-        let slots = self.services.managers.upload_slots();
-        let _slot = slots.acquire().await;
         let ctx = match self.context(&session).await {
             Ok(ctx) => ctx,
             Err(reason) => {
@@ -680,18 +678,25 @@ impl Standby {
                 )
             })
             .collect();
-        let result = match &append {
-            None => {
-                observation
-                    .scope(upload::run_standby(&self, &id, &ctx, segments))
-                    .await
-            }
-            Some(bvid) => {
-                observation
-                    .scope(upload::run_append(&self, &id, &ctx, segments, bvid))
-                    .await
+        let work = async {
+            match &append {
+                None => {
+                    observation
+                        .scope(upload::run_standby(&self, &id, &ctx, segments))
+                        .await
+                }
+                Some(bvid) => {
+                    observation
+                        .scope(upload::run_append(&self, &id, &ctx, segments, bvid))
+                        .await
+                }
             }
         };
+        let result = crate::server::common::upload::with_transfer_pool(
+            self.services.managers.upload_slots(),
+            work,
+        )
+        .await;
         match &result {
             Ok(Submitted::Done { bvid, .. }) => guard.finish("succeeded", None, Some(bvid)),
             Ok(Submitted::Fenced) => guard.finish("cancelled", None, None),

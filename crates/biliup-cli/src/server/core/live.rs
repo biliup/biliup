@@ -15,7 +15,7 @@ use biliup::downloader::live::{
     TwitcastingOptions, TwitchOptions, YoutubeOptions, YtDlpBackend, YtDlpOptions,
 };
 use danmaku_client::{PlatformContext, RecorderConfig};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 pub fn live_request(worker: &Worker) -> LiveRequest {
@@ -325,6 +325,7 @@ pub(crate) const DANMAKU_PREVIEW_XML: &[u8] = include_bytes!(concat!(
 pub fn danmaku_client(
     source: Option<&DanmakuSource>,
     filename_prefix: Option<&str>,
+    output_dir: &Path,
     name: &str,
     embed_preview: bool,
     live_tx: Option<tokio::sync::broadcast::Sender<danmaku_client::DanmakuEvent>>,
@@ -343,7 +344,10 @@ pub fn danmaku_client(
 
     let mut config = RecorderConfig::new(
         source.url.clone(),
-        PathBuf::from(danmaku_filename_template(filename_prefix, name)),
+        crate::server::common::util::template_in(
+            output_dir,
+            &danmaku_filename_template(filename_prefix, name),
+        ),
     )
     .with_context(context)
     .with_raw(source.raw)

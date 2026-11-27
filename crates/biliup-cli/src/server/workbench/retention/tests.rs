@@ -1064,3 +1064,33 @@ async fn render_sources_survive_low_disk_and_remove_until_worker_finishes() {
     assert_eq!(sweep_pending(&pool, now_ms()).await.unwrap(), 1);
     assert!(!path.exists());
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn locked_first_part_does_not_strand_later_uploaded_parts() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (dir, pool) = setup().await;
+    let sid = session(&pool, now_ms()).await;
+    let (a, first) = segment(&pool, dir.path(), sid, "locked.flv", 0, Some(1), 10).await;
+    let (b, second) = segment(&pool, dir.path(), sid, "next.flv", 1, Some(2), 10).await;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&first)
+        .unwrap();
+    let xml = first.with_extension("xml");
+    let xml2 = second.with_extension("xml");
+    let result = remove(&retention(&pool, 0), &[&first, &xml, &second, &xml2]).await;
+    assert!(result.is_err(), "仍需向调用方报告占用");
+    assert_eq!(state(&pool, a).await, "pending_delete");
+    assert!(xml.exists());
+    assert_eq!(
+        state(&pool, b).await,
+        "deleted",
+        "后面的分段不能因前一个被锁而永久遗留"
+    );
+    assert!(!second.exists() && !xml2.exists());
+    drop(lock);
+    sweep_pending(&pool, now_ms() + 1000).await.unwrap();
+    assert!(!first.exists() && !xml.exists());
+}
